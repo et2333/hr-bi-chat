@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.hrchat</groupId>
+        <artifactId>hrchat-server</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+    <artifactId>hrchat-admin</artifactId>
+    <name>hrchat-admin</name>
+    <description>管理后台 API：语义层配置、同步状态、评测查询</description>
+    <dependencies>
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-api</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-authz</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- 租户 usage 统计需查询报表/订阅计数 -->
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-report</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- 管理仪表盘/系统设置：LLM 监控与运行时默认档位 -->
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-model</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- 推送管理：手动触发到期订阅推送（阶段3） -->
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-subscription</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <!-- BCrypt 密码哈希（本地演示登录，SSO 对接后废弃） -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-audit</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-semantic</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.hrchat</groupId>
+            <artifactId>hrchat-knowledge</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

@@ -1,0 +1,65 @@
+spring:
+  application:
+    name: hrchat-server
+  profiles:
+    active: local
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+    default-property-inclusion: non_null
+  mvc:
+    async:
+      request-timeout: 120000
+  servlet:
+    multipart:
+      max-file-size: 10MB
+
+server:
+  port: 8080
+  compression:
+    enabled: true
+    mime-types: text/html,text/plain,application/json
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDeleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+hrchat:
+  ai:
+    # local=Java侧确定性规则引擎(LocalAgentRuntimeImpl)；remote=Python agent-gateway
+    runtime: local
+    remote-base-url: http://localhost:8000
+    # 本地演示：一键部署跳过 Python 调用（true）；生产置 false 走真实下发+健康检查
+    deploy-mock: true
+  chat:
+    max-question-length: 500
+    sse-heartbeat-seconds: 15
+    query-timeout-ms: 30000
+    async-threshold-ms: 30000
+  security:
+    auth-mock: true
+  push:
+    # 订阅推送附件输出目录（阶段3，模拟邮件/IM 附件落地）
+    output-dir: ${HRCHAT_PUSH_OUTPUT_DIR:./push-out}
+
+logging:
+  level:
+    com.hrchat: info

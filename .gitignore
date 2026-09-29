@@ -1,0 +1,49 @@
+# macOS / Windows metadata
+.DS_Store
+._*
+**/__MACOSX/
+Thumbs.db
+Desktop.ini
+
+# IDE and local editor state
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Node.js
+**/node_modules/
+**/dist/
+**/dist-ssr/
+**/coverage/
+*.log
+*.tsbuildinfo
+
+# Java / Maven
+**/target/
+
+# Python
+**/.venv/
+**/venv/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+**/.pytest_cache/
+.coverage
+htmlcov/
+
+# Application output and local databases
+**/push-out/
+*.mv.db
+*.trace.db
