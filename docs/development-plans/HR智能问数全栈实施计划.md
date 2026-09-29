@@ -57,7 +57,7 @@ BIchat/
 │   └── tests/                      # pytest + MockLLM
 ├── hrchat-deploy/                  # docker-compose(local 全中间件)、Helm 骨架、schema.sql
 ├── README.md                       # 快速启动/规范/架构说明
-└── development-plans/HR智能问数全栈实施计划.md
+└── docs/development-plans/HR智能问数全栈实施计划.md
 ```
 
 ## 4. 实施步骤
