@@ -96,7 +96,7 @@ class AuthzAdminControllerTest {
 
     @Test
     void effectivePermissions_ok() throws Exception {
-        when(roleService.effectivePermissions(7L)).thenReturn(
+        when(roleService.effectivePermissions(org.mockito.ArgumentMatchers.eq(7L), any())).thenReturn(
                 new AdminViews.EffectivePermissionsView("7", List.of("HRBP"), List.of(), List.of(),
                         List.of("chat:ask"), "2026-09-28T00:00:00"));
         mockMvc.perform(get("/api/v1/admin/authz/users/7/effective-permissions").header("X-User-No", "hr01"))

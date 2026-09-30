@@ -14,6 +14,7 @@ import com.hrchat.audit.service.AuditCollector;
 import com.hrchat.authz.entity.SecUser;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.authz.tenant.Tenant;
 import com.hrchat.authz.tenant.TenantMapper;
 import com.hrchat.common.api.PageResult;
@@ -53,6 +54,7 @@ public class TenantService {
     private final RptReportMapper reportMapper;
     private final RptSubscriptionMapper subscriptionMapper;
     private final AudAuditLogMapper auditLogMapper;
+    private final UserContextService userContextService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
 
@@ -138,6 +140,7 @@ public class TenantService {
         tenant.setUpdatedBy(ctx.getEmpNo());
         tenant.setUpdatedAt(LocalDateTime.now());
         tenantMapper.updateById(tenant);
+        userContextService.evictTenantAfterCommit(tenant.getTenantCode());
         audit(AuditEvents.TENANT_CHANGE, tenantId, tenant.getTenantCode(), ctx, Map.of("status", 0));
     }
 
@@ -149,6 +152,7 @@ public class TenantService {
         tenant.setUpdatedBy(ctx.getEmpNo());
         tenant.setUpdatedAt(LocalDateTime.now());
         tenantMapper.updateById(tenant);
+        userContextService.evictTenantAfterCommit(tenant.getTenantCode());
         audit(AuditEvents.TENANT_CHANGE, tenantId, tenant.getTenantCode(), ctx, Map.of("status", 1));
     }
 

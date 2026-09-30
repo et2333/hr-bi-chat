@@ -13,6 +13,7 @@ import com.hrchat.authz.mapper.SecRoleMapper;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +55,8 @@ class RoleServiceTest {
     @Mock
     private AuthzService authzService;
     @Mock
+    private UserContextService userContextService;
+    @Mock
     private AuditCollector auditCollector;
 
     private RoleService service;
@@ -61,7 +64,7 @@ class RoleServiceTest {
     @BeforeEach
     void setUp() {
         service = new RoleService(roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
-                orgNodeMapper, authzService, auditCollector, new ObjectMapper());
+                orgNodeMapper, authzService, userContextService, auditCollector, new ObjectMapper());
     }
 
     @Test
@@ -117,9 +120,11 @@ class RoleServiceTest {
         user.setId(1L);
         user.setEmpNo("hr01");
         user.setDisplayName("张雨晴");
+        user.setTenantId("t01");
         when(secUserMapper.selectById(1L)).thenReturn(user);
         UserContext ctx = UserContext.builder()
                 .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP"))
+                .tenantId("t01")
                 .dataLevel(1)
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
                         .orgNodeId(35L).orgCode("rd").orgName("研发中心")
@@ -130,7 +135,8 @@ class RoleServiceTest {
         when(authzService.functionPermsOf("HRBP")).thenReturn(
                 java.util.Set.of("chat:ask", "report:view", "report:create"));
 
-        AdminViews.EffectivePermissionsView view = service.effectivePermissions(1L);
+        AdminViews.EffectivePermissionsView view = service.effectivePermissions(1L,
+                UserContext.builder().tenantId("t01").build());
 
         assertEquals(List.of("HRBP"), view.roles());
         assertEquals(1, view.dataScopes().size());

@@ -55,7 +55,13 @@ hrchat:
     query-timeout-ms: 30000
     async-threshold-ms: 30000
   security:
-    auth-mock: true
+    mode: mock
+    mock-user: hr01
+    authz-cache-ttl-seconds: ${AUTHZ_CACHE_TTL_SECONDS:300}
+  idempotency:
+    retry-cooldown-seconds: ${IDEMPOTENCY_RETRY_COOLDOWN_SECONDS:30}
+    max-attempts: ${IDEMPOTENCY_MAX_ATTEMPTS:3}
+    ttl-hours: ${IDEMPOTENCY_TTL_HOURS:24}
   push:
     # 订阅推送附件输出目录（阶段3，模拟邮件/IM 附件落地）
     output-dir: ${HRCHAT_PUSH_OUTPUT_DIR:./push-out}

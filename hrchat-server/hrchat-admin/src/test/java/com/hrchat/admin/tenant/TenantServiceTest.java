@@ -9,6 +9,7 @@ import com.hrchat.audit.model.AuditEvent;
 import com.hrchat.audit.service.AuditCollector;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.authz.tenant.Tenant;
 import com.hrchat.authz.tenant.TenantMapper;
 import com.hrchat.common.api.PageResult;
@@ -40,6 +41,7 @@ class TenantServiceTest {
     private final RptReportMapper reportMapper = Mockito.mock(RptReportMapper.class);
     private final RptSubscriptionMapper subscriptionMapper = Mockito.mock(RptSubscriptionMapper.class);
     private final AudAuditLogMapper auditLogMapper = Mockito.mock(AudAuditLogMapper.class);
+    private final UserContextService userContextService = Mockito.mock(UserContextService.class);
     private final AuditCollector auditCollector = Mockito.mock(AuditCollector.class);
 
     private TenantService service;
@@ -48,7 +50,7 @@ class TenantServiceTest {
     @BeforeEach
     void setUp() {
         service = new TenantService(tenantMapper, secUserMapper, reportMapper, subscriptionMapper,
-                auditLogMapper, auditCollector, new ObjectMapper());
+                auditLogMapper, userContextService, auditCollector, new ObjectMapper());
         ctx = UserContext.builder().userId(1L).empNo("admin01").roles(List.of("ADMIN")).build();
     }
 

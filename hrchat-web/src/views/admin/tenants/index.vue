@@ -105,7 +105,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import type { FormInstance } from 'ant-design-vue'
 import { message } from 'ant-design-vue'
 import { tenantApi } from '@/api'
-import { TENANT_NO_KEY } from '@/api/http'
+import { TENANT_NO_KEY, TENANT_SWITCH_REASON_KEY } from '@/api/http'
 import type { TenantCreateRequest, TenantPatchRequest, TenantView, UsageView } from '@/api/tenants'
 
 // ---------------- 列表 ----------------
@@ -241,7 +241,13 @@ async function toggleStatus(record: TenantView) {
 }
 
 function switchTenant(record: TenantView) {
+  const reason = window.prompt('请输入跨租户访问原因（将写入安全审计）')?.trim()
+  if (!reason) {
+    message.warning('未填写切换原因，已取消')
+    return
+  }
   localStorage.setItem(TENANT_NO_KEY, record.tenantCode)
+  sessionStorage.setItem(TENANT_SWITCH_REASON_KEY, reason.slice(0, 128))
   message.success(`已切换到租户「${record.tenantName}」，建议刷新页面后生效（用于演示租户隔离）`)
 }
 

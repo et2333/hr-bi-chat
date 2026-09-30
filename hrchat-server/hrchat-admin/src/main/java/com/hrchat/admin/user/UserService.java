@@ -74,7 +74,8 @@ public class UserService {
             throw new BizException(ErrorCode.PARAM_MISSING, "org_node_id");
         }
         SecOrgNode org = orgNodeMapper.selectById(request.orgNodeId());
-        if (org == null || Integer.valueOf(1).equals(org.getIsDeleted())) {
+        if (org == null || Integer.valueOf(1).equals(org.getIsDeleted())
+                || !java.util.Objects.equals(ctx.getTenantId(), org.getTenantId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "org_node_id 不存在");
         }
 
@@ -87,7 +88,7 @@ public class UserService {
                 ? null : request.email().trim());
         user.setOrgNodeId(request.orgNodeId());
         user.setStatus(1);
-        user.setTenantId(TenantContextHolder.get());
+        user.setTenantId(ctx.getTenantId());
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setMustChangePwd(1);
         user.setCreatedBy(ctx.getEmpNo());
@@ -125,7 +126,7 @@ public class UserService {
     /** 启用/停用（status 1/0）。 */
     @Transactional
     public void patchStatus(Long userId, Integer status, UserContext ctx) {
-        SecUser user = requireUser(userId);
+        SecUser user = requireUser(userId, ctx);
         if (status == null || (status != 1 && status != 0)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "status（1启用 0停用）");
         }
@@ -133,6 +134,7 @@ public class UserService {
         user.setUpdatedBy(ctx.getEmpNo());
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
+        userContextService.evictAfterCommit(user.getEmpNo());
         audit(AuditEvents.USER_STATUS_CHANGE, userId, user.getEmpNo(), ctx,
                 Map.of("status", status));
     }
@@ -140,7 +142,7 @@ public class UserService {
     /** 授予角色（删旧插新；校验 role_code 存在于 sec_role）。 */
     @Transactional
     public void assignRoles(Long userId, List<String> roleCodes, UserContext ctx) {
-        SecUser user = requireUser(userId);
+        SecUser user = requireUser(userId, ctx);
         List<String> codes = roleCodes == null ? List.of()
                 : roleCodes.stream().filter(c -> c != null && !c.isBlank())
                 .map(String::trim).distinct().toList();
@@ -152,6 +154,7 @@ public class UserService {
             }
         }
         grantRoles(userId, codes, ctx.getEmpNo());
+        userContextService.evictAfterCommit(user.getEmpNo());
         audit(AuditEvents.USER_ROLE_GRANT, userId, user.getEmpNo(), ctx,
                 Map.of("roles", codes));
     }
@@ -159,7 +162,7 @@ public class UserService {
     /** 重置密码（新随机密码 BCrypt + 首次须改密，明文仅此一次返回）。 */
     @Transactional
     public UserViews.ResetResultView resetPassword(Long userId, UserContext ctx) {
-        SecUser user = requireUser(userId);
+        SecUser user = requireUser(userId, ctx);
         String rawPassword = PasswordGenerator.generate();
         user.setPasswordHash(passwordEncoder.encode(rawPassword));
         user.setMustChangePwd(1);
@@ -172,12 +175,12 @@ public class UserService {
 
     // ---------------- 内部 ----------------
 
-    private SecUser requireUser(Long userId) {
+    private SecUser requireUser(Long userId, UserContext ctx) {
         if (userId == null) {
             throw new BizException(ErrorCode.PARAM_MISSING, "userId");
         }
         SecUser user = userMapper.selectById(userId);
-        if (user == null) {
+        if (user == null || !java.util.Objects.equals(ctx.getTenantId(), user.getTenantId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "userId 不存在");
         }
         return user;

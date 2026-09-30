@@ -13,6 +13,7 @@ import com.hrchat.authz.mapper.SecRoleMapper;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,6 +52,8 @@ class RoleServiceMoreTest {
     @Mock
     private AuthzService authzService;
     @Mock
+    private UserContextService userContextService;
+    @Mock
     private AuditCollector auditCollector;
 
     private RoleService service;
@@ -58,7 +61,7 @@ class RoleServiceMoreTest {
     @BeforeEach
     void setUp() {
         service = new RoleService(roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
-                orgNodeMapper, authzService, auditCollector, new ObjectMapper());
+                orgNodeMapper, authzService, userContextService, auditCollector, new ObjectMapper());
     }
 
     private SecRole role(long id, String code) {
@@ -147,7 +150,8 @@ class RoleServiceMoreTest {
     @Test
     void effectivePermissions_userNotFound_invalid() {
         when(secUserMapper.selectById(1L)).thenReturn(null);
-        assertThatThrownBy(() -> service.effectivePermissions(1L))
+        assertThatThrownBy(() -> service.effectivePermissions(1L,
+                UserContext.builder().tenantId("t01").build()))
                 .isInstanceOf(BizException.class)
                 .extracting(e -> ((BizException) e).getErrorCode())
                 .isEqualTo(ErrorCode.PARAM_INVALID);
@@ -158,6 +162,7 @@ class RoleServiceMoreTest {
         SecUser user = new SecUser();
         user.setId(1L);
         user.setEmpNo("hr01");
+        user.setTenantId("t01");
         when(secUserMapper.selectById(1L)).thenReturn(user);
         UserContext ctx = UserContext.builder().empNo("hr01").roles(List.of("ROLE_X"))
                 .grantedOrgs(List.of(
@@ -170,7 +175,8 @@ class RoleServiceMoreTest {
         when(orgNodeMapper.selectById(88L)).thenReturn(null);
         when(authzService.functionPermsOf("ROLE_X")).thenReturn(java.util.Set.of("chat:ask"));
 
-        AdminViews.EffectivePermissionsView v = service.effectivePermissions(1L);
+        AdminViews.EffectivePermissionsView v = service.effectivePermissions(1L,
+                UserContext.builder().tenantId("t01").build());
         assertThat(v.dataScopes()).hasSize(2);
         assertThat(v.dataScopes().get(0).orgLevel()).isEqualTo(2);
         assertThat(v.dataScopes().get(1).orgLevel()).isNull();

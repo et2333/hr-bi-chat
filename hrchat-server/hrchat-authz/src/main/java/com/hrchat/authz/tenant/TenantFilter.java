@@ -13,26 +13,20 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * 租户过滤器：从请求头 {@code X-Tenant-No} 读取租户号注入 {@link TenantContextHolder}。
+ * 租户上下文生命周期过滤器。
  *
- * <p>仅当请求头显式存在时注入（无头请求 = 单租户兼容视图，不注入租户过滤），
- * 请求结束 finally 清理，避免线程池串扰。</p>
+ * <p>不再信任客户端租户头。可信租户由 {@link TrustedRequestContextInterceptor} 根据已解析用户设置；
+ * 本过滤器只负责请求前后清理，避免线程池串扰。</p>
  */
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class TenantFilter extends OncePerRequestFilter {
 
-    /** 租户请求头 */
-    public static final String TENANT_HEADER = "X-Tenant-No";
-
     @Override
     protected void doFilterInternal(HttpServletRequest request, jakarta.servlet.http.HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
-        String tenantNo = request.getHeader(TENANT_HEADER);
+        TenantContextHolder.clear();
         try {
-            if (tenantNo != null && !tenantNo.isBlank()) {
-                TenantContextHolder.set(tenantNo.trim());
-            }
             filterChain.doFilter(request, response);
         } finally {
             TenantContextHolder.clear();
