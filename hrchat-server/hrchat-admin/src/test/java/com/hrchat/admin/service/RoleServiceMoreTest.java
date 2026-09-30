@@ -56,11 +56,14 @@ class RoleServiceMoreTest {
     @Mock
     private AuditCollector auditCollector;
 
+    @Mock
+    private com.hrchat.authz.service.RolePermissionService rolePermissionService;
+
     private RoleService service;
 
     @BeforeEach
     void setUp() {
-        service = new RoleService(roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
+        service = new RoleService(rolePermissionService, roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
                 orgNodeMapper, authzService, userContextService, auditCollector, new ObjectMapper());
     }
 
@@ -96,6 +99,7 @@ class RoleServiceMoreTest {
     @Test
     void patchRole_updatesAndPerms() {
         when(roleMapper.selectById(1L)).thenReturn(role(1L, "HRBP"));
+        when(roleMapper.selectOne(any())).thenReturn(role(1L, "HRBP"));
         service.patchRole(1L, new AdminViews.RoleCreateRequest(null, "新名字", 3,
                 List.of("report:view")), UserContext.builder().empNo("hr99").build());
         verify(roleMapper).updateById(any());
@@ -164,7 +168,7 @@ class RoleServiceMoreTest {
         user.setEmpNo("hr01");
         user.setTenantId("t01");
         when(secUserMapper.selectById(1L)).thenReturn(user);
-        UserContext ctx = UserContext.builder().empNo("hr01").roles(List.of("ROLE_X"))
+        UserContext ctx = UserContext.builder().empNo("hr01").roles(List.of("ROLE_X")).functionPerms(List.of("chat:ask"))
                 .grantedOrgs(List.of(
                         UserContext.GrantedOrg.builder().orgNodeId(35L).orgName("研发中心").scope(3).build(),
                         UserContext.GrantedOrg.builder().orgNodeId(88L).orgName("无节点").scope(1).build()))
