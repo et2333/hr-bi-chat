@@ -62,14 +62,14 @@ import {
 } from '@ant-design/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { TENANT_NO_KEY } from '@/api/http'
-import { ADMIN_MENUS, menuPermsOf, visible } from './adminMenu'
+import { ADMIN_MENUS, visible } from './adminMenu'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
 /** 当前角色对应的功能权限码集合 */
-const perms = computed(() => menuPermsOf(auth.currentUser.role))
+const perms = computed(() => auth.functionPerms)
 /** 无任何管理权限（其他角色）：整页提示 */
 const noPermission = computed(() => perms.value.length === 0)
 

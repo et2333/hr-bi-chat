@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   BarChartOutlined,
@@ -57,23 +57,40 @@ import {
 } from '@ant-design/icons-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import { useAuthStore } from '@/stores/auth'
-import { menuPermsOf } from '@/layouts/adminMenu'
+import { ADMIN_MENUS, visible, hasPerm } from '@/layouts/adminMenu'
 
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
 
+// 定期刷新与窗口重新激活时刷新；权限加载失败清空菜单。
+let permissionTimer: ReturnType<typeof setInterval> | undefined
+const refresh = () => { void auth.refreshPermissions().catch(() => {}) }
+onMounted(() => {
+  refresh()
+  permissionTimer = setInterval(refresh, 60000)
+  window.addEventListener('focus', refresh)
+})
+onUnmounted(() => {
+  clearInterval(permissionTimer)
+  window.removeEventListener('focus', refresh)
+})
+watch(() => auth.functionPerms, (perms) => {
+  if (route.meta.permission && !hasPerm(perms, route.meta.permission)) void router.replace('/chat')
+})
+
 const selectedKeys = computed(() => [route.path])
 
-/** 当前身份是否有管理后台权限（menuPermsOf 返回非空） */
-const hasAdminEntry = computed(() => menuPermsOf(auth.currentUser.role).length > 0)
+/** 当前身份的服务端授权是否允许至少一个管理菜单。 */
+const hasAdminEntry = computed(() => ADMIN_MENUS.some(item => visible(item, auth.functionPerms)))
 
 function onNavClick({ key }: { key: string }) {
   router.push(key)
 }
 
 function goAdmin() {
-  router.push('/admin/dashboard')
+  const first = ADMIN_MENUS.find(item => visible(item, auth.functionPerms))
+  if (first) router.push(first.path)
 }
 
 function onSwitchUser({ key }: { key: string }) {
