@@ -27,6 +27,7 @@ public enum ErrorCode {
     PAGE_SIZE_EXCEED("HRX-1004", 400, "分页参数越界（size≤200）"),
     QUESTION_TOO_LONG("HRX-1005", 400, "问句长度超限（≤500字符）"),
     IDEMPOTENT_PROCESSING("HRX-1006", 409, "幂等请求处理中，请勿重复提交"),
+    IDEMPOTENCY_CONFLICT("HRX-1007", 409, "幂等键已用于不同请求"),
 
     // ---------------- 权限错误 HRC-2xxx ----------------
     AUTH_EXPIRED("HRC-2001", 401, "登录已过期，请重新登录"),

@@ -72,13 +72,18 @@ public class ChatService {
     private final ChtClarifyMapper clarifyMapper;
     private final ChtFeedbackMapper feedbackMapper;
     private final ChatAskStore askStore;
+    private final IdempotencyService idempotencyService;
     private final AgentRuntimeClient agentRuntime;
     private final AuthzService authzService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
 
     /** 问句编排结果（SYNC 直接返回 payload；STREAM 返回 SSE 帧文本）。 */
-    public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying) {
+    public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying,
+                             boolean replayed) {
+        public AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying) {
+            this(askId, sseBody, payload, clarifying, false);
+        }
     }
 
     // =================================================================
@@ -163,18 +168,15 @@ public class ChatService {
             throw new BizException(ErrorCode.PARAM_INVALID, "mode");
         }
 
-        // 幂等防重（HRX-1006：处理中不可重复提交；已完成回放）
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String existingAskId = askStore.idempotencyGet(idempotencyKey);
-            if (existingAskId != null) {
-                ChatAskStore.AskRecord existing = askStore.get(existingAskId);
-                if (existing == null || !"COMPLETED".equals(existing.status())) {
-                    throw new BizException(ErrorCode.IDEMPOTENT_PROCESSING);
-                }
-                return new AskOutcome(existing.askId(), existing.sseBody(), existing.payload(), false);
-            }
-        }
+        IdempotencyService.Execution<AskOutcome> execution = idempotencyService.execute(ctx, "POST",
+                "/api/v1/chat/sessions/{sessionId}/asks", String.valueOf(sessionId), idempotencyKey,
+                request, AskOutcome.class, () -> executeAsk(ctx, sessionId, request, session));
+        AskOutcome value = execution.value();
+        return new AskOutcome(value.askId(), value.sseBody(), value.payload(), value.clarifying(),
+                execution.replayed());
+    }
 
+    private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session) {
         AgentResult result = agentRuntime.ask(request, ctx);
         String askId = result.askId();
         Long turnId = persistTurn(sessionId, ctx, request.question(), result);
@@ -191,9 +193,6 @@ public class ChatService {
                 result.isClarifying()
                         ? new ChatAskStore.AskRecord.PendingClarify(request.question().trim(), result.clarifyQuestions())
                         : null));
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            askStore.idempotencyPutIfAbsent(idempotencyKey, askId);
-        }
         touchSession(session);
         auditAsk(ctx, sessionId, askId, request.question(), result);
         return new AskOutcome(askId, sseBody, payload, result.isClarifying());

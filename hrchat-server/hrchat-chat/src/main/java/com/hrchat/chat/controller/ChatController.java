@@ -101,6 +101,9 @@ public class ChatController {
         ChatService.AskOutcome outcome = chatService.ask(ctx, sessionId, request, idempotencyKey);
         String mode = request.mode() == null || request.mode().isBlank() ? "STREAM" : request.mode().trim().toUpperCase();
         HttpHeaders headers = new HttpHeaders();
+        if (outcome.replayed()) {
+            headers.set("X-Idempotent-Replay", "true");
+        }
         if ("SYNC".equals(mode)) {
             headers.setContentType(MediaType.APPLICATION_JSON);
             byte[] body = toJsonBytes(outcome.payload());

@@ -40,6 +40,7 @@ class ChatServiceFlowTest {
     private final ChtClarifyMapper clarifyMapper = Mockito.mock(ChtClarifyMapper.class);
     private final ChtFeedbackMapper feedbackMapper = Mockito.mock(ChtFeedbackMapper.class);
     private final ChatAskStore askStore = Mockito.mock(ChatAskStore.class);
+    private final IdempotencyService idempotencyService = Mockito.mock(IdempotencyService.class);
     private final AgentRuntimeClient agentRuntime = Mockito.mock(AgentRuntimeClient.class);
     private final AuthzService authzService = Mockito.mock(AuthzService.class);
     private final AuditCollector auditCollector = Mockito.mock(AuditCollector.class);
@@ -53,7 +54,8 @@ class ChatServiceFlowTest {
     @BeforeEach
     void setUp() {
         service = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
-                feedbackMapper, askStore, agentRuntime, authzService, auditCollector, objectMapper);
+                feedbackMapper, askStore, idempotencyService, agentRuntime, authzService,
+                auditCollector, objectMapper);
     }
 
     private ChtSession session(long id, String title) {

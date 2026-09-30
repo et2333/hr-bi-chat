@@ -33,6 +33,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,7 +42,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -66,6 +72,8 @@ class ChatServiceTest {
     private AuthzService authzService;
     @Mock
     private AuditCollector auditCollector;
+    @Mock
+    private IdempotencyService idempotencyService;
 
     private ChatAskStore askStore;
     private ChatService chatService;
@@ -75,8 +83,14 @@ class ChatServiceTest {
     void setUp() {
         askStore = new ChatAskStore();
         chatService = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
-                feedbackMapper, askStore, agentRuntime, authzService, auditCollector,
+                feedbackMapper, askStore, idempotencyService, agentRuntime, authzService, auditCollector,
                 new ObjectMapper());
+        lenient().when(idempotencyService.execute(any(UserContext.class), anyString(), anyString(), anyString(),
+                        nullable(String.class), any(), eq(ChatService.AskOutcome.class), any()))
+                .thenAnswer(invocation -> {
+                    Supplier<ChatService.AskOutcome> action = invocation.getArgument(7);
+                    return new IdempotencyService.Execution<>(action.get(), false);
+                });
         hr01 = UserContext.builder()
                 .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP"))
                 .dataLevel(1)
@@ -174,17 +188,30 @@ class ChatServiceTest {
         }).when(turnMapper).insert(any());
         when(agentRuntime.ask(any(), any())).thenReturn(completedResult("ask_idem1"));
 
+        AtomicReference<ChatService.AskOutcome> stored = new AtomicReference<>();
+        doAnswer(invocation -> {
+            String key = invocation.getArgument(4);
+            if ("key-run".equals(key)) {
+                throw new BizException(ErrorCode.IDEMPOTENT_PROCESSING);
+            }
+            Supplier<ChatService.AskOutcome> action = invocation.getArgument(7);
+            if (stored.get() == null) {
+                stored.set(action.get());
+                return new IdempotencyService.Execution<>(stored.get(), false);
+            }
+            return new IdempotencyService.Execution<>(stored.get(), true);
+        }).when(idempotencyService).execute(any(UserContext.class), anyString(), anyString(), anyString(),
+                nullable(String.class), any(), eq(ChatService.AskOutcome.class), any());
+
         chatService.ask(hr01, 1L, new AskRequest("研发中心在职人数", "SYNC", null), "key-1");
         // 第二次同键（已完成）回放，不重复执行
         ChatService.AskOutcome replay = chatService.ask(hr01, 1L,
                 new AskRequest("研发中心在职人数", "SYNC", null), "key-1");
         assertEquals("ask_idem1", replay.askId());
+        assertTrue(replay.replayed());
         verify(agentRuntime).ask(any(), any());
 
-        // 处理中不可重入：手动放入 RUNNING 记录再提交同键
-        askStore.put(new ChatAskStore.AskRecord("ask_run", 1L, 1L, 10L, "q", SseEvents.INTENT_QUERY,
-                SseEvents.ASK_RUNNING, null, null, "", null));
-        askStore.idempotencyPutIfAbsent("key-run", "ask_run");
+        // 处理中不可重入。
         BizException ex = assertThrows(BizException.class,
                 () -> chatService.ask(hr01, 1L, new AskRequest("q", "SYNC", null), "key-run"));
         assertEquals(ErrorCode.IDEMPOTENT_PROCESSING, ex.getErrorCode());

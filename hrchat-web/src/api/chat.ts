@@ -1,4 +1,12 @@
-import { get, post, del as deleteReq, http, TENANT_NO_KEY, USER_NO_KEY } from './http'
+import {
+  get,
+  post,
+  del as deleteReq,
+  http,
+  TENANT_NO_KEY,
+  TENANT_SWITCH_REASON_KEY,
+  USER_NO_KEY,
+} from './http'
 import type {
   ApiResponse,
   AnswerPayload,
@@ -49,8 +57,11 @@ export function askStream(
   sessionId: number,
   request: AskRequest,
   onData: (data: Record<string, unknown>) => void,
+  idempotencyKey = crypto.randomUUID(),
 ) {
-  return streamRequest(`/chat/sessions/${sessionId}/asks`, request, onData)
+  return streamRequest(`/chat/sessions/${sessionId}/asks`, request, onData, {
+    'X-Idempotency-Key': idempotencyKey,
+  })
 }
 
 /** 澄清应答续流（POST …/asks/{askId}/clarifications） */
@@ -73,6 +84,7 @@ export function streamRequest(
   const controller = new AbortController()
   const userNo = localStorage.getItem(USER_NO_KEY) || 'hr01'
   const tenantNo = localStorage.getItem(TENANT_NO_KEY) || 't01'
+  const switchReason = sessionStorage.getItem(TENANT_SWITCH_REASON_KEY)
 
   const run = async () => {
     const res = await fetch(`${http.defaults.baseURL ?? '/api/v1'}${url}`, {
@@ -82,6 +94,7 @@ export function streamRequest(
         Accept: 'text/event-stream',
         'X-User-No': userNo,
         'X-Tenant-No': tenantNo,
+        ...(switchReason ? { 'X-Tenant-Switch-Reason': switchReason } : {}),
         ...headers,
       },
       body: JSON.stringify(body),
