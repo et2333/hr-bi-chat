@@ -12,12 +12,14 @@ import org.springframework.test.web.servlet.MvcResult;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -51,10 +53,13 @@ class HrchatIntegrationTest {
                 .at("/data/id").asLong();
 
         // 2) SYNC 问数 → ANSWER_DONE.payload 三段式
-        MvcResult sync = mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
+        MvcResult syncStarted = mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
                         .header("X-User-No", "hr01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数\",\"mode\":\"SYNC\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        MvcResult sync = mockMvc.perform(asyncDispatch(syncStarted))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
@@ -66,10 +71,13 @@ class HrchatIntegrationTest {
         assertFalse(askId.isBlank());
 
         // 3) STREAM 问数 → SSE 帧流（HEARTBEAT seq=-1 + ANSWER_DONE 终态）
-        mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
+        MvcResult streamStarted = mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
                         .header("X-User-No", "hr01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(streamStarted))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.parseMediaType("text/event-stream")))
                 .andExpect(content().string(containsString("event: HEARTBEAT")))
@@ -102,10 +110,13 @@ class HrchatIntegrationTest {
         long sessionId = objectMapper.readTree(session.getResponse().getContentAsString())
                 .at("/data/id").asLong();
 
-        mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
+        MvcResult deniedStarted = mockMvc.perform(post("/api/v1/chat/sessions/" + sessionId + "/asks")
                         .header("X-User-No", "hr02")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(deniedStarted))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.parseMediaType("text/event-stream")))
                 .andExpect(content().string(containsString("event: ERROR")))
