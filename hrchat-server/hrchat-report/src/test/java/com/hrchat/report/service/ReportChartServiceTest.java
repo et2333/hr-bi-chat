@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.AuthzService;
 import com.hrchat.authz.tenant.TenantMapper;
 import com.hrchat.common.exception.BizException;
@@ -30,6 +31,7 @@ import org.mockito.quality.Strictness;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -71,7 +73,8 @@ class ReportChartServiceTest {
         service = new ReportChartService(reportService, componentMapper, semanticMetaService,
                 authzService, queryExecService, reportMapper, agentRuntime, new ObjectMapper());
         ctx = UserContext.builder().userId(1L).empNo("hr01").build();
-        when(authzService.rewriteSql(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(authzService.authorizeSql(anyString(), any())).thenAnswer(inv ->
+                new AuthorizedQuery(inv.getArgument(0), List.of(), Set.of(), "test"));
         // 维度物理映射元数据默认桩（对标 Quick BI：来源表/键/值/父键/外键/时效列）
         when(semanticMetaService.getDimensionByCode("org")).thenReturn(dim(
                 "org", "dim_org", "org_key", "org_name", "parent_org_key", "org_key", "is_current"));
@@ -114,16 +117,16 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(),
                         List.of(Map.of("dim_value", "研发三部", "metric_value", 3)), 1L));
 
         ChartDataView view = service.chartData(1L, 10L, "研发中心", ctx);
 
         assertThat(view.categories()).containsExactly("研发三部");
-        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<AuthorizedQuery> captor = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(captor.capture());
-        assertThat(captor.getValue()).contains("parent_org_key = (SELECT org_key FROM dim_org")
+        assertThat(captor.getValue().sql()).contains("parent_org_key = (SELECT org_key FROM dim_org")
                 .contains("org_name = '研发中心'");
     }
 
@@ -133,14 +136,14 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(), List.of(Map.of("dim_value", "研发一部", "metric_value", 10)), 1L));
 
         service.chartData(1L, 10L, ctx);
 
-        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<AuthorizedQuery> captor = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(captor.capture());
-        assertThat(captor.getValue()).doesNotContain("parent_org_key");
+        assertThat(captor.getValue().sql()).doesNotContain("parent_org_key");
     }
 
     @Test
@@ -149,7 +152,7 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(),
                         List.of(Map.of("dim_value", "研发一部", "metric_value", 10),
                                 Map.of("dim_value", "研发二部", "metric_value", 5)), 2L));
@@ -176,7 +179,7 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(), List.of(Map.of("dim_value", "研发一部", "metric_value", 10)), 1L));
         when(agentRuntime.generateInsight(any(InsightRequest.class)))
                 .thenThrow(new BizException(ErrorCode.AI_DEGRADED));
@@ -194,7 +197,7 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(new QueryResult(List.of(),
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(new QueryResult(List.of(),
                 List.of(Map.of("dim_value", "研发二部", "metric_value", 5),
                         Map.of("dim_value", "研发一部", "metric_value", 10)), 2L));
 
@@ -214,7 +217,7 @@ class ReportChartServiceTest {
                 comp("LINE", "{\"metric\":\"payroll_total\",\"dim\":\"job_family\"}"));
         when(semanticMetaService.getMetricByCode("payroll_total")).thenReturn(
                 metric("payroll_total", "工资总额", "SELECT SUM(gross_pay) FROM fact_payroll_month"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 result("技术", 100_000L));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
@@ -230,7 +233,7 @@ class ReportChartServiceTest {
                 comp("PIE", "{\"metric\":\"hire_count\",\"dim\":\"change_type\"}"));
         when(semanticMetaService.getMetricByCode("hire_count")).thenReturn(
                 metric("hire_count", "入职人数", "SELECT COUNT(*) FROM fact_emp_change WHERE change_type = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(new QueryResult(List.of(),
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(new QueryResult(List.of(),
                 List.of(Map.of("dim_value", 1, "metric_value", 12)), 1L));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
@@ -253,7 +256,7 @@ class ReportChartServiceTest {
                 metric("leave_count", "离职人数", "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 result("研发一部", 0.05d));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
@@ -268,7 +271,7 @@ class ReportChartServiceTest {
                 comp("LINE", "{\"metric\":\"perf_avg\",\"dim\":\"job_level\"}"));
         when(semanticMetaService.getMetricByCode("perf_avg")).thenReturn(
                 metric("perf_avg", "平均绩效", "SELECT AVG(score) FROM fact_performance_cycle"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 result("L5", 4.2d));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
@@ -282,7 +285,7 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(), List.of(), 0L));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
@@ -313,7 +316,7 @@ class ReportChartServiceTest {
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"time\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(result("研发一部", 10));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("研发一部", 10));
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
 
@@ -345,13 +348,13 @@ class ReportChartServiceTest {
                 metric("sales_amount", "销售额", "SELECT SUM(amount) FROM fact_sales"));
         when(semanticMetaService.getDimensionByCode("region")).thenReturn(dim(
                 "region", "dim_region", "region_key", "region_name", null, "region_key", null));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(result("华东", 1000L));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("华东", 1000L));
 
         service.chartData(1L, 10L, ctx);
 
-        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<AuthorizedQuery> captor = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(captor.capture());
-        assertThat(captor.getValue())
+        assertThat(captor.getValue().sql())
                 .contains("(SELECT region_name FROM dim_region WHERE region_key = t.region_key")
                 .contains("GROUP BY t.region_key")
                 .doesNotContain("is_current");
@@ -367,13 +370,13 @@ class ReportChartServiceTest {
         when(semanticMetaService.getDimensionByCode("region")).thenReturn(dim(
                 "region", "dim_region", "region_key", "region_name", "parent_region_key",
                 "region_key", null));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(result("上海", 500L));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("上海", 500L));
 
         service.chartData(1L, 10L, "华东", ctx);
 
-        org.mockito.ArgumentCaptor<String> captor = org.mockito.ArgumentCaptor.forClass(String.class);
+        org.mockito.ArgumentCaptor<AuthorizedQuery> captor = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(captor.capture());
-        assertThat(captor.getValue())
+        assertThat(captor.getValue().sql())
                 .contains("t.region_key IN (SELECT region_key FROM dim_region")
                 .contains("parent_region_key = (SELECT region_key FROM dim_region")
                 .contains("region_name = '华东'");
@@ -446,7 +449,7 @@ class ReportChartServiceTest {
                 comp("PIE", "{\"metric\":\"leave_count\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("leave_count")).thenReturn(
                 metric("leave_count", "离职人数", "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 result("研发一部", 3));
 
         ChartDataView view = service.chartDataForExport(1L, ctx);

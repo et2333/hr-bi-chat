@@ -2,6 +2,7 @@ package com.hrchat.report.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.AuthzService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
@@ -25,6 +26,7 @@ import org.mockito.quality.Strictness;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,7 +63,8 @@ class ReportTableServiceTest {
         service = new ReportTableService(reportService, componentMapper, semanticMetaService,
                 authzService, queryExecService, chartService);
         ctx = UserContext.builder().userId(1L).empNo("hr01").build();
-        when(authzService.rewriteSql(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(authzService.authorizeSql(anyString(), any())).thenAnswer(inv ->
+                new AuthorizedQuery(inv.getArgument(0), List.of(), Set.of(), "test"));
         when(semanticMetaService.getDimensionByCode("org")).thenReturn(new DimensionDetail(
                 1L, "org", "组织", 1, "dim_org", "org_key", "org_name",
                 "parent_org_key", "org_key", "is_current", List.of()));
@@ -89,8 +92,8 @@ class ReportTableServiceTest {
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
         when(semanticMetaService.getMetricByCode("payroll_total")).thenReturn(
                 metric("payroll_total", "工资总额", "SELECT SUM(gross_pay) FROM fact_payroll_month"));
-        when(queryExecService.executeReadonly(anyString())).thenAnswer(inv -> {
-            String sql = inv.getArgument(0);
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenAnswer(inv -> {
+            String sql = ((AuthorizedQuery) inv.getArgument(0)).sql();
             if (sql.contains("dim_employee")) {
                 return new QueryResult(List.of(), List.of(
                         Map.of("dim_value", "研发一部", "metric_value", 10),
@@ -168,7 +171,7 @@ class ReportTableServiceTest {
                 tableComp("{\"metric\":\"headcount\",\"dim\":\"org\"}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(anyString())).thenReturn(new QueryResult(List.of(), List.of(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(new QueryResult(List.of(), List.of(
                 Map.of("dim_value", "研发二部", "metric_value", 5),
                 Map.of("dim_value", "研发一部", "metric_value", 10)), 2L));
 

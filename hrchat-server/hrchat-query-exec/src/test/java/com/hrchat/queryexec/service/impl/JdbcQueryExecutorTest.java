@@ -1,5 +1,6 @@
 package com.hrchat.queryexec.service.impl;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.queryexec.model.QueryResult;
@@ -18,6 +19,7 @@ import java.sql.SQLTimeoutException;
 import java.sql.Types;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -49,7 +51,7 @@ class JdbcQueryExecutorTest {
 
     @Test
     void execute_returnsColumnsAndRows() {
-        QueryResult r = executor.execute("SELECT id, name, salary, hired FROM emp ORDER BY id", 5);
+        QueryResult r = executor.execute(query("SELECT id, name, salary, hired FROM emp ORDER BY id"), 5);
         assertEquals(4, r.columns().size());
         assertEquals(List.of("int", "string", "number", "datetime"),
                 r.columns().stream().map(QueryResult.ColumnMeta::type).toList());
@@ -70,7 +72,7 @@ class JdbcQueryExecutorTest {
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
-        QueryResult r = executor.execute("SELECT id FROM emp", 5);
+        QueryResult r = executor.execute(query("SELECT id FROM emp"), 5);
         assertEquals(200, r.rows().size());
     }
 
@@ -83,7 +85,7 @@ class JdbcQueryExecutorTest {
         when(conn.prepareStatement("SELECT 1")).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLTimeoutException("timeout"));
         JdbcQueryExecutor ex = new JdbcQueryExecutor(mockDs);
-        BizException e = assertThrows(BizException.class, () -> ex.execute("SELECT 1", 1));
+        BizException e = assertThrows(BizException.class, () -> ex.execute(query("SELECT 1"), 1));
         assertEquals(ErrorCode.QUERY_TIMEOUT, e.getErrorCode());
     }
 
@@ -96,7 +98,7 @@ class JdbcQueryExecutorTest {
         when(conn.prepareStatement("SELECT 1")).thenReturn(ps);
         when(ps.executeQuery()).thenThrow(new SQLException("table not found"));
         JdbcQueryExecutor ex = new JdbcQueryExecutor(mockDs);
-        BizException e = assertThrows(BizException.class, () -> ex.execute("SELECT 1", 5));
+        BizException e = assertThrows(BizException.class, () -> ex.execute(query("SELECT 1"), 5));
         assertEquals(ErrorCode.SYSTEM_BUSY, e.getErrorCode());
     }
 
@@ -117,7 +119,11 @@ class JdbcQueryExecutorTest {
         when(rs.next()).thenReturn(true, false);
         when(rs.getObject(1)).thenReturn(new java.math.BigInteger("9223372036854775808"));
         JdbcQueryExecutor ex = new JdbcQueryExecutor(mockDs);
-        QueryResult r = ex.execute("SELECT 1", 5);
+        QueryResult r = ex.execute(query("SELECT 1"), 5);
         assertEquals(new BigDecimal("9223372036854775808"), r.rows().get(0).get("big"));
+    }
+
+    private static AuthorizedQuery query(String sql, Object... parameters) {
+        return new AuthorizedQuery(sql, List.of(parameters), Set.of(), "test-fingerprint");
     }
 }

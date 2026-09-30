@@ -7,6 +7,7 @@ import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
+import com.hrchat.authz.service.SqlRewriteService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.queryexec.model.QueryResult;
@@ -149,7 +150,7 @@ public class ReportChartService {
         String sql = agg.ratio()
                 ? buildRatioSql(metric, dimKey, agg, drill)
                 : buildDirectSql(metric, dimKey, agg, drill);
-        QueryResult result = queryExecService.executeReadonly(authzService.rewriteSql(sql, ctx));
+        QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
         return toView(chartType, metric, result);
     }
 
@@ -271,6 +272,7 @@ public class ReportChartService {
                 .append(agg.metricExpr()).append(" AS metric_value")
                 .append(" FROM ").append(agg.table()).append(" t");
         List<String> conditions = new ArrayList<>();
+        conditions.add(SqlRewriteService.ORG_FILTER_PLACEHOLDER);
         if (agg.where() != null && !agg.where().isBlank()) {
             conditions.add("(" + agg.where() + ")");
         }

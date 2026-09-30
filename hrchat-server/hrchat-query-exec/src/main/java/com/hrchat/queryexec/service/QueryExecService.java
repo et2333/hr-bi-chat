@@ -1,9 +1,11 @@
 package com.hrchat.queryexec.service;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.SqlRewriteService;
 import com.hrchat.queryexec.model.QueryResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 取数编排服务（架构文档 D-2：取数唯一入口经权限中心裁决后进入）。
@@ -27,16 +29,19 @@ public class QueryExecService {
      * @param sql    改写后的 SQL（含 {authz_org_filter} 已被替换）
      * @return 查询结果
      */
-    public QueryResult executeReadonly(String sql) {
-        sqlRewriteService.validateReadOnly(sql);
-        return queryExecutor.execute(sql, DEFAULT_TIMEOUT_SECONDS);
+    @Transactional(readOnly = true)
+    public QueryResult executeReadonly(AuthorizedQuery query) {
+        sqlRewriteService.validateReadOnly(query.sql());
+        return queryExecutor.execute(query, DEFAULT_TIMEOUT_SECONDS);
     }
 
     /**
      * 直接执行（供已自行校验的调用方使用，如分页续查）。
      */
-    public QueryResult executeWithTimeout(String sql, int timeoutSeconds) {
-        sqlRewriteService.validateReadOnly(sql);
-        return queryExecutor.execute(sql, timeoutSeconds);
+    @Transactional(readOnly = true)
+    public QueryResult executeWithTimeout(AuthorizedQuery query, int timeoutSeconds) {
+        sqlRewriteService.validateReadOnly(query.sql());
+        return queryExecutor.execute(query, timeoutSeconds);
     }
+
 }
