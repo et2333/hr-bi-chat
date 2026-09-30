@@ -30,6 +30,10 @@ public class UserContext {
     /** 角色编码列表 */
     private List<String> roles;
 
+    /** 多角色功能授权并集，空集合默认拒绝。 */
+    @Builder.Default
+    private List<String> functionPerms = List.of();
+
     /** 最高数据层级（max(role.dataLevel)） */
     private Integer dataLevel;
 

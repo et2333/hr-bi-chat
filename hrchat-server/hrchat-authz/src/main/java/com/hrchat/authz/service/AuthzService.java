@@ -23,25 +23,6 @@ public class AuthzService {
     private final SqlRewriteService sqlRewriteService;
     private final DataMaskService dataMaskService;
 
-    /** 功能权限映射：角色 → 可访问功能码 */
-    private static final java.util.Map<String, Set<String>> FUNC_PERMISSION = java.util.Map.of(
-            "HRBP", Set.of("chat:ask", "chat:view_sql", "report:view", "report:create", "report:manage",
-                    "report:subscribe", "export:apply"),
-            "HR_SPECIALIST", Set.of("chat:ask", "report:view", "report:create", "report:manage",
-                    "report:subscribe", "export:apply"),
-            "HRD", Set.of("chat:ask", "chat:view_sql", "chat:attribution", "report:view", "report:create",
-                    "report:manage", "report:subscribe", "export:apply"),
-            "PAYROLL", Set.of("chat:ask", "payroll:plain_view", "report:view", "report:subscribe"),
-            "CHO", Set.of("chat:ask", "chat:view_sql", "chat:attribution", "report:view", "report:create",
-                    "report:manage", "report:subscribe"),
-            "ADMIN", Set.of("chat:ask", "chat:view_sql", "report:view", "report:create", "report:manage",
-                    "report:subscribe", "admin:*", "export:apply"),
-            "DATA_ADMIN", Set.of("chat:ask", "chat:view_sql", "semantic:manage", "admin:semantic",
-                    "admin:audit:read", "admin:data:read", "report:view", "report:subscribe", "export:apply"),
-            // P2 租户管理员：只管本租户用户与 LLM 配置 + 审计查看 + 报表，无 admin:tenant/authz/system
-            "TENANT_ADMIN", Set.of("chat:ask", "report:view", "admin:view", "admin:user:manage",
-                    "admin:llm:view", "admin:llm:manage", "admin:audit:read"));
-
     /**
      * 解析用户上下文（缓存 5min）。
      *
@@ -59,24 +40,10 @@ public class AuthzService {
      * @param funcCode 功能码
      */
     public void checkFunc(UserContext ctx, String funcCode) {
-        boolean allowed = ctx.getRoles().stream()
-                .anyMatch(role -> matches(FUNC_PERMISSION.getOrDefault(role, Set.of()), funcCode));
+        boolean allowed = PermissionCatalog.matches(ctx.getFunctionPerms(), funcCode);
         if (!allowed) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }
-    }
-
-    private static boolean matches(Set<String> perms, String funcCode) {
-        for (String perm : perms) {
-            if (perm.endsWith("*")) {
-                if (funcCode.startsWith(perm.substring(0, perm.length() - 1))) {
-                    return true;
-                }
-            } else if (perm.equals(funcCode)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**
@@ -86,7 +53,7 @@ public class AuthzService {
      * @return 功能权限码集合
      */
     public Set<String> functionPermsOf(String roleCode) {
-        return FUNC_PERMISSION.getOrDefault(roleCode, Set.of());
+        return Set.copyOf(userContextService.functionPermsOf(List.of(roleCode)));
     }
 
     /**
