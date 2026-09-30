@@ -49,7 +49,8 @@ class ChatServiceFlowTest {
     private ChatService service;
 
     private final UserContext ctx = UserContext.builder()
-            .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP")).build();
+            .userId(1L).empNo("hr01").displayName("张雨晴").tenantId("t01")
+            .roles(List.of("HRBP")).build();
 
     @BeforeEach
     void setUp() {
@@ -62,6 +63,7 @@ class ChatServiceFlowTest {
         ChtSession s = new ChtSession();
         s.setId(id);
         s.setUserId(1L);
+        s.setTenantId("t01");
         s.setTitle(title);
         s.setStatus(1);
         return s;
@@ -135,7 +137,7 @@ class ChatServiceFlowTest {
     }
 
     private ChatAskStore.AskRecord record(String askId, AnswerPayload payload, String sql) {
-        return new ChatAskStore.AskRecord(askId, 1L, 1L, 10L, "问题", "METRIC", "COMPLETED",
+        return new ChatAskStore.AskRecord(askId, 1L, 1L, "t01", 10L, "问题", "METRIC", "COMPLETED",
                 sql, payload, null,
                 new ChatAskStore.AskRecord.PendingClarify("问题", List.<ClarifyQuestion>of()));
     }

@@ -16,9 +16,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class ChatAskStore {
 
-    /** 幂等键 → ask_id（LRU 语义简化：5 分钟清理由调度清理）。 */
-    private final ConcurrentHashMap<String, String> idempotency = new ConcurrentHashMap<>();
-
     private final ConcurrentHashMap<String, AskRecord> records = new ConcurrentHashMap<>();
 
     /** 问句任务记录。 */
@@ -26,6 +23,7 @@ public class ChatAskStore {
             String askId,
             Long sessionId,
             Long userId,
+            String tenantId,
             Long turnId,
             String question,
             String intent,
@@ -48,12 +46,4 @@ public class ChatAskStore {
         records.put(record.askId(), record);
     }
 
-    /** 幂等键注册：返回已存在的 ask_id（无则 null）。 */
-    public String idempotencyPutIfAbsent(String key, String askId) {
-        return idempotency.putIfAbsent(key, askId);
-    }
-
-    public String idempotencyGet(String key) {
-        return idempotency.get(key);
-    }
 }

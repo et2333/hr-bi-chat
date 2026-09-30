@@ -98,6 +98,7 @@ public class ChatService {
         session.setStatus(1);
         session.setLastActiveAt(LocalDateTime.now());
         session.setIsPinned(0);
+        session.setTenantId(ctx.getTenantId());
         session.setIsDeleted(0);
         session.setCreatedBy(ctx.getEmpNo());
         session.setUpdatedBy(ctx.getEmpNo());
@@ -108,6 +109,7 @@ public class ChatService {
     public PageResult<SessionView> listSessions(UserContext ctx, int page, int size) {
         List<ChtSession> all = sessionMapper.selectList(new LambdaQueryWrapper<ChtSession>()
                 .eq(ChtSession::getUserId, ctx.getUserId())
+                .eq(ChtSession::getTenantId, ctx.getTenantId())
                 .eq(ChtSession::getIsDeleted, 0)
                 .orderByDesc(ChtSession::getLastActiveAt));
         List<SessionView> records = all.stream()
@@ -188,7 +190,7 @@ public class ChatService {
                 : clarifyingPayload(askId, result.intent(), result.clarifyQuestions());
         String sseBody = buildSse(result);
 
-        askStore.put(new ChatAskStore.AskRecord(askId, sessionId, ctx.getUserId(), turnId,
+        askStore.put(new ChatAskStore.AskRecord(askId, sessionId, ctx.getUserId(), ctx.getTenantId(), turnId,
                 request.question().trim(), result.intent(), status, result.sql(), payload, sseBody,
                 result.isClarifying()
                         ? new ChatAskStore.AskRecord.PendingClarify(request.question().trim(), result.clarifyQuestions())
@@ -221,7 +223,8 @@ public class ChatService {
         String sseBody = buildSse(result);
 
         updateTurnAnswer(record.turnId(), ctx, payload, result.elapsedMs());
-        askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), record.turnId(),
+        askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), ctx.getTenantId(),
+                record.turnId(),
                 record.question(), result.intent(), status, result.sql(), payload, sseBody,
                 result.isClarifying()
                         ? new ChatAskStore.AskRecord.PendingClarify(pending.question(), result.clarifyQuestions())
@@ -440,7 +443,8 @@ public class ChatService {
     private ChtSession requireSession(UserContext ctx, Long sessionId) {
         ChtSession session = sessionMapper.selectById(sessionId);
         if (session == null || session.getIsDeleted() != null && session.getIsDeleted() == 1
-                || !ctx.getUserId().equals(session.getUserId())) {
+                || !ctx.getUserId().equals(session.getUserId())
+                || !ctx.getTenantId().equals(session.getTenantId())) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }
         return session;
@@ -449,6 +453,7 @@ public class ChatService {
     private ChatAskStore.AskRecord requireOwnAsk(UserContext ctx, String askId, Long sessionId) {
         ChatAskStore.AskRecord record = askStore.get(askId);
         if (record == null || !ctx.getUserId().equals(record.userId())
+                || !ctx.getTenantId().equals(record.tenantId())
                 || (sessionId != null && !sessionId.equals(record.sessionId()))) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }

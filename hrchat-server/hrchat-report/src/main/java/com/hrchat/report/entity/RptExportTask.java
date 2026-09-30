@@ -25,6 +25,8 @@ public class RptExportTask {
 
     private Long reportId;
 
+    private String tenantId;
+
     private String ownerEmpNo;
 
     /** CSV/XLSX/PDF */

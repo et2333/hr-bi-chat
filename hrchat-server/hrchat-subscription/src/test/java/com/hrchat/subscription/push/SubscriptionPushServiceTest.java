@@ -86,6 +86,13 @@ class SubscriptionPushServiceTest {
     void setUp() {
         service = new SubscriptionPushService(subscriptionMapper, receiverMapper, snapshotMapper,
                 reportMapper, secUserMapper, authzService, pushChannelClient, chartService, excelExporter);
+        SecUser owner = new SecUser();
+        owner.setId(1L);
+        owner.setEmpNo("hr01");
+        owner.setTenantId("t01");
+        when(secUserMapper.selectById(1L)).thenReturn(owner);
+        when(authzService.resolveContext("hr01")).thenReturn(UserContext.builder()
+                .userId(1L).empNo("hr01").tenantId("t01").roles(List.of("HRBP")).build());
     }
 
     private RptSubscription dueSub() {
@@ -104,6 +111,7 @@ class SubscriptionPushServiceTest {
         RptReport r = new RptReport();
         r.setId(1L);
         r.setOwnerId(ownerId);
+        r.setTenantId("t01");
         r.setIsDeleted(0);
         return r;
     }

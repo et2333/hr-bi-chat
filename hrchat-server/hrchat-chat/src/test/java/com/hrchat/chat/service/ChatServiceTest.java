@@ -92,7 +92,8 @@ class ChatServiceTest {
                     return new IdempotencyService.Execution<>(action.get(), false);
                 });
         hr01 = UserContext.builder()
-                .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP"))
+                .userId(1L).empNo("hr01").displayName("张雨晴").tenantId("t01")
+                .roles(List.of("HRBP"))
                 .dataLevel(1)
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
                         .orgNodeId(2L).orgCode("RD").orgName("研发中心").orgPath("/1/2/")
@@ -104,6 +105,7 @@ class ChatServiceTest {
         ChtSession s = new ChtSession();
         s.setId(id);
         s.setUserId(userId);
+        s.setTenantId("t01");
         s.setTitle("会话1");
         s.setStatus(1);
         s.setIsDeleted(0);
@@ -261,7 +263,7 @@ class ChatServiceTest {
 
     @Test
     void getSql_otherUserAsk_throwsForbidden() {
-        askStore.put(new ChatAskStore.AskRecord("ask_other", 1L, 2L, 1L, "q", SseEvents.INTENT_QUERY,
+        askStore.put(new ChatAskStore.AskRecord("ask_other", 1L, 2L, "t01", 1L, "q", SseEvents.INTENT_QUERY,
                 SseEvents.ASK_COMPLETED, "SELECT 1", null, "", null));
         assertThrows(BizException.class, () -> chatService.getSql(hr01, "ask_other"));
     }
@@ -270,7 +272,7 @@ class ChatServiceTest {
 
     @Test
     void feedback_downWithoutReason_throwsParamMissing() {
-        askStore.put(new ChatAskStore.AskRecord("ask_fb", 1L, 1L, 1L, "q", SseEvents.INTENT_QUERY,
+        askStore.put(new ChatAskStore.AskRecord("ask_fb", 1L, 1L, "t01", 1L, "q", SseEvents.INTENT_QUERY,
                 SseEvents.ASK_COMPLETED, "SELECT 1", null, "", null));
         BizException ex = assertThrows(BizException.class,
                 () -> chatService.feedback(hr01, "ask_fb", new FeedbackRequest("DOWN", null, "说不清楚")));
@@ -279,7 +281,7 @@ class ChatServiceTest {
 
     @Test
     void feedback_up_persists() {
-        askStore.put(new ChatAskStore.AskRecord("ask_fb2", 1L, 1L, 1L, "q", SseEvents.INTENT_QUERY,
+        askStore.put(new ChatAskStore.AskRecord("ask_fb2", 1L, 1L, "t01", 1L, "q", SseEvents.INTENT_QUERY,
                 SseEvents.ASK_COMPLETED, "SELECT 1", null, "", null));
         when(feedbackMapper.selectOne(any())).thenReturn(null);
         chatService.feedback(hr01, "ask_fb2", new FeedbackRequest("UP", null, "很准"));
@@ -290,7 +292,7 @@ class ChatServiceTest {
 
     @Test
     void getSql_checksPermission() {
-        askStore.put(new ChatAskStore.AskRecord("ask_v", 1L, 1L, 1L, "q", SseEvents.INTENT_QUERY,
+        askStore.put(new ChatAskStore.AskRecord("ask_v", 1L, 1L, "t01", 1L, "q", SseEvents.INTENT_QUERY,
                 SseEvents.ASK_COMPLETED, "SELECT 1", null, "", null));
         org.mockito.Mockito.doThrow(new BizException(ErrorCode.FUNC_FORBIDDEN))
                 .when(authzService).checkFunc(any(), any());

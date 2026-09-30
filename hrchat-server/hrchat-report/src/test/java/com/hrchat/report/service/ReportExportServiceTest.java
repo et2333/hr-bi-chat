@@ -48,6 +48,8 @@ class ReportExportServiceTest {
     @Mock
     private RptExportTaskMapper exportTaskMapper;
     @Mock
+    private ReportService reportService;
+    @Mock
     private ReportChartService chartService;
 
     /** 真实导出器（无外部依赖），用于 magic header 断言。 */
@@ -62,11 +64,13 @@ class ReportExportServiceTest {
     @BeforeEach
     void setUp() {
         service = new ReportExportService(authzService, auditCollector, new ObjectMapper(),
-                reportMapper, exportTaskMapper, chartService, excelExporter, pdfExporter);
+                reportMapper, exportTaskMapper, reportService, chartService, excelExporter, pdfExporter);
         ctx = UserContext.builder().userId(1L).empNo("hr01").displayName("张丽")
+                .tenantId("t01")
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder().scope(3).build()))
                 .build();
         noExportCtx = UserContext.builder().userId(1L).empNo("hr01").displayName("张丽")
+                .tenantId("t01")
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder().scope(2).build()))
                 .build();
     }
