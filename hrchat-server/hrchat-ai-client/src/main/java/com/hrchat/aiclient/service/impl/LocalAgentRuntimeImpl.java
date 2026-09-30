@@ -16,6 +16,7 @@ import com.hrchat.api.chat.TimeRange;
 import com.hrchat.api.sse.SseEvent;
 import com.hrchat.api.sse.SseEvents;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.SqlRewriteService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
@@ -241,8 +242,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             long sqlStart = System.currentTimeMillis();
             sql = buildQuerySql(metric, window, orgFragment);
             // 取数唯一入口：权限改写（占位符替换 + 只读白名单校验）
-            sql = sqlRewriteService.rewrite(sql, ctx);
-            QueryResult result = queryExecService.executeReadonly(sql);
+            AuthorizedQuery authorizedQuery = sqlRewriteService.authorize(sql, ctx);
+            sql = authorizedQuery.sql();
+            QueryResult result = queryExecService.executeReadonly(authorizedQuery);
             long sqlMs = System.currentTimeMillis() - sqlStart;
             events.add(toolEnd("sql_exec", sqlMs, result.rows().size()));
 
@@ -254,7 +256,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                 if (prev != null) {
                     // 取数唯一入口：环比查询同样必须经权限改写后执行（BR-02）
                     QueryResult prevResult = queryExecService.executeReadonly(
-                            sqlRewriteService.rewrite(buildQuerySql(metric, prev, orgFragment), ctx));
+                            sqlRewriteService.authorize(buildQuerySql(metric, prev, orgFragment), ctx));
                     compare = extractValue(prevResult, metricCode);
                     prevPeriod = prev.label();
                 }
@@ -558,7 +560,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     /** 向基础 SQL 注入组织/时间谓词（追加于 WHERE 之后；无 WHERE 时新起 WHERE）。 */
     private String injectFilters(String baseSql, TimeWindow window, String orgFragment) {
         List<String> predicates = new ArrayList<>();
-        predicates.add(orgFragment != null ? orgFragment : SqlRewriteService.ORG_FILTER_PLACEHOLDER);
+        predicates.add(authzPredicate(orgFragment));
         if (window != null && baseSql.toUpperCase().contains("FACT_")) {
             predicates.add(window.sqlPredicate());
         }
@@ -608,7 +610,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     }
 
     private String authzPredicate(String orgFragment) {
-        return orgFragment != null ? orgFragment : SqlRewriteService.ORG_FILTER_PLACEHOLDER;
+        return orgFragment != null
+                ? "(" + orgFragment + ") AND " + SqlRewriteService.TENANT_FILTER_PLACEHOLDER
+                : SqlRewriteService.ORG_FILTER_PLACEHOLDER;
     }
 
     /** 事实表按月聚合子查询：输出 {@code period(yyyy-MM), v}，组织/时间谓词在组内注入。 */
@@ -950,8 +954,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         String sql = null;
         try {
             long sqlStart = System.currentTimeMillis();
-            sql = sqlRewriteService.rewrite(trendSql, ctx);
-            QueryResult result = queryExecService.executeReadonly(sql);
+            AuthorizedQuery authorizedQuery = sqlRewriteService.authorize(trendSql, ctx);
+            sql = authorizedQuery.sql();
+            QueryResult result = queryExecService.executeReadonly(authorizedQuery);
             events.add(toolEnd("sql_exec", System.currentTimeMillis() - sqlStart, result.rows().size()));
 
             List<String> periods = new ArrayList<>();

@@ -56,7 +56,7 @@ class AuthzServiceTest {
     @Test
     void hr01ShouldAccessRdcSubtree() {
         String filter = authz.authorizeOrgFilter(hr01, "/1/2/", "研发中心");
-        assertThat(filter).isEqualTo("org_key IN (2, 3, 4)");
+        assertThat(filter).isEqualTo("org_key IN (2, 3, 4) AND tenant_id = 't01'");
     }
 
     @Test
@@ -68,7 +68,8 @@ class AuthzServiceTest {
 
     @Test
     void hr02ShouldAccessSalesOnly() {
-        assertThat(authz.authorizeOrgFilter(hr02, "/1/5/", "销售部")).isEqualTo("org_key IN (5)");
+        assertThat(authz.authorizeOrgFilter(hr02, "/1/5/", "销售部"))
+                .isEqualTo("org_key IN (5) AND tenant_id = 't01'");
         assertThatThrownBy(() -> authz.authorizeOrgFilter(hr02, "/1/2/", "研发中心"))
                 .isInstanceOf(BizException.class)
                 .satisfies(e -> assertThat(((BizException) e).getErrorCode()).isEqualTo(ErrorCode.DATA_RANGE_FORBIDDEN));
@@ -76,8 +77,10 @@ class AuthzServiceTest {
 
     @Test
     void hr04GlobalGrantCoversAllOrgs() {
-        assertThat(authz.authorizeOrgFilter(hr04, "/1/2/", "研发中心")).isEqualTo("1=1");
-        assertThat(authz.authorizeOrgFilter(hr04, "/1/5/", "销售部")).isEqualTo("1=1");
+        assertThat(authz.authorizeOrgFilter(hr04, "/1/2/", "研发中心"))
+                .isEqualTo("1=1 AND tenant_id = 't01'");
+        assertThat(authz.authorizeOrgFilter(hr04, "/1/5/", "销售部"))
+                .isEqualTo("1=1 AND tenant_id = 't01'");
     }
 
     @Test
@@ -175,6 +178,7 @@ class AuthzServiceTest {
                 .userId(1L)
                 .empNo(empNo)
                 .displayName(empNo)
+                .tenantId("t01")
                 .roles(roles)
                 .dataLevel(roles.isEmpty() ? 0 : 1)
                 .grantedOrgs(grants)

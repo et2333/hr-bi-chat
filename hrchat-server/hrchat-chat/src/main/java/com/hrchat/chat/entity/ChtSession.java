@@ -29,6 +29,9 @@ public class ChtSession {
 
     private Integer isPinned;
 
+    /** 会话所属租户 */
+    private String tenantId;
+
     private Integer isDeleted;
 
     private LocalDateTime createdAt;

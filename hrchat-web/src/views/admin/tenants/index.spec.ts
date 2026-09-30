@@ -22,6 +22,7 @@ vi.mock('@/api/http', () => ({
   http: {},
   USER_NO_KEY: 'hrchat_user_no',
   TENANT_NO_KEY: 'hrchat_tenant_no',
+  TENANT_SWITCH_REASON_KEY: 'hrchat_tenant_switch_reason',
   default: {},
 }))
 
@@ -145,6 +146,8 @@ describe('views/admin/tenants', () => {
 
   it('切换到此租户写入 localStorage 并提示', async () => {
     localStorage.clear()
+    sessionStorage.clear()
+    vi.spyOn(window, 'prompt').mockReturnValue('处理客户支持问题')
     const wrapper = mount(TenantAdmin, { global: { plugins: [Antd] } })
     await flushPromises()
 
@@ -158,6 +161,7 @@ describe('views/admin/tenants', () => {
     await flushPromises()
 
     expect(localStorage.getItem('hrchat_tenant_no')).toBe('t01')
+    expect(sessionStorage.getItem('hrchat_tenant_switch_reason')).toBe('处理客户支持问题')
     expect(successSpy).toHaveBeenCalledWith(expect.stringContaining('已切换到租户「演示租户」'))
   })
 })

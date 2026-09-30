@@ -24,7 +24,7 @@ import java.util.List;
  */
 public interface SemanticMetaService {
 
-    // 版本状态：0待审批 1生效中 2已驳回 3历史（与 schema-h2.sql 注释一致）
+    // 版本状态：0待审批 1生效中 2已驳回 3历史（与 Flyway H2 baseline 注释一致）
     int VERSION_PENDING = 0;
     int VERSION_EFFECTIVE = 1;
     int VERSION_REJECTED = 2;

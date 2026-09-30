@@ -1,5 +1,6 @@
 package com.hrchat.queryexec.service;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.SqlRewriteService;
 import com.hrchat.queryexec.model.QueryResult;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.verify;
@@ -31,17 +33,19 @@ class QueryExecServiceTest {
     @Test
     void executeReadonly_validatesThenExecutesWithDefaultTimeout() {
         QueryResult expected = new QueryResult(List.of(), List.of(Map.of()), 0);
-        when(queryExecutor.execute("SELECT 1", QueryExecService.DEFAULT_TIMEOUT_SECONDS)).thenReturn(expected);
-        assertSame(expected, service.executeReadonly("SELECT 1"));
+        AuthorizedQuery query = new AuthorizedQuery("SELECT 1", List.of(), Set.of(), "fp");
+        when(queryExecutor.execute(query, QueryExecService.DEFAULT_TIMEOUT_SECONDS)).thenReturn(expected);
+        assertSame(expected, service.executeReadonly(query));
         verify(sqlRewriteService).validateReadOnly("SELECT 1");
-        verify(queryExecutor).execute("SELECT 1", QueryExecService.DEFAULT_TIMEOUT_SECONDS);
+        verify(queryExecutor).execute(query, QueryExecService.DEFAULT_TIMEOUT_SECONDS);
     }
 
     @Test
     void executeWithTimeout_validatesThenExecutesWithGivenTimeout() {
         QueryResult expected = new QueryResult(List.of(), List.of(Map.of()), 0);
-        when(queryExecutor.execute("SELECT 2", 3)).thenReturn(expected);
-        assertSame(expected, service.executeWithTimeout("SELECT 2", 3));
+        AuthorizedQuery query = new AuthorizedQuery("SELECT 2", List.of(), Set.of(), "fp");
+        when(queryExecutor.execute(query, 3)).thenReturn(expected);
+        assertSame(expected, service.executeWithTimeout(query, 3));
         verify(sqlRewriteService).validateReadOnly("SELECT 2");
     }
 }

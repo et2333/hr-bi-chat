@@ -126,7 +126,8 @@ class UserContextServiceTest {
 
         service.resolve("hr01");
         UserContext second = service.resolve("hr01");
-        verify(userMapper, times(1)).selectOne(any());
+        // 身份状态与角色每次请求均重新校验；组织和字段权限上下文使用短 TTL 缓存。
+        verify(userMapper, times(2)).selectOne(any());
         assertThat(second.getEmpNo()).isEqualTo("hr01");
     }
 

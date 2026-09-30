@@ -54,6 +54,7 @@ public class ReportExportService {
     private final ObjectMapper objectMapper;
     private final RptReportMapper reportMapper;
     private final RptExportTaskMapper exportTaskMapper;
+    private final ReportService reportService;
     private final ReportChartService chartService;
     private final ReportExcelExporter excelExporter;
     private final ReportPdfExporter pdfExporter;
@@ -69,6 +70,7 @@ public class ReportExportService {
         if (!ctx.canExport()) {
             throw new BizException(ErrorCode.EXPORT_FORBIDDEN);
         }
+        reportService.requireViewAccess(ctx, reportId);
         if (request == null || request.format() == null || request.format().isBlank()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "format");
         }
@@ -90,6 +92,7 @@ public class ReportExportService {
         RptExportTask task = new RptExportTask();
         task.setExportId(exportId);
         task.setReportId(reportId);
+        task.setTenantId(ctx.getTenantId());
         task.setOwnerEmpNo(ctx.getEmpNo());
         task.setFormat(format);
         task.setStatus("COMPLETED");
@@ -125,7 +128,8 @@ public class ReportExportService {
 
     private RptExportTask requireTask(UserContext ctx, String exportId) {
         RptExportTask task = exportTaskMapper.selectOne(new LambdaQueryWrapper<RptExportTask>()
-                .eq(RptExportTask::getExportId, exportId));
+                .eq(RptExportTask::getExportId, exportId)
+                .eq(RptExportTask::getTenantId, ctx.getTenantId()));
         if (task == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "exportId");
         }

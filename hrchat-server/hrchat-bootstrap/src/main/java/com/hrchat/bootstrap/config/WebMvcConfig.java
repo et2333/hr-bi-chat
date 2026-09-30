@@ -1,10 +1,12 @@
 package com.hrchat.bootstrap.config;
 
+import com.hrchat.authz.identity.AuthenticatedIdentityProvider;
 import com.hrchat.authz.service.CurrentUserArgumentResolver;
 import com.hrchat.authz.service.UserContextService;
-import org.springframework.beans.factory.annotation.Value;
+import com.hrchat.authz.tenant.TrustedRequestContextInterceptor;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.util.List;
@@ -16,19 +18,22 @@ import java.util.List;
 public class WebMvcConfig implements WebMvcConfigurer {
 
     private final UserContextService userContextService;
+    private final AuthenticatedIdentityProvider identityProvider;
 
-    @Value("${hrchat.security.auth-mock:true}")
-    private boolean authMock;
-
-    @Value("${hrchat.security.mock-user:hr01}")
-    private String mockUser;
-
-    public WebMvcConfig(UserContextService userContextService) {
+    public WebMvcConfig(UserContextService userContextService,
+                        AuthenticatedIdentityProvider identityProvider) {
         this.userContextService = userContextService;
+        this.identityProvider = identityProvider;
     }
 
     @Override
     public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
-        resolvers.add(new CurrentUserArgumentResolver(userContextService, authMock ? mockUser : null));
+        resolvers.add(new CurrentUserArgumentResolver(userContextService, identityProvider));
+    }
+
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(new TrustedRequestContextInterceptor(identityProvider, userContextService))
+                .addPathPatterns("/api/v1/**");
     }
 }

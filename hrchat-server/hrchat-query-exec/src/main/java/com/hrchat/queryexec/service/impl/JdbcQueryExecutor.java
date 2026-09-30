@@ -1,5 +1,6 @@
 package com.hrchat.queryexec.service.impl;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.queryexec.model.QueryResult;
@@ -39,15 +40,17 @@ public class JdbcQueryExecutor implements QueryExecutor {
     private final DataSource dataSource;
 
     @Override
-    public QueryResult execute(String sql, int timeoutSeconds) {
+    public QueryResult execute(AuthorizedQuery query, int timeoutSeconds) {
         long start = System.currentTimeMillis();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(sql)) {
+             PreparedStatement ps = prepare(conn, query)) {
+            conn.setReadOnly(true);
             ps.setMaxRows(MAX_ROWS);
             ps.setQueryTimeout(timeoutSeconds);
             try (ResultSet rs = ps.executeQuery()) {
                 QueryResult result = toResult(rs);
-                log.debug("SQL 执行完成: 耗时 {}ms, 列 {} 行 {}", System.currentTimeMillis() - start,
+                log.info("SECURITY_QUERY_EXEC tables={} fingerprint={} elapsedMs={} columns={} rows={}",
+                        query.referencedTables(), query.permissionFingerprint(), System.currentTimeMillis() - start,
                         result.columns().size(), result.rows().size());
                 return result;
             }
@@ -60,6 +63,15 @@ public class JdbcQueryExecutor implements QueryExecutor {
             // 硬错误：执行失败统一映射 HRS-3001 系统繁忙（500）
             throw new BizException(ErrorCode.SYSTEM_BUSY, e.getMessage());
         }
+    }
+
+    private static PreparedStatement prepare(Connection conn, AuthorizedQuery query) throws SQLException {
+        conn.setReadOnly(true);
+        PreparedStatement statement = conn.prepareStatement(query.sql());
+        for (int i = 0; i < query.parameters().size(); i++) {
+            statement.setObject(i + 1, query.parameters().get(i));
+        }
+        return statement;
     }
 
     private static QueryResult toResult(ResultSet rs) throws SQLException {

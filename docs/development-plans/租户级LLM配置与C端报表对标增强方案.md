@@ -18,11 +18,11 @@
 ## 任务 A：租户级 LLM 配置（完整多租户运行时）
 
 ### DDL 与 Java
-- **schema-h2.sql / hrchat-deploy/sql/schema.sql**：`llm_model_config` 加 `tenant_id VARCHAR(16) NULL`（NULL=系统默认，非 NULL=租户专属）。`llm_deploy_state` 不加列，经 config 归属。
+- **Flyway H2/MySQL V1 baseline**：`llm_model_config` 含 `tenant_id VARCHAR(16) NULL`（NULL=系统默认，非 NULL=租户专属）。`llm_deploy_state` 不加列，经 config 归属。
 - **LlmModelConfig.java** 加 `tenantId`；**LlmConfigService** create/patch 从 `TenantContextHolder.get()` 写租户（null 回退 't01'），`list` 过滤 `tenant_id=当前 OR IS NULL`。
 - **LlmDeployService** ACTIVE 查询按 config 归属过滤。
 - **AgentRuntimeFactory**：单例 → `Map<String, AgentRuntimeClient>` 按租户懒加载缓存 + default 条目（保留 build 逻辑）；`getForTenant(String tenant)` 替代 getDelegate，调用方用 `TenantContextHolder.get()`（null 用 default）；`RemoteAgentRuntimeClient` 构造加 tenantNo、请求头带 X-Tenant-No；`ApplicationReadyEvent` 预热 default。
-- **data-h2.sql** 种子：t01 ACTIVE 模型、t02 ACTIVE 模型、一条 tenant_id NULL 默认 ACTIVE（演示回退）。
+- **Flyway V2 demo seed**：t01 ACTIVE 模型、t02 ACTIVE 模型、一条 tenant_id NULL 默认 ACTIVE（演示回退）。
 
 ### Python（hrchat-ai/agent_gateway）
 - `_runtime` → `_runtimes: dict[str, runtime]` + `_default`（yml LLM_PROFILE 兜底）。
@@ -84,4 +84,4 @@
 ## 涉及关键文件
 - 新增：`ReportTableService.java`、`ReportTableServiceTest.java`、Python `insight` 端点
 - 复用：`ReportChartService`（def/聚合/改写）、`ChartViews`、`QueryExecService`、`TenantContextHolder`
-- 修改：`schema-h2.sql`、`hrchat-deploy/sql/schema.sql`、`data-h2.sql`、`LlmModelConfig.java`、`LlmConfigService.java`、`LlmDeployService.java`、`AgentRuntimeFactory.java`、`RemoteAgentRuntimeClient.java`、`ChartController.java`、`app.py`、`mock_llm.py`、`openai_client.py`、`detail.vue`、`api/reports.ts`、`views/admin/llm/index.vue`、`llm.ts`、`EChart.vue`、`ChartRenderer.vue` 及对应测试
+- 修改：Flyway H2/MySQL baseline 与 demo seed、`LlmModelConfig.java`、`LlmConfigService.java`、`LlmDeployService.java`、`AgentRuntimeFactory.java`、`RemoteAgentRuntimeClient.java`、`ChartController.java`、`app.py`、`mock_llm.py`、`openai_client.py`、`detail.vue`、`api/reports.ts`、`views/admin/llm/index.vue`、`llm.ts`、`EChart.vue`、`ChartRenderer.vue` 及对应测试

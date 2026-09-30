@@ -6,6 +6,8 @@ import type { ApiResponse } from './types'
 export const USER_NO_KEY = 'hrchat_user_no'
 /** localStorage 中存储当前租户编码的 key（多租户隔离演示） */
 export const TENANT_NO_KEY = 'hrchat_tenant_no'
+/** 平台管理员跨租户访问原因，仅保留在当前浏览器会话。 */
+export const TENANT_SWITCH_REASON_KEY = 'hrchat_tenant_switch_reason'
 
 const http = axios.create({
   baseURL: '/api/v1',
@@ -18,6 +20,8 @@ http.interceptors.request.use((config) => {
   const tenantNo = localStorage.getItem(TENANT_NO_KEY) || 't01'
   config.headers['X-User-No'] = userNo
   config.headers['X-Tenant-No'] = tenantNo
+  const switchReason = sessionStorage.getItem(TENANT_SWITCH_REASON_KEY)
+  if (switchReason) config.headers['X-Tenant-Switch-Reason'] = switchReason
   return config
 })
 

@@ -45,7 +45,7 @@
 ## P2 租户级 LLM + 超管/租户管理员两级
 
 ### 1. 租户级 LLM 配置
-- **DDL**：`llm_model_config` 加 `tenant_id VARCHAR(16) NULL`（NULL=系统默认）；`llm_deploy_state` 经 config 归属。schema-h2.sql + hrchat-deploy/sql/schema.sql + data-h2.sql 种子（t01 ACTIVE 模型、t02 ACTIVE 模型、tenant_id NULL 默认 ACTIVE）。
+- **DDL**：`llm_model_config` 加 `tenant_id VARCHAR(16) NULL`（NULL=系统默认）；`llm_deploy_state` 经 config 归属。相关结构和种子现已固化在 Flyway H2/MySQL baseline 与 V2 demo seed 中。
 - **Java**：LlmModelConfig 加 tenantId；LlmConfigService create/patch 写租户（TenantContextHolder.get()，null→'t01'）、list 过滤 `tenant_id=当前 OR IS NULL`；LlmDeployService ACTIVE 按 config 归属过滤；AgentRuntimeFactory 单例→`Map<String,AgentRuntimeClient>` 按租户懒加载 + default（保留 build）；RemoteAgentRuntimeClient 构造加 tenantNo、请求头带 X-Tenant-No；调用方用 TenantContextHolder.get()（null→default）。
 - **Python**：`_runtime`→`_runtimes: dict[str,runtime]` + `_default`；`POST /v1/config` body 加 tenant_no；`GET /v1/config/current?tenant_no=`；asks 端点读 X-Tenant-No，无记录回退 `_default`；新增 `POST /v1/insight`（见 P3-C）。
 - **前端** llm 页：顶部提示"配置按当前租户生效（{tenant}）"；列表/部署已自动带 X-Tenant-No。
@@ -53,7 +53,7 @@
 ### 2. 超管/租户管理员两级
 - AuthzService.FUNC_PERMISSION 新增角色 `TENANT_ADMIN` → `{admin:user:manage, admin:llm:manage, admin:audit:view, report:view}`（不含 admin:tenant:*、admin:authz:*、admin:system:*）。
 - 超管 `ADMIN` 保持 `admin:*`。租户管理员新建用户/LLM 配置自动归属本租户（已有 tenant_id 谓词 + 新写入逻辑）。
-- data-h2.sql 种子：t02 新增租户管理员用户（如 `t02adm01`/TENANT_ADMIN/org 归属 t02）。
+- Flyway V2 demo seed：t02 新增租户管理员用户（如 `t02adm01`/TENANT_ADMIN/org 归属 t02）。
 - 管理端前端：顶栏展示当前管理员角色；租户管理员不显示租户管理/角色权限/系统设置菜单（按权限码过滤菜单）。
 
 ---
@@ -95,6 +95,6 @@
 - 前端新增：`layouts/AdminLayout.vue`、`views/admin/dashboard/index.vue`、`views/admin/roles/index.vue`、`views/admin/audit/index.vue`（迁移）、`views/admin/settings/index.vue`
 - 前端修改：`router/index.ts`（/admin 挂 AdminLayout）、`App.vue`、`stores/auth.ts`（管理员角色标识）、`views/reports/detail.vue`、`views/admin/llm/index.vue`、`api/reports.ts`、`api/admin.ts`、`api/llm.ts`、`EChart.vue`、`ChartRenderer.vue`
 - 后端新增：`DashboardController`、`SysSettingController/SysSettingService`、`ReportTableService`
-- 后端修改：`schema-h2.sql`、`hrchat-deploy/sql/schema.sql`、`data-h2.sql`、`LlmModelConfig.java`、`LlmConfigService.java`、`LlmDeployService.java`、`AgentRuntimeFactory.java`、`RemoteAgentRuntimeClient.java`、`AuthzService.java`（TENANT_ADMIN）、`ChartController.java`、`ChartViews.java`、`ReportChartService.java`
+- 后端修改：Flyway H2/MySQL baseline 与 demo seed、`LlmModelConfig.java`、`LlmConfigService.java`、`LlmDeployService.java`、`AgentRuntimeFactory.java`、`RemoteAgentRuntimeClient.java`、`AuthzService.java`（TENANT_ADMIN）、`ChartController.java`、`ChartViews.java`、`ReportChartService.java`
 - Python：`app.py`（_runtimes + insight）、`mock_llm.py`、`openai_client.py`
 - 测试：对应各模块新增/补充（DashboardTest、SysSettingTest、RoleService TENANT_ADMIN、LlmConfig 租户、ReportTableServiceTest、test_config 多租户、test_insight、各前端 spec）

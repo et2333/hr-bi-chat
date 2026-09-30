@@ -18,6 +18,7 @@ import com.hrchat.authz.mapper.SecRoleMapper;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.common.api.PageResult;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
@@ -64,6 +65,7 @@ public class RoleService {
     private final SecUserMapper secUserMapper;
     private final SecOrgNodeMapper orgNodeMapper;
     private final AuthzService authzService;
+    private final UserContextService userContextService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
 
@@ -115,6 +117,7 @@ public class RoleService {
         if (request.functionPerms() != null) {
             rolePerms.put(role.getRoleCode(), new LinkedHashSet<>(request.functionPerms()));
         }
+        userContextService.evictRoleAfterCommit(role.getRoleCode());
         audit(role.getId(), role.getRoleCode(), "PATCH", ctx, request.functionPerms());
     }
 
@@ -141,6 +144,7 @@ public class RoleService {
                 orgGrantMapper.insert(grant);
             }
         }
+        userContextService.evictRoleAfterCommit(role.getRoleCode());
         audit(role.getId(), role.getRoleCode(), "DATA_SCOPE", ctx,
                 orgIds == null ? List.of() : orgIds.stream().map(String::valueOf).toList());
     }
@@ -167,6 +171,7 @@ public class RoleService {
                 fieldPolicyMapper.insert(policy);
             }
         }
+        userContextService.evictRoleAfterCommit(role.getRoleCode());
         audit(role.getId(), role.getRoleCode(), "FIELD_POLICY", ctx,
                 request == null || request.policies() == null ? List.of()
                         : request.policies().stream().map(p -> p == null ? "" : p.fieldCode()).toList());
@@ -175,9 +180,9 @@ public class RoleService {
     // ---------------- 用户有效权限（2.5.4） ----------------
 
     /** 合并视图：角色 + 数据范围 + 字段策略 + 功能权限（实时裁决快照，BR-05）。 */
-    public AdminViews.EffectivePermissionsView effectivePermissions(Long userId) {
+    public AdminViews.EffectivePermissionsView effectivePermissions(Long userId, UserContext requester) {
         SecUser user = secUserMapper.selectById(userId);
-        if (user == null) {
+        if (user == null || !java.util.Objects.equals(user.getTenantId(), requester.getTenantId())) {
             throw new BizException(ErrorCode.PARAM_INVALID, "userId");
         }
         UserContext ctx = authzService.resolveContext(user.getEmpNo());

@@ -1,5 +1,6 @@
 package com.hrchat.authz.service;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import org.junit.jupiter.api.Test;
@@ -54,9 +55,8 @@ class SqlRewriteServiceTest {
     }
 
     @Test
-    void shouldRejectNonSelectPrefix() {
-        assertThatThrownBy(() -> service.validateReadOnly("WITH t AS (SELECT 1) SELECT * FROM t"))
-                .isInstanceOf(BizException.class);
+    void shouldAllowReadOnlyCte() {
+        service.validateReadOnly("WITH t AS (SELECT 1) SELECT * FROM t");
     }
 
     @Test
@@ -66,10 +66,36 @@ class SqlRewriteServiceTest {
     }
 
     @Test
+    void authorizeShouldBindOrgAndTenantParameters() {
+        AuthorizedQuery query = service.authorize(
+                "SELECT COUNT(*) FROM dim_employee WHERE {authz_org_filter}",
+                buildContext(2L, 3L, 4L));
+
+        assertThat(query.sql()).contains("org_key IN (?, ?, ?)").contains("tenant_id = ?");
+        assertThat(query.parameters()).containsExactly(2L, 3L, 4L, "t01");
+        assertThat(query.referencedTables()).containsExactly("dim_employee");
+    }
+
+    @Test
+    void authorizeShouldRejectProtectedTableWithoutSecurityMarker() {
+        assertThatThrownBy(() -> service.authorize("SELECT COUNT(*) FROM dim_employee", buildContext(1L)))
+                .isInstanceOf(BizException.class)
+                .satisfies(e -> assertThat(((BizException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.FUNC_FORBIDDEN));
+    }
+
+    @Test
+    void authorizeShouldRejectUnknownTable() {
+        assertThatThrownBy(() -> service.authorize(
+                "SELECT COUNT(*) FROM sec_user WHERE {authz_tenant_filter}", buildContext(1L)))
+                .isInstanceOf(BizException.class);
+    }
+
+    @Test
     void buildOrgFilterShouldDeduplicateKeys() {
         String filter = service.buildOrgFilter(buildContext(2L, 3L, 4L),
                 java.util.List.of(buildContext(2L, 3L, 4L).getGrantedOrgs().get(0)));
-        assertThat(filter).isEqualTo("org_key IN (2, 3, 4)");
+        assertThat(filter).isEqualTo("org_key IN (2, 3, 4) AND tenant_id = 't01'");
     }
 
     @Test
@@ -85,23 +111,23 @@ class SqlRewriteServiceTest {
     }
 
     @Test
-    void buildOrgFilter_appendsTenantPredicateToRootGrant() {
+    void buildOrgFilter_trustedContextOverridesThreadLocalTenant() {
         com.hrchat.authz.tenant.TenantContextHolder.set("t02");
         try {
             String filter = service.buildOrgFilter(buildContext(1L),
                     java.util.List.of(buildContext(1L).getGrantedOrgs().get(0)));
-            assertThat(filter).isEqualTo("1=1 AND tenant_id = 't02'");
+            assertThat(filter).isEqualTo("1=1 AND tenant_id = 't01'");
         } finally {
             com.hrchat.authz.tenant.TenantContextHolder.clear();
         }
     }
 
     @Test
-    void buildOrgFilter_skipsTenantPredicateWhenContextUnset() {
+    void buildOrgFilter_usesTenantFromTrustedUserContext() {
         com.hrchat.authz.tenant.TenantContextHolder.clear();
         String filter = service.buildOrgFilter(buildContext(2L, 3L),
                 java.util.List.of(buildContext(2L, 3L).getGrantedOrgs().get(0)));
-        assertThat(filter).isEqualTo("org_key IN (2, 3)");
+        assertThat(filter).isEqualTo("org_key IN (2, 3) AND tenant_id = 't01'");
     }
 
     @Test
@@ -130,6 +156,7 @@ class SqlRewriteServiceTest {
                 .build();
         return com.hrchat.authz.model.UserContext.builder()
                 .empNo("t")
+                .tenantId("t01")
                 .grantedOrgs(java.util.List.of(grant))
                 .build();
     }

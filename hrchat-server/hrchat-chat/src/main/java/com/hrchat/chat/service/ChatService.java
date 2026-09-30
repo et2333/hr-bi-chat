@@ -72,13 +72,18 @@ public class ChatService {
     private final ChtClarifyMapper clarifyMapper;
     private final ChtFeedbackMapper feedbackMapper;
     private final ChatAskStore askStore;
+    private final IdempotencyService idempotencyService;
     private final AgentRuntimeClient agentRuntime;
     private final AuthzService authzService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
 
     /** 问句编排结果（SYNC 直接返回 payload；STREAM 返回 SSE 帧文本）。 */
-    public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying) {
+    public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying,
+                             boolean replayed) {
+        public AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying) {
+            this(askId, sseBody, payload, clarifying, false);
+        }
     }
 
     // =================================================================
@@ -93,6 +98,7 @@ public class ChatService {
         session.setStatus(1);
         session.setLastActiveAt(LocalDateTime.now());
         session.setIsPinned(0);
+        session.setTenantId(ctx.getTenantId());
         session.setIsDeleted(0);
         session.setCreatedBy(ctx.getEmpNo());
         session.setUpdatedBy(ctx.getEmpNo());
@@ -103,6 +109,7 @@ public class ChatService {
     public PageResult<SessionView> listSessions(UserContext ctx, int page, int size) {
         List<ChtSession> all = sessionMapper.selectList(new LambdaQueryWrapper<ChtSession>()
                 .eq(ChtSession::getUserId, ctx.getUserId())
+                .eq(ChtSession::getTenantId, ctx.getTenantId())
                 .eq(ChtSession::getIsDeleted, 0)
                 .orderByDesc(ChtSession::getLastActiveAt));
         List<SessionView> records = all.stream()
@@ -163,18 +170,15 @@ public class ChatService {
             throw new BizException(ErrorCode.PARAM_INVALID, "mode");
         }
 
-        // 幂等防重（HRX-1006：处理中不可重复提交；已完成回放）
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            String existingAskId = askStore.idempotencyGet(idempotencyKey);
-            if (existingAskId != null) {
-                ChatAskStore.AskRecord existing = askStore.get(existingAskId);
-                if (existing == null || !"COMPLETED".equals(existing.status())) {
-                    throw new BizException(ErrorCode.IDEMPOTENT_PROCESSING);
-                }
-                return new AskOutcome(existing.askId(), existing.sseBody(), existing.payload(), false);
-            }
-        }
+        IdempotencyService.Execution<AskOutcome> execution = idempotencyService.execute(ctx, "POST",
+                "/api/v1/chat/sessions/{sessionId}/asks", String.valueOf(sessionId), idempotencyKey,
+                request, AskOutcome.class, () -> executeAsk(ctx, sessionId, request, session));
+        AskOutcome value = execution.value();
+        return new AskOutcome(value.askId(), value.sseBody(), value.payload(), value.clarifying(),
+                execution.replayed());
+    }
 
+    private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session) {
         AgentResult result = agentRuntime.ask(request, ctx);
         String askId = result.askId();
         Long turnId = persistTurn(sessionId, ctx, request.question(), result);
@@ -186,14 +190,11 @@ public class ChatService {
                 : clarifyingPayload(askId, result.intent(), result.clarifyQuestions());
         String sseBody = buildSse(result);
 
-        askStore.put(new ChatAskStore.AskRecord(askId, sessionId, ctx.getUserId(), turnId,
+        askStore.put(new ChatAskStore.AskRecord(askId, sessionId, ctx.getUserId(), ctx.getTenantId(), turnId,
                 request.question().trim(), result.intent(), status, result.sql(), payload, sseBody,
                 result.isClarifying()
                         ? new ChatAskStore.AskRecord.PendingClarify(request.question().trim(), result.clarifyQuestions())
                         : null));
-        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
-            askStore.idempotencyPutIfAbsent(idempotencyKey, askId);
-        }
         touchSession(session);
         auditAsk(ctx, sessionId, askId, request.question(), result);
         return new AskOutcome(askId, sseBody, payload, result.isClarifying());
@@ -222,7 +223,8 @@ public class ChatService {
         String sseBody = buildSse(result);
 
         updateTurnAnswer(record.turnId(), ctx, payload, result.elapsedMs());
-        askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), record.turnId(),
+        askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), ctx.getTenantId(),
+                record.turnId(),
                 record.question(), result.intent(), status, result.sql(), payload, sseBody,
                 result.isClarifying()
                         ? new ChatAskStore.AskRecord.PendingClarify(pending.question(), result.clarifyQuestions())
@@ -441,7 +443,8 @@ public class ChatService {
     private ChtSession requireSession(UserContext ctx, Long sessionId) {
         ChtSession session = sessionMapper.selectById(sessionId);
         if (session == null || session.getIsDeleted() != null && session.getIsDeleted() == 1
-                || !ctx.getUserId().equals(session.getUserId())) {
+                || !ctx.getUserId().equals(session.getUserId())
+                || !ctx.getTenantId().equals(session.getTenantId())) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }
         return session;
@@ -450,6 +453,7 @@ public class ChatService {
     private ChatAskStore.AskRecord requireOwnAsk(UserContext ctx, String askId, Long sessionId) {
         ChatAskStore.AskRecord record = askStore.get(askId);
         if (record == null || !ctx.getUserId().equals(record.userId())
+                || !ctx.getTenantId().equals(record.tenantId())
                 || (sessionId != null && !sessionId.equals(record.sessionId()))) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }

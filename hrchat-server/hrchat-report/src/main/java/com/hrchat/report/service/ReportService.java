@@ -440,7 +440,8 @@ public class ReportService {
 
     private RptReport requireOwner(UserContext ctx, Long reportId) {
         RptReport report = requireReport(reportId);
-        if (!report.getOwnerId().equals(ctx.getUserId())) {
+        if (!java.util.Objects.equals(ctx.getTenantId(), report.getTenantId())
+                || !report.getOwnerId().equals(ctx.getUserId())) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         }
         return report;
@@ -448,6 +449,9 @@ public class ReportService {
 
     /** BR-05 结果权限隔离：所有者 / 订阅收件人 / 管理员可访问。 */
     private void requireAccess(UserContext ctx, RptReport report) {
+        if (!java.util.Objects.equals(ctx.getTenantId(), report.getTenantId())) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        }
         if (report.getOwnerId().equals(ctx.getUserId())) {
             return;
         }

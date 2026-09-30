@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  sql:
+    init:
+      mode: never
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/mysql
+    validate-on-migrate: true
+    clean-disabled: true
+
+hrchat:
+  security:
+    # 正式身份提供器将在 S1b 接入；在此之前 prod profile 会因缺少 oidc provider 而拒绝启动。
+    mode: oidc

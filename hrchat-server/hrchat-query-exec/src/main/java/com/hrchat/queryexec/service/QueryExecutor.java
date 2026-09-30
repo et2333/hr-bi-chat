@@ -1,5 +1,6 @@
 package com.hrchat.queryexec.service;
 
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.queryexec.model.QueryResult;
 
 /**
@@ -14,5 +15,5 @@ public interface QueryExecutor {
      * @param timeoutSeconds  超时控制（秒），超时抛异常
      * @return 查询结果
      */
-    QueryResult execute(String sql, int timeoutSeconds);
+    QueryResult execute(AuthorizedQuery query, int timeoutSeconds);
 }

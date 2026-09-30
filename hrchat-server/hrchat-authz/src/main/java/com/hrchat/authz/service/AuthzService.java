@@ -1,6 +1,7 @@
 package com.hrchat.authz.service;
 
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -118,6 +119,11 @@ public class AuthzService {
      */
     public String rewriteSql(String sql, UserContext ctx) {
         return sqlRewriteService.rewrite(sql, ctx);
+    }
+
+    /** 返回带绑定参数和权限指纹的结构化授权查询。 */
+    public AuthorizedQuery authorizeSql(String sql, UserContext ctx) {
+        return sqlRewriteService.authorize(sql, ctx);
     }
 
     /**

@@ -2,6 +2,8 @@ package com.hrchat.authz.service;
 
 import com.hrchat.authz.model.CurrentUser;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.identity.AuthenticatedIdentityProvider;
+import com.hrchat.authz.tenant.TrustedRequestContextInterceptor;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +23,7 @@ import static org.mockito.Mockito.when;
 class CurrentUserArgumentResolverTest {
 
     private final UserContextService userContextService = Mockito.mock(UserContextService.class);
+    private final AuthenticatedIdentityProvider identityProvider = Mockito.mock(AuthenticatedIdentityProvider.class);
     private CurrentUserArgumentResolver resolver;
 
     /** 测试控制器：带注解/不带注解的同形参方法，用于构造 MethodParameter。 */
@@ -34,7 +37,7 @@ class CurrentUserArgumentResolverTest {
 
     @BeforeEach
     void setUp() {
-        resolver = new CurrentUserArgumentResolver(userContextService, "hr01");
+        resolver = new CurrentUserArgumentResolver(userContextService, identityProvider);
     }
 
     private MethodParameter param(String method) throws NoSuchMethodException {
@@ -51,34 +54,47 @@ class CurrentUserArgumentResolverTest {
     void resolveArgument_usesHeaderUserNo() throws Exception {
         NativeWebRequest web = Mockito.mock(NativeWebRequest.class);
         when(web.getHeader(CurrentUserArgumentResolver.USER_NO_HEADER)).thenReturn("hr09");
+        when(identityProvider.resolveUserNo("hr09")).thenReturn("hr09");
         UserContext ctx = UserContext.builder().empNo("hr09").build();
-        when(userContextService.resolve("hr09")).thenReturn(ctx);
+        when(userContextService.resolve("hr09", null, null)).thenReturn(ctx);
 
         UserContext resolved = resolver.resolveArgument(param("handle"), null, web, null);
         assertThat(resolved).isSameAs(ctx);
-        verify(userContextService).resolve("hr09");
+        verify(userContextService).resolve("hr09", null, null);
     }
 
     @Test
     void resolveArgument_blankHeader_fallsBackToDefault() throws Exception {
         NativeWebRequest web = Mockito.mock(NativeWebRequest.class);
         when(web.getHeader(CurrentUserArgumentResolver.USER_NO_HEADER)).thenReturn("   ");
+        when(identityProvider.resolveUserNo("   ")).thenReturn("hr01");
         UserContext ctx = UserContext.builder().empNo("hr01").build();
-        when(userContextService.resolve("hr01")).thenReturn(ctx);
+        when(userContextService.resolve("hr01", null, null)).thenReturn(ctx);
 
         UserContext resolved = resolver.resolveArgument(param("handle"), null, web, null);
         assertThat(resolved).isSameAs(ctx);
-        verify(userContextService).resolve("hr01");
+        verify(userContextService).resolve("hr01", null, null);
     }
 
     @Test
     void resolveArgument_nullHeaderAndNoDefault_throwsAuthExpired() throws Exception {
-        CurrentUserArgumentResolver noDefault = new CurrentUserArgumentResolver(userContextService, "");
         NativeWebRequest web = Mockito.mock(NativeWebRequest.class);
         when(web.getHeader(CurrentUserArgumentResolver.USER_NO_HEADER)).thenReturn(null);
+        when(identityProvider.resolveUserNo(null)).thenThrow(new BizException(ErrorCode.AUTH_EXPIRED));
 
         BizException ex = assertThrows(BizException.class,
-                () -> noDefault.resolveArgument(param("handle"), null, web, null));
+                () -> resolver.resolveArgument(param("handle"), null, web, null));
         assertThat(ex.getErrorCode()).isEqualTo(ErrorCode.AUTH_EXPIRED);
+    }
+
+    @Test
+    void resolveArgument_reusesContextResolvedByInterceptor() throws Exception {
+        NativeWebRequest web = Mockito.mock(NativeWebRequest.class);
+        UserContext ctx = UserContext.builder().empNo("hr01").tenantId("t01").build();
+        when(web.getAttribute(TrustedRequestContextInterceptor.CURRENT_USER_ATTRIBUTE,
+                NativeWebRequest.SCOPE_REQUEST)).thenReturn(ctx);
+
+        assertThat(resolver.resolveArgument(param("handle"), null, web, null)).isSameAs(ctx);
+        Mockito.verifyNoInteractions(identityProvider, userContextService);
     }
 }

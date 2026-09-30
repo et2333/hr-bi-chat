@@ -18,6 +18,9 @@ import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -34,9 +37,8 @@ import java.util.Optional;
 /**
  * 用户权限上下文装配：三层裁决（功能 → 行级 → 字段级）的数据来源。
  *
- * <p>BR-12：上下文按工号缓存 5min，授权变更时经 {@link #evict(String)} 立即失效。</p>
- * <p>多租户：仅当请求显式携带 {@code X-Tenant-No}（{@link TenantContextHolder} 非空）时，
- * 校验用户租户一致性/租户启用状态，并按租户过滤组织树；无租户头 = 单租户兼容视图不校验。</p>
+ * <p>BR-12：上下文按可信租户和用户 id 缓存，授权变更时经 {@link #evict(String)} 立即失效。</p>
+ * <p>租户事实来自 {@code sec_user.tenant_id}；客户端租户头只能表达期望租户，不能扩大访问范围。</p>
  */
 @Slf4j
 @Service
@@ -48,6 +50,7 @@ public class UserContextService {
     private final SecOrgGrantMapper orgGrantMapper;
     private final SecFieldPolicyMapper fieldPolicyMapper;
     private final TenantMapper tenantMapper;
+    private final long cacheTtlMillis;
 
     /** 权限缓存（TTL 5min，BR-12） */
     private final Map<String, CacheEntry> cache = new java.util.concurrent.ConcurrentHashMap<>();
@@ -56,22 +59,31 @@ public class UserContextService {
     public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
                               SecUserRoleMapper userRoleMapper, SecOrgGrantMapper orgGrantMapper,
                               SecFieldPolicyMapper fieldPolicyMapper) {
-        this(userMapper, orgNodeMapper, userRoleMapper, orgGrantMapper, fieldPolicyMapper, null);
+        this(userMapper, orgNodeMapper, userRoleMapper, orgGrantMapper, fieldPolicyMapper, null, 300);
+    }
+
+    public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
+                              SecUserRoleMapper userRoleMapper, SecOrgGrantMapper orgGrantMapper,
+                              SecFieldPolicyMapper fieldPolicyMapper, TenantMapper tenantMapper) {
+        this(userMapper, orgNodeMapper, userRoleMapper, orgGrantMapper, fieldPolicyMapper, tenantMapper, 300);
     }
 
     @org.springframework.beans.factory.annotation.Autowired
     public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
                               SecUserRoleMapper userRoleMapper, SecOrgGrantMapper orgGrantMapper,
-                              SecFieldPolicyMapper fieldPolicyMapper, TenantMapper tenantMapper) {
+                              SecFieldPolicyMapper fieldPolicyMapper, TenantMapper tenantMapper,
+                              @Value("${hrchat.security.authz-cache-ttl-seconds:300}") long cacheTtlSeconds) {
         this.userMapper = userMapper;
         this.orgNodeMapper = orgNodeMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgGrantMapper = orgGrantMapper;
         this.fieldPolicyMapper = fieldPolicyMapper;
         this.tenantMapper = tenantMapper;
+        if (cacheTtlSeconds < 60 || cacheTtlSeconds > 300) {
+            throw new IllegalArgumentException("权限缓存 TTL 必须在 60～300 秒之间");
+        }
+        this.cacheTtlMillis = cacheTtlSeconds * 1000L;
     }
-
-    private static final long CACHE_TTL_MILLIS = 5 * 60 * 1000L;
 
     /**
      * 解析用户权限上下文（带 5min 缓存，BR-12）。
@@ -80,19 +92,35 @@ public class UserContextService {
      * @return 用户权限上下文
      */
     public UserContext resolve(String empNo) {
-        CacheEntry entry = cache.get(empNo);
+        return resolve(empNo, TenantContextHolder.get(), null);
+    }
+
+    /**
+     * 根据模拟/已认证身份解析可信用户与租户上下文。
+     *
+     * @param empNo 已由身份提供器解析的工号
+     * @param requestedTenant 客户端期望租户；普通用户只能等于所属租户
+     * @param switchReason 平台管理员跨租户原因
+     * @return 权限上下文
+     */
+    public UserContext resolve(String empNo, String requestedTenant, String switchReason) {
+        SecUser user = findEnabledUser(empNo);
+        List<SecUserRole> userRoles = userRoleMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecUserRole>()
+                        .eq(SecUserRole::getUserId, user.getId()));
+        List<String> roles = userRoles.stream().map(SecUserRole::getRoleCode).distinct().toList();
+        String activeTenant = resolveActiveTenant(user, roles, requestedTenant, switchReason);
+        validateTenantEnabled(activeTenant);
+
+        String cacheKey = activeTenant + ":" + user.getId();
+        CacheEntry entry = cache.get(cacheKey);
         long now = System.currentTimeMillis();
-        if (entry != null && now - entry.loadedAt < CACHE_TTL_MILLIS) {
-            String requestTenant = TenantContextHolder.get();
-            if (requestTenant != null && entry.tenantId() != null
-                    && !requestTenant.equals(entry.tenantId())) {
-                throw new BizException(ErrorCode.FUNC_FORBIDDEN);
-            }
+        if (entry != null && now - entry.loadedAt < cacheTtlMillis) {
             return entry.context();
         }
-        BuildOutcome outcome = build(empNo);
-        cache.put(empNo, new CacheEntry(outcome.context(), now, outcome.tenantId()));
-        return outcome.context();
+        UserContext context = build(user, userRoles, roles, activeTenant);
+        cache.put(cacheKey, new CacheEntry(context, now));
+        return context;
     }
 
     /**
@@ -101,57 +129,118 @@ public class UserContextService {
      * @param empNo 工号
      */
     public void evict(String empNo) {
-        cache.remove(empNo);
+        cache.entrySet().removeIf(entry -> empNo.equals(entry.getValue().context().getEmpNo()));
         log.info("权限缓存已失效: empNo={}", empNo);
     }
 
-    private BuildOutcome build(String empNo) {
+    /** 用户或其角色发生变化后，在当前事务成功提交后清理缓存。 */
+    public void evictAfterCommit(String empNo) {
+        afterCommit(() -> evict(empNo));
+    }
+
+    /** 角色的数据范围或字段策略变化后，清理所有持有该角色的已缓存用户。 */
+    public void evictRoleAfterCommit(String roleCode) {
+        afterCommit(() -> {
+            cache.entrySet().removeIf(entry -> entry.getValue().context().getRoles().contains(roleCode));
+            log.info("角色权限缓存已失效: roleCode={}", roleCode);
+        });
+    }
+
+    /** 租户启停后，清理该租户的全部已缓存用户。 */
+    public void evictTenantAfterCommit(String tenantId) {
+        afterCommit(() -> {
+            cache.entrySet().removeIf(entry -> tenantId.equals(entry.getValue().context().getTenantId()));
+            log.info("租户权限缓存已失效: tenantId={}", tenantId);
+        });
+    }
+
+    private static void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+            return;
+        }
+        action.run();
+    }
+
+    private SecUser findEnabledUser(String empNo) {
         SecUser user = userMapper.selectOne(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecUser>()
                         .eq(SecUser::getEmpNo, empNo));
-        if (user == null) {
+        if (user == null || (user.getStatus() != null && user.getStatus() == 0)) {
             throw new BizException(ErrorCode.AUTH_EXPIRED);
         }
-        String tenantId = user.getTenantId();
-        String requestTenant = TenantContextHolder.get();
-        if (requestTenant != null && tenantId != null) {
-            // ① 用户租户与请求租户不一致 → 拒绝（HRC-2002）
-            if (!requestTenant.equals(tenantId)) {
+        return user;
+    }
+
+    private String resolveActiveTenant(SecUser user, List<String> roles, String requestedTenant,
+                                       String switchReason) {
+        String ownTenant = normalize(user.getTenantId());
+        String expectedTenant = normalize(requestedTenant);
+        if (ownTenant == null) {
+            if (tenantMapper == null) {
+                ownTenant = expectedTenant == null ? "t01" : expectedTenant;
+            } else {
                 throw new BizException(ErrorCode.FUNC_FORBIDDEN);
             }
-            // ② 租户停用（status=0）→ 拒绝
-            if (tenantMapper != null) {
-                Tenant tenant = tenantMapper.selectOne(
-                        new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Tenant>()
-                                .eq(Tenant::getTenantCode, requestTenant)
-                                .last("LIMIT 1"));
-                if (tenant != null && tenant.getStatus() != null && tenant.getStatus() == 0) {
-                    throw new BizException(ErrorCode.FUNC_FORBIDDEN);
-                }
-            }
         }
-
-        List<SecUserRole> userRoles = userRoleMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecUserRole>()
-                        .eq(SecUserRole::getUserId, user.getId()));
-        List<String> roles = userRoles.stream().map(SecUserRole::getRoleCode).distinct().toList();
-
-        List<SecOrgGrant> grants = orgGrantMapper.selectList(
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecOrgGrant>()
-                        .eq(SecOrgGrant::getGranteeType, 1)
-                        .eq(SecOrgGrant::getGranteeId, empNo)
-                        .le(SecOrgGrant::getEffectiveAt, LocalDateTime.now())
-                        .and(w -> w.isNull(SecOrgGrant::getExpireAt)
-                                .or().gt(SecOrgGrant::getExpireAt, LocalDateTime.now())));
-        // ③ 显式租户请求时按租户过滤组织树（sec_org_node.tenant_id）
-        List<SecOrgNode> allNodes;
-        if (requestTenant != null && tenantId != null) {
-            allNodes = orgNodeMapper.selectList(
-                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecOrgNode>()
-                            .eq(SecOrgNode::getTenantId, requestTenant));
-        } else {
-            allNodes = orgNodeMapper.selectList(null);
+        if (expectedTenant == null || expectedTenant.equals(ownTenant)) {
+            return ownTenant;
         }
+        if (!roles.contains("ADMIN") || switchReason == null || switchReason.isBlank()) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        }
+        log.warn("SECURITY_TENANT_SWITCH user={} fromTenant={} toTenant={} reason={}",
+                user.getEmpNo(), ownTenant, expectedTenant, sanitizeReason(switchReason));
+        return expectedTenant;
+    }
+
+    private void validateTenantEnabled(String tenantId) {
+        if (tenantMapper == null) {
+            return;
+        }
+        Tenant tenant = tenantMapper.selectOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Tenant>()
+                        .eq(Tenant::getTenantCode, tenantId)
+                        .last("LIMIT 1"));
+        if (tenant == null || (tenant.getStatus() != null && tenant.getStatus() == 0)) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        }
+    }
+
+    private static String normalize(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static String sanitizeReason(String reason) {
+        return reason.trim().replaceAll("[\\r\\n\\t]", " ").substring(0, Math.min(reason.trim().length(), 128));
+    }
+
+    private UserContext build(SecUser user, List<SecUserRole> userRoles, List<String> roles,
+                              String tenantId) {
+        String empNo = user.getEmpNo();
+
+        var grantQuery = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecOrgGrant>()
+                .and(scope -> {
+                    scope.and(userGrant -> userGrant.eq(SecOrgGrant::getGranteeType, 1)
+                            .eq(SecOrgGrant::getGranteeId, empNo));
+                    if (!roles.isEmpty()) {
+                        scope.or(roleGrant -> roleGrant.eq(SecOrgGrant::getGranteeType, 2)
+                                .in(SecOrgGrant::getGranteeId, roles));
+                    }
+                })
+                .le(SecOrgGrant::getEffectiveAt, LocalDateTime.now())
+                .and(w -> w.isNull(SecOrgGrant::getExpireAt)
+                        .or().gt(SecOrgGrant::getExpireAt, LocalDateTime.now()));
+        List<SecOrgGrant> grants = orgGrantMapper.selectList(grantQuery);
+        List<SecOrgNode> allNodes = orgNodeMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<SecOrgNode>()
+                        .eq(SecOrgNode::getTenantId, tenantId));
 
         // 授权组织 → 含下级子树 id 集合（物化路径前缀匹配）
         List<UserContext.GrantedOrg> grantedOrgs = new ArrayList<>();
@@ -200,13 +289,14 @@ public class UserContextService {
                 .userId(user.getId())
                 .empNo(empNo)
                 .displayName(user.getDisplayName())
+                .tenantId(tenantId)
                 .roles(roles)
                 .dataLevel(maxDataLevel)
                 .grantedOrgs(grantedOrgs)
                 .fieldPolicyByField(fieldPolicies)
                 .build();
         ctx.setPermissionFingerprint(fingerprint(ctx));
-        return new BuildOutcome(ctx, tenantId);
+        return ctx;
     }
 
     /** 越权判断：更严格策略（数值更小）优先。 */
@@ -234,9 +324,11 @@ public class UserContextService {
         }
     }
 
-    /** 权限指纹：roles + 授权子树 + 字段策略 排序拼接后 SHA-256 前 16 位（BR-05）。 */
+    /** 权限指纹：租户 + 用户 + roles + 授权子树 + 字段策略排序后 SHA-256 前 16 位（BR-05）。 */
     private String fingerprint(UserContext ctx) {
         StringBuilder sb = new StringBuilder();
+        sb.append("t:").append(ctx.getTenantId()).append(';');
+        sb.append("u:").append(ctx.getUserId()).append(';');
         ctx.getRoles().stream().sorted().forEach(r -> sb.append("r:").append(r).append(';'));
         ctx.getGrantedOrgs().stream()
                 .sorted(Comparator.comparing(UserContext.GrantedOrg::getOrgPath))
@@ -262,10 +354,6 @@ public class UserContextService {
     }
 
     /** 缓存条目。 */
-    private record CacheEntry(UserContext context, long loadedAt, String tenantId) {
-    }
-
-    /** 装配结果（上下文 + 用户租户号，供缓存命中时做租户一致性校验）。 */
-    private record BuildOutcome(UserContext context, String tenantId) {
+    private record CacheEntry(UserContext context, long loadedAt) {
     }
 }

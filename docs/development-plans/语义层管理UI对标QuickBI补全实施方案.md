@@ -75,7 +75,7 @@
 
 `biz_dimension` 现无软删字段，**补字段后软删**（与指标一致的处理范式）：
 
-- DDL：`ALTER TABLE biz_dimension ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0`（同步写入 `schema-h2.sql`；实体 `BizDimension` 加 `isDeleted`）。
+- DDL：`ALTER TABLE biz_dimension ADD COLUMN is_deleted TINYINT(1) NOT NULL DEFAULT 0`（新增 H2/MySQL Flyway 版本迁移；实体 `BizDimension` 加 `isDeleted`）。
 - 新接口：`DELETE /api/v1/admin/semantic/dimensions/{dimensionId}`
 - 引用检查（任一命中即拒绝，返回命中类型与数量）：
   1. `biz_metric_dim`：被指标配置为可用维度；
@@ -199,7 +199,7 @@
 | biz_dimension | 加 `is_deleted TINYINT(1) NOT NULL DEFAULT 0` | 维度软删 |
 | biz_metric_version | 加 `submitted_at DATETIME(3) DEFAULT NULL` | 草稿/待审批区分 + 提交时间 |
 
-落点：`schema-h2.sql`（H2 local）、对应实体（`BizDimension`、`BizMetricVersion`）、受影响查询补条件。现有种子数据无需修改（新字段走默认值）。
+落点：H2/MySQL 新增 Flyway 版本迁移、对应实体（`BizDimension`、`BizMetricVersion`）、受影响查询补条件。现有种子数据无需修改（新字段走默认值）。
 
 ---
 

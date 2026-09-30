@@ -45,6 +45,7 @@
         <h2.version>2.2.224</h2.version>
         <maven-checkstyle-plugin.version>3.3.1</maven-checkstyle-plugin.version>
         <jacoco.version>0.8.12</jacoco.version>
+        <jsqlparser.version>4.9</jsqlparser.version>
         <!-- S8a 质量门禁：默认 LINE ≥70%，核心模块（authz/semantic/chat/query-exec）覆盖为 ≥80%；无测试模块 skip -->
         <jacoco.line.minimum>0.70</jacoco.line.minimum>
         <jacoco.check.skip>false</jacoco.check.skip>
@@ -66,6 +67,11 @@
                 <groupId>com.h2database</groupId>
                 <artifactId>h2</artifactId>
                 <version>${h2.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.jsqlparser</groupId>
+                <artifactId>jsqlparser</artifactId>
+                <version>${jsqlparser.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

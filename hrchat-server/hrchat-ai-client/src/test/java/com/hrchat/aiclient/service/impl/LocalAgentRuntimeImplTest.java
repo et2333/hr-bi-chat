@@ -10,6 +10,7 @@ import com.hrchat.api.chat.ClarifyAnswerRequest;
 import com.hrchat.api.sse.SseEvent;
 import com.hrchat.api.sse.SseEvents;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.service.SqlRewriteService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
@@ -69,6 +70,7 @@ class LocalAgentRuntimeImplTest {
                 queryExecService, synonymMapper, new ObjectMapper(), LocalDate.of(2026, 9, 28));
         hr01 = UserContext.builder()
                 .userId(1L).empNo("hr01").displayName("张雨晴")
+                .tenantId("t01")
                 .roles(List.of("HRBP")).dataLevel(1)
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
                         .orgNodeId(2L).orgCode("RD").orgName("研发中心").orgPath("/1/2/")
@@ -144,15 +146,15 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
                         List.of(Map.of("headcount", 18L)), 1));
 
         AgentResult result = runtime.ask(new AskRequest("研发中心在职人数", "STREAM", null), hr01);
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
+        String sql = sqlCaptor.getValue().sql();
         // 组织行级注入：研发中心（节点2）授权子树 2,3,4
         assertTrue(sql.contains("org_key IN (2, 3, 4)"), "SQL 应注入授权子树过滤: " + sql);
         assertTrue(sql.contains("emp_status = 1"), "应保留指标自身口径谓词: " + sql);
@@ -174,9 +176,9 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString()))
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class)))
                 .thenAnswer(inv -> {
-                    String sql = inv.getArgument(0);
+                    String sql = ((AuthorizedQuery) inv.getArgument(0)).sql();
                     // 主查询（2026-08）与环比上期（2026-07）区分：环比 SQL 含 "dt < '2026-08-01'"，
                     // 故用 "dt >= '2026-08-01'" 精确定位主查询
                     long value = sql.contains("dt >= '2026-08-01'") ? 3L : 0L;
@@ -186,9 +188,9 @@ class LocalAgentRuntimeImplTest {
 
         AgentResult result = runtime.ask(new AskRequest("上月入职了多少人？", "STREAM", null), hr01);
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.atLeast(1)).executeReadonly(sqlCaptor.capture());
-        List<String> sqls = sqlCaptor.getAllValues();
+        List<String> sqls = sqlCaptor.getAllValues().stream().map(AuthorizedQuery::sql).toList();
         assertTrue(sqls.stream().anyMatch(s -> s.contains("dt >= '2026-08-01' AND dt < '2026-09-01'")),
                 "上月窗口应映射 2026-08: " + sqls);
         assertTrue(sqls.stream().anyMatch(s -> s.contains("change_type = 1")));
@@ -218,7 +220,7 @@ class LocalAgentRuntimeImplTest {
         assertNull(first.payload());
 
         // 澄清选择「入职人数」续跑
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("hire_count", "hire_count", "int", false)),
                         List.of(Map.of("hire_count", 3L)), 1));
         AgentResult second = runtime.clarify(first.askId(), "上月离职人数和入职人数",
@@ -260,7 +262,7 @@ class LocalAgentRuntimeImplTest {
         AgentResult first = runtime.ask(new AskRequest("查看近三月趋势", "STREAM", null), hr01);
         ClarifyQuestion q = first.clarifyQuestions().get(0);
 
-        when(queryExecService.executeReadonly(anyString())).thenReturn(monthlyHireResult());
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(monthlyHireResult());
         AgentResult second = runtime.clarify(first.askId(), "查看近三月趋势",
                 new ClarifyAnswerRequest.Answer(q.questionId(), List.of("hire_count")), hr01);
 
@@ -285,13 +287,13 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(monthlyHireResult());
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(monthlyHireResult());
 
         AgentResult result = runtime.ask(new AskRequest("入职人数近三月趋势", "STREAM", null), hr01);
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
+        String sql = sqlCaptor.getValue().sql();
         assertTrue(sql.contains("GROUP BY FORMATDATETIME(dt, 'yyyy-MM')"), "应按月分组: " + sql);
         assertTrue(sql.contains("dt >= '2026-06-28' AND dt < '2026-09-29'"), "应注入近三月窗口: " + sql);
         assertTrue(sql.contains("change_type = 1"), "应保留指标自身口径: " + sql);
@@ -317,7 +319,7 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
                         List.of(Map.of("headcount", 18L)), 1));
 
@@ -336,7 +338,7 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(new QueryResult(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(new QueryResult(
                 List.of(new QueryResult.ColumnMeta("period", "period", "string", false),
                         new QueryResult.ColumnMeta("turnover_rate", "turnover_rate", "decimal", false)),
                 List.of(
@@ -416,15 +418,15 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("turnover_rate", "turnover_rate", "decimal", false)),
                         List.of(Map.of("turnover_rate", new java.math.BigDecimal("0.055600"))), 1));
 
         AgentResult result = runtime.ask(new AskRequest("研发中心离职率是多少", "STREAM", null), hr01);
 
-        ArgumentCaptor<String> sqlCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(sqlCaptor.capture());
-        String sql = sqlCaptor.getValue();
+        String sql = sqlCaptor.getValue().sql();
         assertTrue(sql.contains("CAST(") && sql.contains("AS DECIMAL(18,6)"),
                 "比率指标应转 DECIMAL 浮点除法: " + sql);
         assertTrue(sql.contains("NULLIF("), "应防除零: " + sql);
@@ -445,7 +447,7 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
                         List.of(Map.of("headcount", 18L)), 1));
 
@@ -467,7 +469,7 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
                         List.of(Map.of("headcount", 18L)), 1));
 
@@ -487,7 +489,7 @@ class LocalAgentRuntimeImplTest {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(anyString())).thenReturn(
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
                 new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
                         List.of(Map.of("headcount", 18L)), 1));
 

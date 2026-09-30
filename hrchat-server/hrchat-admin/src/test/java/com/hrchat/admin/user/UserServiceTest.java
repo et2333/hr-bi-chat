@@ -53,7 +53,8 @@ class UserServiceTest {
     void setUp() {
         service = new UserService(userMapper, userRoleMapper, roleMapper, orgNodeMapper,
                 userContextService, auditCollector, new ObjectMapper());
-        ctx = UserContext.builder().userId(1L).empNo("admin01").roles(List.of("ADMIN")).build();
+        ctx = UserContext.builder().userId(1L).empNo("admin01").tenantId("t01")
+                .roles(List.of("ADMIN")).build();
         TenantContextHolder.clear();
     }
 
@@ -78,6 +79,7 @@ class UserServiceTest {
         SecOrgNode n = new SecOrgNode();
         n.setId(id);
         n.setOrgName("研发中心");
+        n.setTenantId("t01");
         return n;
     }
 

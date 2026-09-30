@@ -140,15 +140,18 @@ public class SubscriptionPushService {
         if (report == null || Integer.valueOf(1).equals(report.getIsDeleted())) {
             return false;
         }
-        if (report.getOwnerId().equals(userId)) {
-            return true;
-        }
         SecUser user = secUserMapper.selectById(userId);
         if (user == null) {
             return false;
         }
-        UserContext receiverCtx = authzService.resolveContext(user.getEmpNo());
         try {
+            UserContext receiverCtx = authzService.resolveContext(user.getEmpNo());
+            if (!java.util.Objects.equals(receiverCtx.getTenantId(), report.getTenantId())) {
+                return false;
+            }
+            if (report.getOwnerId().equals(userId)) {
+                return true;
+            }
             authzService.checkFunc(receiverCtx, "report:view");
             return true;
         } catch (BizException e) {

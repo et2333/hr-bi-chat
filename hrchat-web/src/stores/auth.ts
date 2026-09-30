@@ -1,8 +1,8 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { TENANT_NO_KEY, USER_NO_KEY } from '@/api/http'
+import { TENANT_NO_KEY, TENANT_SWITCH_REASON_KEY, USER_NO_KEY } from '@/api/http'
 
-/** 本地演示模式可用身份（对齐 data-h2.sql mock 用户矩阵） */
+/** 本地演示模式可用身份（对齐 Flyway V2 demo seed 的 mock 用户矩阵） */
 export interface MockUser {
   empNo: string
   name: string
@@ -49,6 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
     const target = MOCK_USERS.find((u) => u.empNo === userNo)
     // 关键：切回普通身份必须复位租户，否则上一次租户管理员（t02）的租户会残留并污染后续请求
     localStorage.setItem(TENANT_NO_KEY, target?.tenant ?? 't01')
+    sessionStorage.removeItem(TENANT_SWITCH_REASON_KEY)
   }
 
   return { empNo, currentUser, MOCK_USERS, switchUser }

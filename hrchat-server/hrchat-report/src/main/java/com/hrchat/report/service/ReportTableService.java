@@ -68,7 +68,7 @@ public class ReportTableService {
             String sql = agg.ratio()
                     ? chartService.buildRatioSql(metric, def.dim(), agg)
                     : chartService.buildDirectSql(metric, def.dim(), agg);
-            QueryResult result = queryExecService.executeReadonly(authzService.rewriteSql(sql, ctx));
+            QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
             merge(result, metric.code(), merged);
         }
         List<Map<String, Object>> rows = new ArrayList<>(merged.values());
@@ -113,7 +113,7 @@ public class ReportTableService {
         String sql = agg.ratio()
                 ? chartService.buildRatioSql(first, def.dim(), agg)
                 : chartService.buildDirectSql(first, def.dim(), agg);
-        QueryResult result = queryExecService.executeReadonly(authzService.rewriteSql(sql, ctx));
+        QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
         Set<String> values = new LinkedHashSet<>();
         for (Map<String, Object> row : result.rows()) {
             Object v = row.get("dim_value");

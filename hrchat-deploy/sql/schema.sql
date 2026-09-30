@@ -1,6 +1,6 @@
 -- =====================================================================
 -- HR智能问数 MySQL 业务库 hrchat_meta 建表脚本（生产版，DB-HRCHATBI-001）
--- 与 schema-h2.sql（H2 本地）结构一致；Doris 数仓表不在此脚本（见部署手册）
+-- Flyway MySQL V1 baseline 的部署侧快照；后续变更只新增版本迁移，不回改已发布 baseline。
 -- 通用列：id/created_at/created_by/updated_at/updated_by/is_deleted
 -- =====================================================================
 CREATE DATABASE IF NOT EXISTS hrchat_meta DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS sec_org_node (
 
 CREATE TABLE IF NOT EXISTS sec_role (
   id       BIGINT UNSIGNED AUTO_INCREMENT,
-  role_code VARCHAR(64) NOT NULL COMMENT 'HRBP/HRD/CHO/PAYROLL/ADMIN/DATA_ADMIN',
+  role_code VARCHAR(64) NOT NULL COMMENT 'HRBP/HRD/CHO/PAYROLL/ADMIN/TENANT_ADMIN/DATA_ADMIN',
   role_name VARCHAR(64) NOT NULL,
   data_level TINYINT NOT NULL DEFAULT 1 COMMENT '数据层级:1明细受限 2部门汇总 3全局汇总',
   PRIMARY KEY (id), UNIQUE KEY uk_role_code (role_code)
@@ -236,6 +236,29 @@ CREATE TABLE IF NOT EXISTS cht_answer (
   UNIQUE KEY uk_turn (turn_id),
   KEY idx_state (answer_state)
 ) ENGINE=InnoDB COMMENT='答案(明细不落库,大结果走MinIO)';
+
+CREATE TABLE IF NOT EXISTS sys_idempotency_record (
+  id               BIGINT UNSIGNED AUTO_INCREMENT,
+  scope_key        CHAR(64) NOT NULL COMMENT '租户/用户/接口/资源/幂等键作用域摘要',
+  tenant_id        VARCHAR(16) NOT NULL,
+  user_id          BIGINT UNSIGNED NOT NULL,
+  endpoint         VARCHAR(192) NOT NULL,
+  resource_id      VARCHAR(128) NOT NULL,
+  idempotency_key  VARCHAR(128) NOT NULL,
+  request_hash     CHAR(64) NOT NULL,
+  status           VARCHAR(24) NOT NULL COMMENT 'PROCESSING/COMPLETED/FAILED_FINAL/FAILED_RETRYABLE',
+  result_ref       VARCHAR(128) DEFAULT NULL,
+  response_code    VARCHAR(64) DEFAULT NULL,
+  response_body    LONGTEXT DEFAULT NULL,
+  attempt_count    INT NOT NULL DEFAULT 1,
+  retry_after      DATETIME(3) DEFAULT NULL,
+  expires_at       DATETIME(3) NOT NULL,
+  created_at       DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at       DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_idempotency_scope (scope_key),
+  KEY idx_idempotency_expire (expires_at)
+) ENGINE=InnoDB COMMENT='创建类接口幂等事实记录';
 
 CREATE TABLE IF NOT EXISTS cht_clarify (
   id          BIGINT UNSIGNED AUTO_INCREMENT,
@@ -453,6 +476,7 @@ CREATE TABLE IF NOT EXISTS rpt_export_task (
   id           BIGINT UNSIGNED AUTO_INCREMENT,
   export_id    VARCHAR(64) NOT NULL COMMENT '导出ID（exp_+UUID短码，唯一）',
   report_id    BIGINT UNSIGNED NOT NULL COMMENT 'FK→rpt_report.id',
+  tenant_id    VARCHAR(16) NOT NULL COMMENT '任务所属租户',
   owner_emp_no VARCHAR(64) DEFAULT NULL COMMENT '任务发起人工号',
   format       VARCHAR(8)  DEFAULT NULL COMMENT 'CSV/XLSX/PDF',
   status       VARCHAR(16) DEFAULT 'PENDING' COMMENT 'PENDING/COMPLETED/FAILED',
@@ -462,7 +486,7 @@ CREATE TABLE IF NOT EXISTS rpt_export_task (
   created_at   DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_export_id (export_id),
-  KEY idx_export_owner (owner_emp_no, created_at)
+  KEY idx_export_tenant_owner (tenant_id, owner_emp_no, created_at)
 ) ENGINE=InnoDB COMMENT='报表导出任务';
 
 -- ---------------- 系统设置 t_sys_setting（P1：键值配置，系统默认 LLM 档位/模拟部署开关） ----------------

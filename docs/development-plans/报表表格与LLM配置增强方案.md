@@ -49,7 +49,7 @@
 
 ### DDL 与 Java
 
-- **schema-h2.sql** `llm_model_config` 加 4 列：`top_p DECIMAL(4,2) DEFAULT NULL`、`timeout_seconds INT DEFAULT 30`、`description VARCHAR(255) DEFAULT NULL`、`system_prompt TEXT`；**hrchat-deploy/sql/schema.sql** 生产版同步。
+- 相关结构已固化在 Flyway H2/MySQL V1 baseline：`llm_model_config` 含 `top_p`、`timeout_seconds`、`description`、`system_prompt`；后续变更新增版本迁移。
 - **LlmModelConfig.java**：加 `topP/top_p`(BigDecimal)、`timeoutSeconds`(Integer)、`description`(String)、`systemPrompt`(String)。
 - **LlmViews.java** CreateRequest/DetailView 加 4 字段；**LlmConfigService** create/patch：新字段落库、校验（topP∈[0,1]、timeoutSeconds≥1 越界抛 PARAM_INVALID）、patch 保持"空字段不覆盖"语义；**LlmDeployService** 部署/回滚 payload 透传 topP/timeoutSeconds/systemPrompt（description 仅存库不发运行时）。
 
@@ -91,4 +91,4 @@
 
 - 复用：`ReportChartService.java`（def 解析/聚合/改写链）、`ChartViews.java`、`QueryExecService`/`JdbcQueryExecutor`
 - 新增：`ReportTableService.java`、`ReportTableServiceTest.java`
-- 修改：`ChartController.java`、`detail.vue`、`api/reports.ts`、`schema-h2.sql`、`hrchat-deploy/sql/schema.sql`、`LlmModelConfig.java`、`LlmViews.java`、`LlmConfigService.java`、`LlmDeployService.java`、`app.py`、`mock_llm.py`、`openai_client.py`、`llm.ts`、`views/admin/llm/index.vue` 及对应测试
+- 修改：`ChartController.java`、`detail.vue`、`api/reports.ts`、Flyway H2/MySQL baseline、`LlmModelConfig.java`、`LlmViews.java`、`LlmConfigService.java`、`LlmDeployService.java`、`app.py`、`mock_llm.py`、`openai_client.py`、`llm.ts`、`views/admin/llm/index.vue` 及对应测试

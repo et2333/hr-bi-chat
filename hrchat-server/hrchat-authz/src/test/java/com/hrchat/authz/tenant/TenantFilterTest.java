@@ -21,9 +21,9 @@ class TenantFilterTest {
     }
 
     @Test
-    void headerPresent_injectsTenantAndClearsAfterChain() throws Exception {
+    void headerPresent_isIgnoredAndContextClearedAfterChain() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader(TenantFilter.TENANT_HEADER, "t02");
+        request.addHeader(TrustedRequestContextInterceptor.TENANT_HEADER, "t02");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -34,15 +34,15 @@ class TenantFilterTest {
     }
 
     @Test
-    void headerPresent_injectsTenantDuringChain() throws Exception {
+    void headerPresent_doesNotInjectDuringChain() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader(TenantFilter.TENANT_HEADER, " t02 ");
+        request.addHeader(TrustedRequestContextInterceptor.TENANT_HEADER, " t02 ");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain() {
             @Override
             public void doFilter(jakarta.servlet.ServletRequest request,
                                  jakarta.servlet.ServletResponse response) {
-                assertThat(TenantContextHolder.get()).isEqualTo("t02");
+                assertThat(TenantContextHolder.get()).isNull();
             }
         };
 
@@ -64,7 +64,7 @@ class TenantFilterTest {
     @Test
     void blankHeader_doesNotInject() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest();
-        request.addHeader(TenantFilter.TENANT_HEADER, "   ");
+        request.addHeader(TrustedRequestContextInterceptor.TENANT_HEADER, "   ");
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 

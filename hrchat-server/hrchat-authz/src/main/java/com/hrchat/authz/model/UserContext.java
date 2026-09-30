@@ -24,6 +24,9 @@ public class UserContext {
     /** 姓名 */
     private String displayName;
 
+    /** 当前请求经服务端裁决后的可信租户编码 */
+    private String tenantId;
+
     /** 角色编码列表 */
     private List<String> roles;
 

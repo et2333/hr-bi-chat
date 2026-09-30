@@ -90,6 +90,6 @@ public class AuthzAdminController {
     public ApiResponse<AdminViews.EffectivePermissionsView> effectivePermissions(
             @PathVariable Long userId, @CurrentUser UserContext ctx) {
         authzService.checkFunc(ctx, RoleService.PERM_MANAGE);
-        return ApiResponse.ok(roleService.effectivePermissions(userId));
+        return ApiResponse.ok(roleService.effectivePermissions(userId, ctx));
     }
 }
