@@ -217,7 +217,7 @@ import type {
   MetricVersionStatus,
 } from '@/api/semantic'
 import { useAuthStore } from '@/stores/auth'
-import { hasPerm, menuPermsOf } from '@/layouts/adminMenu'
+import { hasPerm } from '@/layouts/adminMenu'
 import MetricEditorModal from './MetricEditorModal.vue'
 import VersionDiffModal from './VersionDiffModal.vue'
 
@@ -236,7 +236,7 @@ function domainLabel(value: string): string {
 
 // ---------------- 权限 ----------------
 const auth = useAuthStore()
-const perms = computed(() => menuPermsOf(auth.currentUser.role))
+const perms = computed(() => auth.functionPerms)
 const canApprove = computed(() => hasPerm(perms.value, 'admin:semantic:approve'))
 
 // ---------------- 列表 ----------------

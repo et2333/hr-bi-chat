@@ -1,5 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { get } from '@/api/http'
+import type { ApiResponse } from '@/api/types'
 import { TENANT_NO_KEY, TENANT_SWITCH_REASON_KEY, USER_NO_KEY } from '@/api/http'
 
 /** 本地演示模式可用身份（对齐 Flyway V2 demo seed 的 mock 用户矩阵） */
@@ -42,8 +44,35 @@ export const useAuthStore = defineStore('auth', () => {
     () => MOCK_USERS.find((u) => u.empNo === empNo.value) ?? { empNo: empNo.value, name: empNo.value, role: '-' },
   )
 
+  const functionPerms = ref<string[]>([])
+  const roles = ref<string[]>([])
+  let requestVersion = 0
+  const identityKey = () => [empNo.value, localStorage.getItem(TENANT_NO_KEY),
+    sessionStorage.getItem(TENANT_SWITCH_REASON_KEY)].join('|')
+
+  async function refreshPermissions() {
+    const version = ++requestVersion
+    const identity = identityKey()
+    try {
+      const response = await get<ApiResponse<{ roles: string[]; functionPerms: string[] }>>('/me/permissions')
+      if (version === requestVersion && identity === identityKey()) {
+        functionPerms.value = response.data.functionPerms
+        roles.value = response.data.roles
+      }
+    } catch (error) {
+      if (version === requestVersion && identity === identityKey()) {
+        functionPerms.value = []
+        roles.value = []
+      }
+      throw error
+    }
+  }
+
   /** 切换身份（持久化并全局生效；租户管理员身份同步切换其租户上下文，普通身份复位为默认租户 t01） */
   function switchUser(userNo: string) {
+    ++requestVersion
+    functionPerms.value = []
+    roles.value = []
     empNo.value = userNo
     localStorage.setItem(USER_NO_KEY, userNo)
     const target = MOCK_USERS.find((u) => u.empNo === userNo)
@@ -52,5 +81,5 @@ export const useAuthStore = defineStore('auth', () => {
     sessionStorage.removeItem(TENANT_SWITCH_REASON_KEY)
   }
 
-  return { empNo, currentUser, MOCK_USERS, switchUser }
+  return { empNo, currentUser, MOCK_USERS, switchUser, functionPerms, roles, refreshPermissions }
 })

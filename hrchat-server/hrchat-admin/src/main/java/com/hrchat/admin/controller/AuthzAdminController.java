@@ -34,6 +34,12 @@ public class AuthzAdminController {
     private final RoleService roleService;
     private final AuthzService authzService;
 
+    @GetMapping("/permission-catalog")
+    public ApiResponse<java.util.List<String>> permissionCatalog(@CurrentUser UserContext ctx) {
+        authzService.checkFunc(ctx, RoleService.PERM_MANAGE);
+        return ApiResponse.ok(com.hrchat.authz.service.PermissionCatalog.CODES);
+    }
+
     @Operation(summary = "角色列表（含功能权限）")
     @GetMapping("/roles")
     public ApiResponse<PageResult<AdminViews.RoleView>> listRoles(

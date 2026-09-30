@@ -9,7 +9,7 @@
 - C 端报表本轮实现：TABLE 数据表格（筛选/排序/分页）、图表类型一键切换、AI 洞察解读、图表下钻。
 
 已核实现状（可复用）：
-- 后端已具备：RoleService 角色 CRUD（admin:authz:manage）、UserAdminController（admin:user:manage）、TenantAdminController（admin:tenant:manage，含 usage）、LlmAdminController、审计 Tab（admin/index.vue）、AuthzService.FUNC_PERMISSION 硬编码角色→功能码（ADMIN 含 admin:*）。
+- 后端已具备：RoleService 角色 CRUD（admin:authz:manage）、UserAdminController（admin:user:manage）、TenantAdminController（admin:tenant:manage，含 usage）、LlmAdminController、审计 Tab（admin/index.vue）。功能授权已统一为 `sec_role_permission`，默认角色授权由 Flyway V3 初始化。
 - 前端：路由 /admin、/admin/llm|users|tenants 已存在；App.vue 顶部导航聚合管理入口（非独立侧边栏）；auth store 无超管/租户管理员区分。
 - 租户机制：TenantContextHolder（显式 X-Tenant-No 才注入）+ 业务查询 tenant_id 谓词；前端 http.ts 自动带 X-Tenant-No。
 - LLM 配置当前全局单例（llm_model_config 无 tenant_id；Python _runtime 全局）；Python 仅 config/chat 端点。
@@ -51,7 +51,7 @@
 - **前端** llm 页：顶部提示"配置按当前租户生效（{tenant}）"；列表/部署已自动带 X-Tenant-No。
 
 ### 2. 超管/租户管理员两级
-- AuthzService.FUNC_PERMISSION 新增角色 `TENANT_ADMIN` → `{admin:user:manage, admin:llm:manage, admin:audit:view, report:view}`（不含 admin:tenant:*、admin:authz:*、admin:system:*）。
+- `TENANT_ADMIN` 默认授权已在 Flyway V3 落表：`chat:ask、report:view、admin:view、admin:user:manage、admin:llm:view、admin:llm:manage、admin:audit:read`；不含平台租户管理、角色授权管理和系统管理权限。
 - 超管 `ADMIN` 保持 `admin:*`。租户管理员新建用户/LLM 配置自动归属本租户（已有 tenant_id 谓词 + 新写入逻辑）。
 - Flyway V2 demo seed：t02 新增租户管理员用户（如 `t02adm01`/TENANT_ADMIN/org 归属 t02）。
 - 管理端前端：顶栏展示当前管理员角色；租户管理员不显示租户管理/角色权限/系统设置菜单（按权限码过滤菜单）。

@@ -1,5 +1,5 @@
 /**
- * 管理后台菜单定义与前端权限映射（对齐后端 FUNC_PERMISSION 语义的前端映射）。
+ * 管理后台菜单与所需功能码；用户授权由后端返回，不在前端按角色推导。
  * AdminLayout（侧边菜单）与 App.vue（管理入口按钮）共用。
  */
 
@@ -25,27 +25,12 @@ export const ADMIN_MENUS: AdminMenuItem[] = [
   { key: 'eval', path: '/admin/eval', title: '问句评测', requiredPerm: 'admin:eval:manage' },
 ]
 
-/** 角色 → 功能权限码（前端映射后端 FUNC_PERMISSION 语义） */
-export function menuPermsOf(role: string): string[] {
-  switch (role) {
-    case 'ADMIN':
-      return ['*']
-    case 'TENANT_ADMIN':
-      return ['admin:view', 'admin:user:manage', 'admin:llm:manage', 'admin:audit:read']
-    case 'DATA_ADMIN':
-      return ['admin:view', 'admin:semantic', 'admin:audit:read', 'admin:data:read']
-    default:
-      return []
-  }
-}
-
 /** 权限匹配：支持 '*' 全量通配与 'xxx:*' 前缀通配 */
 export function hasPerm(perms: string[], required: string): boolean {
   if (!required) return true
-  if (perms.includes('*')) return true
   return perms.some((p) => {
     if (p === required) return true
-    if (p.endsWith(':*') && required.startsWith(p.slice(0, -2))) return true
+    if (p.endsWith(':*') && required.startsWith(p.slice(0, -1))) return true
     return false
   })
 }

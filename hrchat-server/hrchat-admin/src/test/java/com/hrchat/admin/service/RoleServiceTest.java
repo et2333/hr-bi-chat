@@ -59,11 +59,14 @@ class RoleServiceTest {
     @Mock
     private AuditCollector auditCollector;
 
+    @Mock
+    private com.hrchat.authz.service.RolePermissionService rolePermissionService;
+
     private RoleService service;
 
     @BeforeEach
     void setUp() {
-        service = new RoleService(roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
+        service = new RoleService(rolePermissionService, roleMapper, orgGrantMapper, fieldPolicyMapper, secUserMapper,
                 orgNodeMapper, authzService, userContextService, auditCollector, new ObjectMapper());
     }
 
@@ -125,6 +128,7 @@ class RoleServiceTest {
         UserContext ctx = UserContext.builder()
                 .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP"))
                 .tenantId("t01")
+                .functionPerms(List.of("chat:ask", "report:view", "report:create"))
                 .dataLevel(1)
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
                         .orgNodeId(35L).orgCode("rd").orgName("研发中心")

@@ -1,4 +1,4 @@
-import { get, post, del as deleteReq } from './http'
+import { get, post, patch, del as deleteReq } from './http'
 import type {
   ApiResponse,
   AuditLog,
@@ -103,3 +103,11 @@ export function effectivePermissions(userId: number) {
 }
 
 export { deleteReq as delete }
+
+export function permissionCatalog() {
+  return get<ApiResponse<string[]>>('/admin/authz/permission-catalog')
+}
+
+export function patchRole(roleId: number, body: RoleCreateRequest) {
+  return patch<ApiResponse<void>>(`/admin/authz/roles/${roleId}`, body)
+}

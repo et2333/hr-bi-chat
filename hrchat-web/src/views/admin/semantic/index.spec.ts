@@ -34,6 +34,7 @@ vi.mock('@/api/http', () => ({
 const roleState = vi.hoisted(() => ({ role: 'ADMIN', empNo: 'adm01' }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
+    functionPerms: roleState.role === 'ADMIN' ? ['admin:*'] : ['admin:semantic'],
     currentUser: { empNo: roleState.empNo, name: '用户', role: roleState.role },
   }),
 }))

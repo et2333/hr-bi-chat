@@ -50,11 +50,11 @@ import DimensionPanel from './DimensionPanel.vue'
 import ApprovalTodoPanel from './ApprovalTodoPanel.vue'
 import SynonymPanel from './SynonymPanel.vue'
 import { useAuthStore } from '@/stores/auth'
-import { hasPerm, menuPermsOf } from '@/layouts/adminMenu'
+import { hasPerm } from '@/layouts/adminMenu'
 
 const auth = useAuthStore()
 const canApprove = computed(() =>
-  hasPerm(menuPermsOf(auth.currentUser.role), 'admin:semantic:approve'))
+  hasPerm(auth.functionPerms, 'admin:semantic:approve'))
 
 const activeTab = ref('metric')
 /** 已访问过的 Tab：切走后保留组件状态（避免来回切换重复加载） */

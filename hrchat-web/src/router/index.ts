@@ -2,7 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { useAuthStore } from '@/stores/auth'
-import { hasPerm, menuPermsOf } from '@/layouts/adminMenu'
+import { hasPerm } from '@/layouts/adminMenu'
 
 declare module 'vue-router' {
   interface RouteMeta {
@@ -122,11 +122,16 @@ const router = createRouter({
 })
 
 // 全局权限守卫：目标路由声明了 meta.permission 且当前角色无权限时，回到 C 端并提示。
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const required = to.meta.permission
-  if (!required) return true
   const auth = useAuthStore()
-  const perms = menuPermsOf(auth.currentUser.role)
+  try {
+    await auth.refreshPermissions()
+  } catch {
+    if (required) return { path: '/chat' }
+  }
+  if (!required) return true
+  const perms = auth.functionPerms
   if (!hasPerm(perms, required)) {
     message.warning('当前身份无权限访问该页面')
     return { path: '/chat' }

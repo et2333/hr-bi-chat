@@ -21,6 +21,7 @@
           </div>
         </template>
         <template #bodyCell="{ column, record }">
+          <template v-if="column.key === 'actions'"><a-button type="link" size="small" @click="openEdit(record)">编辑</a-button></template>
           <template v-if="column.key === 'dataLevel'">L{{ record.dataLevel }}</template>
         </template>
       </a-table>
@@ -51,10 +52,10 @@
     </a-card>
 
     <!-- 新建角色 Modal -->
-    <a-modal v-model:open="modalOpen" title="新建角色" :confirm-loading="saving" @ok="submitModal">
+    <a-modal v-model:open="modalOpen" :title="editingId === null ? '新建角色' : '编辑角色'" :confirm-loading="saving" @ok="submitModal">
       <a-form ref="formRef" :model="form" :rules="rules" :label-col="{ span: 6 }" :wrapper-col="{ span: 18 }">
         <a-form-item label="角色编码" name="roleCode">
-          <a-input v-model:value="form.roleCode" placeholder="如 DATA_ANALYST" />
+          <a-input v-model:value="form.roleCode" :disabled="editingId !== null" placeholder="如 DATA_ANALYST" />
         </a-form-item>
         <a-form-item label="角色名称" name="roleName">
           <a-input v-model:value="form.roleName" placeholder="如 数据分析员" />
@@ -76,21 +77,14 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { FormInstance } from 'ant-design-vue'
 import { message } from 'ant-design-vue'
+import { useAuthStore } from '@/stores/auth'
 import { adminApi } from '@/api'
 import type { EffectivePermissions, RoleView } from '@/api/types'
 
 /** 可选功能权限码（对齐菜单 required-perm 与路由 meta.permission） */
-const PERM_OPTIONS = [
-  'admin:view',
-  'admin:tenant:manage',
-  'admin:user:manage',
-  'admin:authz:manage',
-  'admin:llm:manage',
-  'admin:audit:read',
-  'admin:system:manage',
-  'admin:data:read',
-  'admin:eval:manage',
-]
+const PERM_OPTIONS = ref<string[]>([])
+const auth = useAuthStore()
+const editingId = ref<number | null>(null)
 
 // ---------------- 角色列表 ----------------
 const roles = ref<RoleView[]>([])
@@ -105,6 +99,7 @@ const roleColumns = [
   { title: '编码', key: 'roleCode', dataIndex: 'roleCode', width: 160 },
   { title: '名称', key: 'roleName', dataIndex: 'roleName' },
   { title: '数据级别', key: 'dataLevel', width: 90 },
+  { title: '操作', key: 'actions', width: 90 },
 ]
 
 // ---------------- 新建角色 ----------------
@@ -126,7 +121,14 @@ const rules = {
   dataLevel: [{ required: true, message: '请填写数据级别', trigger: 'change' }],
 }
 
+function openEdit(role: RoleView) {
+  editingId.value = role.roleId
+  Object.assign(form, { ...role, functionPerms: [...role.functionPerms] })
+  modalOpen.value = true
+}
+
 function openCreate() {
+  editingId.value = null
   Object.assign(form, { roleCode: '', roleName: '', dataLevel: undefined, functionPerms: [] })
   formRef.value?.clearValidate()
   modalOpen.value = true
@@ -140,17 +142,20 @@ async function submitModal() {
   }
   saving.value = true
   try {
-    await adminApi.createRole({
+    const body = {
       roleCode: form.roleCode.trim(),
       roleName: form.roleName.trim(),
       dataLevel: form.dataLevel ?? 1,
       functionPerms: form.functionPerms,
-    })
-    message.success('角色已创建')
+    }
+    if (editingId.value === null) await adminApi.createRole(body)
+    else await adminApi.patchRole(editingId.value, body)
+    await auth.refreshPermissions()
+    message.success('角色已保存')
     modalOpen.value = false
     await loadRoles()
   } catch (e) {
-    message.error(e instanceof Error ? e.message : '创建失败')
+    message.error(e instanceof Error ? e.message : '保存失败')
   } finally {
     saving.value = false
   }
@@ -199,7 +204,11 @@ function formatDateTime(iso: string): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-onMounted(loadRoles)
+onMounted(() => {
+  void loadRoles()
+  void adminApi.permissionCatalog().then(res => { PERM_OPTIONS.value = res.data })
+    .catch(() => { message.error('加载权限目录失败') })
+})
 </script>
 
 <style scoped>

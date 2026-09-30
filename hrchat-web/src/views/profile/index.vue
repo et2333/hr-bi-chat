@@ -53,9 +53,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { adminApi } from '@/api'
-import type { EffectivePermissions } from '@/api/types'
+import { onMounted, ref } from 'vue'
+import { get } from '@/api/http'
+import type { ApiResponse, EffectivePermissions } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
@@ -63,23 +63,14 @@ const selectedUser = ref(auth.empNo)
 const perms = ref<EffectivePermissions | null>(null)
 const loading = ref(true)
 
-/** 本地 mock 用户 ID 与后端 sec_user.id 对齐（数组顺序 +1） */
-const userId = computed(() => {
-  const idx = auth.MOCK_USERS.findIndex((u) => u.empNo === auth.empNo)
-  return idx >= 0 ? idx + 1 : 0
-})
-
 onMounted(loadPerms)
 
 async function loadPerms() {
   loading.value = true
   perms.value = null
-  if (userId.value <= 0) {
-    loading.value = false
-    return
-  }
+
   try {
-    const res = await adminApi.effectivePermissions(userId.value)
+    const res = await get<ApiResponse<EffectivePermissions>>('/me/permissions')
     perms.value = res.data
   } catch {
     perms.value = null

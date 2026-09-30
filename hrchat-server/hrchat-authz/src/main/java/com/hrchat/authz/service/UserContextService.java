@@ -52,8 +52,16 @@ public class UserContextService {
     private final TenantMapper tenantMapper;
     private final long cacheTtlMillis;
 
+    private final RolePermissionService rolePermissionService;
+
+    public List<String> functionPermsOf(List<String> roles) {
+        return rolePermissionService == null ? List.of() : rolePermissionService.forRoles(roles);
+    }
+
     /** 权限缓存（TTL 5min，BR-12） */
     private final Map<String, CacheEntry> cache = new java.util.concurrent.ConcurrentHashMap<>();
+    // 防止撤权期间仍在构建的旧快照重新写回缓存。
+    private final java.util.concurrent.atomic.AtomicLong cacheGeneration = new java.util.concurrent.atomic.AtomicLong();
 
     /** 兼容旧构造（无租户 Mapper，单测/单租户使用；租户校验跳过）。 */
     public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
@@ -68,17 +76,27 @@ public class UserContextService {
         this(userMapper, orgNodeMapper, userRoleMapper, orgGrantMapper, fieldPolicyMapper, tenantMapper, 300);
     }
 
+    public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
+                              SecUserRoleMapper userRoleMapper, SecOrgGrantMapper orgGrantMapper,
+                              SecFieldPolicyMapper fieldPolicyMapper, TenantMapper tenantMapper,
+                              long cacheTtlSeconds) {
+        this(userMapper, orgNodeMapper, userRoleMapper, orgGrantMapper, fieldPolicyMapper,
+                tenantMapper, cacheTtlSeconds, null);
+    }
+
     @org.springframework.beans.factory.annotation.Autowired
     public UserContextService(SecUserMapper userMapper, SecOrgNodeMapper orgNodeMapper,
                               SecUserRoleMapper userRoleMapper, SecOrgGrantMapper orgGrantMapper,
                               SecFieldPolicyMapper fieldPolicyMapper, TenantMapper tenantMapper,
-                              @Value("${hrchat.security.authz-cache-ttl-seconds:300}") long cacheTtlSeconds) {
+                              @Value("${hrchat.security.authz-cache-ttl-seconds:300}") long cacheTtlSeconds,
+                              RolePermissionService rolePermissionService) {
         this.userMapper = userMapper;
         this.orgNodeMapper = orgNodeMapper;
         this.userRoleMapper = userRoleMapper;
         this.orgGrantMapper = orgGrantMapper;
         this.fieldPolicyMapper = fieldPolicyMapper;
         this.tenantMapper = tenantMapper;
+        this.rolePermissionService = rolePermissionService;
         if (cacheTtlSeconds < 60 || cacheTtlSeconds > 300) {
             throw new IllegalArgumentException("权限缓存 TTL 必须在 60～300 秒之间");
         }
@@ -113,13 +131,15 @@ public class UserContextService {
         validateTenantEnabled(activeTenant);
 
         String cacheKey = activeTenant + ":" + user.getId();
+        long generation = cacheGeneration.get();
         CacheEntry entry = cache.get(cacheKey);
         long now = System.currentTimeMillis();
-        if (entry != null && now - entry.loadedAt < cacheTtlMillis) {
+        if (entry != null && entry.generation() == generation && now - entry.loadedAt < cacheTtlMillis
+                && entry.context().getRoles().equals(roles)) {
             return entry.context();
         }
         UserContext context = build(user, userRoles, roles, activeTenant);
-        cache.put(cacheKey, new CacheEntry(context, now));
+        cache.put(cacheKey, new CacheEntry(context, now, generation));
         return context;
     }
 
@@ -129,6 +149,7 @@ public class UserContextService {
      * @param empNo 工号
      */
     public void evict(String empNo) {
+        cacheGeneration.incrementAndGet();
         cache.entrySet().removeIf(entry -> empNo.equals(entry.getValue().context().getEmpNo()));
         log.info("权限缓存已失效: empNo={}", empNo);
     }
@@ -141,6 +162,7 @@ public class UserContextService {
     /** 角色的数据范围或字段策略变化后，清理所有持有该角色的已缓存用户。 */
     public void evictRoleAfterCommit(String roleCode) {
         afterCommit(() -> {
+            cacheGeneration.incrementAndGet();
             cache.entrySet().removeIf(entry -> entry.getValue().context().getRoles().contains(roleCode));
             log.info("角色权限缓存已失效: roleCode={}", roleCode);
         });
@@ -149,6 +171,7 @@ public class UserContextService {
     /** 租户启停后，清理该租户的全部已缓存用户。 */
     public void evictTenantAfterCommit(String tenantId) {
         afterCommit(() -> {
+            cacheGeneration.incrementAndGet();
             cache.entrySet().removeIf(entry -> tenantId.equals(entry.getValue().context().getTenantId()));
             log.info("租户权限缓存已失效: tenantId={}", tenantId);
         });
@@ -291,6 +314,7 @@ public class UserContextService {
                 .displayName(user.getDisplayName())
                 .tenantId(tenantId)
                 .roles(roles)
+                .functionPerms(functionPermsOf(roles))
                 .dataLevel(maxDataLevel)
                 .grantedOrgs(grantedOrgs)
                 .fieldPolicyByField(fieldPolicies)
@@ -329,6 +353,7 @@ public class UserContextService {
         StringBuilder sb = new StringBuilder();
         sb.append("t:").append(ctx.getTenantId()).append(';');
         sb.append("u:").append(ctx.getUserId()).append(';');
+        ctx.getFunctionPerms().stream().sorted().forEach(p -> sb.append("p:").append(p).append(';'));
         ctx.getRoles().stream().sorted().forEach(r -> sb.append("r:").append(r).append(';'));
         ctx.getGrantedOrgs().stream()
                 .sorted(Comparator.comparing(UserContext.GrantedOrg::getOrgPath))
@@ -354,6 +379,6 @@ public class UserContextService {
     }
 
     /** 缓存条目。 */
-    private record CacheEntry(UserContext context, long loadedAt) {
+    private record CacheEntry(UserContext context, long loadedAt, long generation) {
     }
 }

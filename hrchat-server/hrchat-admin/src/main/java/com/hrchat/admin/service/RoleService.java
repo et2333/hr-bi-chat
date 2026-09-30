@@ -18,6 +18,7 @@ import com.hrchat.authz.mapper.SecRoleMapper;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
+import com.hrchat.authz.service.RolePermissionService;
 import com.hrchat.authz.service.UserContextService;
 import com.hrchat.common.api.PageResult;
 import com.hrchat.common.exception.BizException;
@@ -30,16 +31,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 权限管理（接口文档 2.5，S5 admin-svc）。
  *
- * <p>角色 CRUD 落 sec_role；角色级功能权限经本地注册表承载（RBAC 存储，prod 演进为独立表）；
+ * <p>角色 CRUD 落 sec_role；角色功能授权写 sec_role_permission；
  * 角色级组织数据范围写 sec_org_grant（grantee_type=2）；列级策略写 sec_field_policy；
  * 权限变更记审计（PERMISSION_CHANGE，BR-12 留痕）。</p>
  */
@@ -56,8 +54,7 @@ public class RoleService {
     private static final DateTimeFormatter TS =
             DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
-    /** 角色 → 功能权限（本地 RBAC 注册表） */
-    private final Map<String, Set<String>> rolePerms = new ConcurrentHashMap<>();
+    private final RolePermissionService rolePermissionService;
 
     private final SecRoleMapper roleMapper;
     private final SecOrgGrantMapper orgGrantMapper;
@@ -85,6 +82,7 @@ public class RoleService {
         if (request == null || request.roleCode() == null || request.roleCode().isBlank()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "role_code");
         }
+        rolePermissionService.validate(request.functionPerms());
         String code = request.roleCode().trim().toUpperCase();
         long exists = roleMapper.selectCount(new LambdaQueryWrapper<SecRole>()
                 .eq(SecRole::getRoleCode, code));
@@ -98,7 +96,7 @@ public class RoleService {
         role.setDataLevel(request.dataLevel() == null ? 1 : request.dataLevel());
         roleMapper.insert(role);
         if (request.functionPerms() != null && !request.functionPerms().isEmpty()) {
-            rolePerms.put(code, new LinkedHashSet<>(request.functionPerms()));
+            rolePermissionService.replace(code, request.functionPerms(), ctx.getEmpNo());
         }
         audit(role.getId(), code, "CREATE", ctx, request.functionPerms());
         return role.getId();
@@ -106,7 +104,10 @@ public class RoleService {
 
     @Transactional
     public void patchRole(Long roleId, AdminViews.RoleCreateRequest request, UserContext ctx) {
-        SecRole role = requireRole(roleId);
+        rolePermissionService.validate(request.functionPerms());
+        SecRole role = roleMapper.selectOne(new LambdaQueryWrapper<SecRole>()
+                .eq(SecRole::getId, roleId).last("FOR UPDATE"));
+        if (role == null) throw new BizException(ErrorCode.PARAM_INVALID, "roleId");
         if (request.roleName() != null && !request.roleName().isBlank()) {
             role.setRoleName(request.roleName().trim());
         }
@@ -115,7 +116,7 @@ public class RoleService {
         }
         roleMapper.updateById(role);
         if (request.functionPerms() != null) {
-            rolePerms.put(role.getRoleCode(), new LinkedHashSet<>(request.functionPerms()));
+            rolePermissionService.replace(role.getRoleCode(), request.functionPerms(), ctx.getEmpNo());
         }
         userContextService.evictRoleAfterCommit(role.getRoleCode());
         audit(role.getId(), role.getRoleCode(), "PATCH", ctx, request.functionPerms());
@@ -202,14 +203,7 @@ public class RoleService {
             ctx.getFieldPolicyByField().forEach((field, type) ->
                     fieldPolicies.add(field + ":" + fieldPolicyName(type)));
         }
-        Set<String> funcPerms = new LinkedHashSet<>();
-        for (String role : ctx.getRoles()) {
-            funcPerms.addAll(authzService.functionPermsOf(role));
-            Set<String> extra = rolePerms.get(role);
-            if (extra != null) {
-                funcPerms.addAll(extra);
-            }
-        }
+        List<String> funcPerms = ctx.getFunctionPerms();
         return new AdminViews.EffectivePermissionsView(String.valueOf(user.getId()),
                 ctx.getRoles(), scopes, fieldPolicies, new ArrayList<>(funcPerms),
                 TS.format(LocalDateTime.now()));
@@ -226,11 +220,7 @@ public class RoleService {
     }
 
     private AdminViews.RoleView toRoleView(SecRole role) {
-        Set<String> perms = new LinkedHashSet<>(authzService.functionPermsOf(role.getRoleCode()));
-        Set<String> extra = rolePerms.get(role.getRoleCode());
-        if (extra != null) {
-            perms.addAll(extra);
-        }
+        List<String> perms = rolePermissionService.forRoles(List.of(role.getRoleCode()));
         return new AdminViews.RoleView(role.getId(), role.getRoleCode(), role.getRoleName(),
                 role.getDataLevel(), new ArrayList<>(perms));
     }

@@ -54,6 +54,21 @@ class AuthzServiceTest {
     }
 
     @Test
+    void functionChecksUseGrantsInsteadOfRoleNames() {
+        UserContext custom = UserContext.builder().roles(List.of("CUSTOM"))
+                .functionPerms(List.of("admin:audit:read")).build();
+        authz.checkFunc(custom, "admin:audit:read");
+        assertThatThrownBy(() -> authz.checkFunc(custom, "admin:authz:manage"))
+                .isInstanceOf(BizException.class);
+        UserContext adminWithoutGrants = UserContext.builder().roles(List.of("ADMIN")).build();
+        assertThatThrownBy(() -> authz.checkFunc(adminWithoutGrants, "admin:view"))
+                .isInstanceOf(BizException.class);
+        assertThat(PermissionCatalog.matches(List.of("admin:*"), "admin:user:manage")).isTrue();
+        assertThat(PermissionCatalog.matches(List.of("admin:*"), "administrator:manage")).isFalse();
+        assertThat(PermissionCatalog.matches(List.of("admin:*"), "chat:ask")).isFalse();
+    }
+
+    @Test
     void hr01ShouldAccessRdcSubtree() {
         String filter = authz.authorizeOrgFilter(hr01, "/1/2/", "研发中心");
         assertThat(filter).isEqualTo("org_key IN (2, 3, 4) AND tenant_id = 't01'");
@@ -180,12 +195,26 @@ class AuthzServiceTest {
                 .displayName(empNo)
                 .tenantId("t01")
                 .roles(roles)
+                .functionPerms(testPermissions(roles))
                 .dataLevel(roles.isEmpty() ? 0 : 1)
                 .grantedOrgs(grants)
                 .fieldPolicyByField(fieldPolicies)
                 .build();
         ctx.setPermissionFingerprint("fp-" + empNo);
         return ctx;
+    }
+
+    private List<String> testPermissions(List<String> roles) {
+        Map<String, List<String>> fixtures = Map.of(
+                "HRBP", List.of("chat:ask", "chat:view_sql", "report:view", "report:create", "report:manage", "report:subscribe", "export:apply"),
+                "HR_SPECIALIST", List.of("chat:ask", "report:view", "report:create", "report:manage", "report:subscribe", "export:apply"),
+                "HRD", List.of("chat:ask", "chat:view_sql", "chat:attribution", "report:view", "report:create", "report:manage", "report:subscribe", "export:apply"),
+                "PAYROLL", List.of("chat:ask", "payroll:plain_view", "report:view", "report:subscribe"),
+                "CHO", List.of("chat:ask", "chat:view_sql", "chat:attribution", "report:view", "report:create", "report:manage", "report:subscribe"),
+                "ADMIN", List.of("chat:ask", "chat:view_sql", "report:view", "report:create", "report:manage", "report:subscribe", "admin:*", "export:apply"),
+                "DATA_ADMIN", List.of("chat:ask", "chat:view_sql", "semantic:manage", "admin:semantic", "admin:audit:read", "admin:data:read", "report:view", "report:subscribe", "export:apply"),
+                "TENANT_ADMIN", List.of("chat:ask", "report:view", "admin:view", "admin:user:manage", "admin:llm:view", "admin:llm:manage", "admin:audit:read"));
+        return roles.stream().flatMap(r -> fixtures.getOrDefault(r, List.of()).stream()).distinct().toList();
     }
 
     private UserContext.GrantedOrg grant(Long nodeId, String path, String name, int scope, Long... subtree) {
