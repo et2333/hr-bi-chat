@@ -6,10 +6,12 @@ spring:
     password: ""
   sql:
     init:
-      mode: always
-      schema-locations: classpath:schema-h2.sql
-      data-locations: classpath:data-h2.sql
-      encoding: UTF-8
+      mode: never
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/h2
+    validate-on-migrate: true
+    clean-disabled: true
   h2:
     console:
       enabled: true

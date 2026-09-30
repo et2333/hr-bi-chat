@@ -1,6 +1,6 @@
 -- =====================================================================
--- HR智能问数 H2 本地兼容 Schema（MODE=MySQL）
--- 与 hrchat-deploy/sql/schema.sql（MySQL 生产版）保持结构一致：
+-- Flyway V1 baseline：HR智能问数 H2 本地兼容 Schema（发布后禁止修改）
+-- 与 db/migration/mysql/V1__baseline.sql（MySQL 生产版）保持结构一致：
 --   ① 去掉 ENGINE/UNSIGNED/PARTITION 等 MySQL 特有语法
 --   ② JSON 用 TEXT 存储（规避 H2 JSON 列 getString 双重编码问题，Java 端 getString 即得纯 JSON 文本）
 --   ③ 追加本地演示所需的 Doris 风格表（dim_org/dim_employee/fact_*）
@@ -246,6 +246,29 @@ CREATE TABLE cht_answer (
   PRIMARY KEY (id),
   UNIQUE (turn_id),
   KEY idx_state (answer_state)
+);
+
+CREATE TABLE sys_idempotency_record (
+  id               BIGINT AUTO_INCREMENT,
+  scope_key        VARCHAR(64) NOT NULL,
+  tenant_id        VARCHAR(16) NOT NULL,
+  user_id          BIGINT NOT NULL,
+  endpoint         VARCHAR(192) NOT NULL,
+  resource_id      VARCHAR(128) NOT NULL,
+  idempotency_key  VARCHAR(128) NOT NULL,
+  request_hash     VARCHAR(64) NOT NULL,
+  status           VARCHAR(24) NOT NULL,
+  result_ref       VARCHAR(128),
+  response_code    VARCHAR(64),
+  response_body    CLOB,
+  attempt_count    INT NOT NULL DEFAULT 1,
+  retry_after      DATETIME(3),
+  expires_at       DATETIME(3) NOT NULL,
+  created_at       DATETIME(3) NOT NULL,
+  updated_at       DATETIME(3) NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE (scope_key),
+  KEY idx_idempotency_expire (expires_at)
 );
 
 CREATE TABLE cht_clarify (
@@ -549,6 +572,7 @@ CREATE TABLE rpt_export_task (
   id           BIGINT AUTO_INCREMENT,
   export_id    VARCHAR(64)  NOT NULL,
   report_id    BIGINT       NOT NULL,
+  tenant_id    VARCHAR(16)  NOT NULL,
   owner_emp_no VARCHAR(64)  DEFAULT NULL,
   format       VARCHAR(8)   DEFAULT NULL,
   status       VARCHAR(16)  DEFAULT 'PENDING',
@@ -557,7 +581,8 @@ CREATE TABLE rpt_export_task (
   expires_at   DATETIME(3)  DEFAULT NULL,
   created_at   DATETIME(3)  DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE (export_id)
+  UNIQUE (export_id),
+  KEY idx_export_tenant_owner (tenant_id, owner_emp_no, created_at)
 );
 
 -- =====================================================================

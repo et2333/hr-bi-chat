@@ -1,11 +1,9 @@
 -- =====================================================================
--- HR智能问数 MySQL 业务库 hrchat_meta 建表脚本（生产版，DB-HRCHATBI-001）
--- Flyway MySQL V1 baseline 的部署侧快照；后续变更只新增版本迁移，不回改已发布 baseline。
+-- Flyway V1 baseline：HR智能问数 MySQL 业务库建表脚本（发布后禁止修改）
+-- 数据库由部署流程预先创建，Flyway 连接到目标库后执行本脚本。
+-- 与 H2 V1 baseline 结构一致；Doris 数仓表不在此脚本（见部署手册）
 -- 通用列：id/created_at/created_by/updated_at/updated_by/is_deleted
 -- =====================================================================
-CREATE DATABASE IF NOT EXISTS hrchat_meta DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
-USE hrchat_meta;
-
 -- ---------------- 多租户域 t_ ----------------
 CREATE TABLE IF NOT EXISTS t_tenant (
   id                 BIGINT UNSIGNED AUTO_INCREMENT,
