@@ -10,6 +10,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -20,15 +23,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** MCP /mcp 鉴权骨架：服务令牌、工具令牌、tools/list 与 tools/call 未实现桩。 */
+/** MCP /mcp：鉴权分发与 tools/list；handler 存在时 tools/call 返回业务结果。 */
 class McpControllerTest {
 
     private final McpAuthService mcpAuthService = Mockito.mock(McpAuthService.class);
+    private final McpToolHandler semanticQuery = Mockito.mock(McpToolHandler.class);
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        mockMvc = MockMvcBuilders.standaloneSetup(new McpController(mcpAuthService)).build();
+        when(semanticQuery.toolName()).thenReturn("semantic_query");
+        mockMvc = MockMvcBuilders.standaloneSetup(new McpController(mcpAuthService, List.of(semanticQuery))).build();
     }
 
     @Test
@@ -62,9 +67,11 @@ class McpControllerTest {
     }
 
     @Test
-    void toolsCall_authenticated_returnsNotImplemented() throws Exception {
+    void toolsCall_dispatchesToHandler() throws Exception {
         when(mcpAuthService.authenticate(eq("svc"), eq("tok"), eq("inv-1")))
                 .thenReturn(UserContext.builder().empNo("hr01").tenantId("t01").build());
+        when(semanticQuery.call(any(), any(), any()))
+                .thenReturn(Map.of("row_count", 1, "permission_rewrite_applied", true));
         mockMvc.perform(post("/mcp")
                         .header(McpAuthService.SERVICE_TOKEN_HEADER, "svc")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -76,7 +83,26 @@ class McpControllerTest {
                                 }}
                                 """))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.error.code").value(-32000))
+                .andExpect(jsonPath("$.result.row_count").value(1))
+                .andExpect(jsonPath("$.result.permission_rewrite_applied").value(true));
+    }
+
+    @Test
+    void toolsCall_unknownKnownToolWithoutHandler_returnsUnavailable() throws Exception {
+        mockMvc = MockMvcBuilders.standaloneSetup(new McpController(mcpAuthService, List.of())).build();
+        when(mcpAuthService.authenticate(eq("svc"), eq("tok"), eq("inv-1")))
+                .thenReturn(UserContext.builder().empNo("hr01").tenantId("t01").build());
+        mockMvc.perform(post("/mcp")
+                        .header(McpAuthService.SERVICE_TOKEN_HEADER, "svc")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"jsonrpc":"2.0","id":"9","method":"tools/call","params":{
+                                  "name":"permission_check",
+                                  "arguments":{},
+                                  "context":{"tool_context_token":"tok","invocation_id":"inv-1"}
+                                }}
+                                """))
+                .andExpect(status().isOk())
                 .andExpect(jsonPath("$.error.data.code").value(ErrorCode.SERVICE_UNAVAILABLE.getCode()));
     }
 
