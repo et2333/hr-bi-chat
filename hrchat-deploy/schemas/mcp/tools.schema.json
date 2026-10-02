@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hrchat.local/schemas/mcp/tools.schema.json",
+  "title": "MCP Tools Arguments and Results",
+  "description": "本期三个问数 MCP 工具 arguments/result（阶段 B 契约；阶段 C 实现执行）",
+  "$defs": {
+    "get_semantic_meta.args": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["METRIC", "DIMENSION", "SYNONYM"] },
+        "names": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "get_semantic_meta.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objects"],
+      "properties": {
+        "objects": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    },
+    "permission_check.args": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "semantic_objects": { "type": "array", "items": { "type": "string" } },
+        "intent": { "type": "string", "enum": ["QUERY", "EXPORT"] }
+      }
+    },
+    "permission_check.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "field_policies": { "type": "array", "items": { "type": "object" } },
+        "org_scope": { "type": "object" },
+        "reason": { "type": ["string", "null"] }
+      }
+    },
+    "semantic_query.args": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "metrics": { "type": "array", "items": { "type": "string" } },
+        "dimensions": { "type": "array", "items": { "type": "string" } },
+        "filters": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["field", "op"],
+            "properties": {
+              "field": { "type": "string" },
+              "op": {
+                "type": "string",
+                "enum": ["EQ", "NE", "IN", "NOT_IN", "BETWEEN", "GT", "GTE", "LT", "LTE", "LIKE"]
+              },
+              "value": { "type": "array" }
+            }
+          }
+        },
+        "time_range": { "type": "object" },
+        "org_context": {
+          "type": "object",
+          "properties": {
+            "org_id": { "type": "string" },
+            "include_children": { "type": "boolean" }
+          }
+        },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "semantic_query.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["columns", "rows", "permission_rewrite_applied", "row_count"],
+      "properties": {
+        "columns": { "type": "array", "items": { "type": "object" } },
+        "rows": { "type": "array", "items": { "type": "array" } },
+        "caliber_meta": { "type": "object" },
+        "permission_rewrite_applied": { "type": "boolean" },
+        "row_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "tools_list.result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tools"],
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "inputSchema"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "enum": ["get_semantic_meta", "permission_check", "semantic_query"]
+              },
+              "description": { "type": "string" },
+              "inputSchema": { "type": "object" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
