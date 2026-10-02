@@ -3,9 +3,11 @@ package com.hrchat.chat.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
+import com.hrchat.authz.mcp.ToolContextTokenService;
 import com.hrchat.api.chat.AnswerPayload;
 import com.hrchat.api.chat.AskRequest;
 import com.hrchat.api.chat.ClarifyAnswerRequest;
@@ -48,6 +50,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 会话/问答编排服务（S4 问数主链路，接口文档 2.2）。
@@ -75,6 +78,7 @@ public class ChatService {
     private final IdempotencyService idempotencyService;
     private final AgentRuntimeClient agentRuntime;
     private final AuthzService authzService;
+    private final ToolContextTokenService toolContextTokenService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
 
@@ -179,7 +183,8 @@ public class ChatService {
     }
 
     private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session) {
-        AgentResult result = agentRuntime.ask(request, ctx);
+        AgentInvocationContext invocation = buildInvocation(ctx, sessionId, null);
+        AgentResult result = agentRuntime.ask(request, ctx, invocation);
         String askId = result.askId();
         Long turnId = persistTurn(sessionId, ctx, request.question(), result);
 
@@ -213,7 +218,8 @@ public class ChatService {
         if (request.answers() == null || request.answers().isEmpty()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "answers");
         }
-        AgentResult result = agentRuntime.clarify(askId, pending.question(), request.answers().get(0), ctx);
+        AgentInvocationContext invocation = buildInvocation(ctx, sessionId, askId);
+        AgentResult result = agentRuntime.clarify(askId, pending.question(), request.answers().get(0), ctx, invocation);
 
         String status = result.isClarifying()
                 ? SseEvents.ASK_CLARIFYING
@@ -498,6 +504,18 @@ public class ChatService {
             case SseEvents.ASK_FAILED -> 5;
             default -> 0;
         };
+    }
+
+    private AgentInvocationContext buildInvocation(UserContext ctx, Long sessionId, String javaAskId) {
+        String invocationId = UUID.randomUUID().toString();
+        String token = toolContextTokenService.issue(ctx.getEmpNo(), ctx.getTenantId(), invocationId);
+        return new AgentInvocationContext(
+                ctx.getTenantId(),
+                String.valueOf(sessionId),
+                javaAskId,
+                invocationId,
+                UUID.randomUUID().toString().replace("-", ""),
+                token);
     }
 
     private static String stateCodeToName(Integer code) {

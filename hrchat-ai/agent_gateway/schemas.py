@@ -86,6 +86,11 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     mode: Literal["STREAM", "SYNC"] = "STREAM"
     context_override: Optional[ContextOverride] = None
+    # 阶段 B：Java 签发的短期工具令牌与任务绑定；Python 仅原样转交 MCP
+    invocation_id: Optional[str] = None
+    tool_context_token: Optional[str] = None
+    trace_id: Optional[str] = None
+    java_ask_id: Optional[str] = None
 
 
 class ClarifyAnswer(BaseModel):
@@ -99,6 +104,9 @@ class ClarifyAnswerRequest(BaseModel):
     """澄清应答请求体。"""
 
     answers: list[ClarifyAnswer] = Field(min_length=1)
+    invocation_id: Optional[str] = None
+    tool_context_token: Optional[str] = None
+    trace_id: Optional[str] = None
 
 
 class FeedbackRequest(BaseModel):

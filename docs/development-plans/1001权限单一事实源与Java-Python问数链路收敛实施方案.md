@@ -117,7 +117,7 @@ MCP 调用同时校验两类凭证：
 建议使用 Java 签名的短期 JWT 或等价签名令牌，载荷只包含：
 
 - `iss=hrchat-server`、`aud=hrchat-mcp`
-- `sub=userId`、`tenant_id`
+- `sub=empNo`（与现有 `UserContext` / mock 身份一致；权限按工号重建）、`tenant_id`
 - `invocation_id`、`jti`
 - `iat`、`exp`，有效期建议 5 分钟；长任务由 Java 明确续签
 
@@ -328,5 +328,11 @@ local 的 `X-User-No` 仅用于浏览器到 Java 的 mock 身份切换。它不�
 - Java 生成 `invocation_id` 并签发工具令牌，Python 只负责转交。
 - 历史配置的混用 URL 统一转 PENDING 后人工补齐，不自动猜测字段含义。
 - 版本快照不保留 API Key 明文，回滚沿用当前凭据。
+
+阶段 B 实施决策（2026-10-02）：
+
+- 工具令牌采用 HS256 JWT（`HRCHAT_TOOL_TOKEN_SECRET`），与浏览器登录 JWT（未来 SSO/RS256）密钥与用途完全隔离。
+- `sub=empNo`；`ContextOverride` 跨栈统一嵌套 snake_case（Java Web 仍可用扁平 camelCase，在 Remote 边界映射）。
+- 阶段 B 暴露 `POST /mcp` 鉴权骨架 + `tools/list`；`tools/call` 鉴权通过后对业务工具返回明确未实现，执行留给阶段 C。
 
 当前没有需要产品侧补充的业务决策。若进入生产部署阶段，需要再确认企业内部服务认证设施（统一服务 JWT 或 mTLS）以及密钥管理平台；这不阻塞当前 local/demo 编码。

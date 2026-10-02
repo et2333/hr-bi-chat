@@ -43,6 +43,8 @@ class ChatServiceFlowTest {
     private final IdempotencyService idempotencyService = Mockito.mock(IdempotencyService.class);
     private final AgentRuntimeClient agentRuntime = Mockito.mock(AgentRuntimeClient.class);
     private final AuthzService authzService = Mockito.mock(AuthzService.class);
+    private final com.hrchat.authz.mcp.ToolContextTokenService toolContextTokenService =
+            Mockito.mock(com.hrchat.authz.mcp.ToolContextTokenService.class);
     private final AuditCollector auditCollector = Mockito.mock(AuditCollector.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -54,9 +56,11 @@ class ChatServiceFlowTest {
 
     @BeforeEach
     void setUp() {
+        Mockito.when(toolContextTokenService.issue(Mockito.any(), Mockito.any(), Mockito.any()))
+                .thenReturn("test-tool-token");
         service = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
                 feedbackMapper, askStore, idempotencyService, agentRuntime, authzService,
-                auditCollector, objectMapper);
+                toolContextTokenService, auditCollector, objectMapper);
     }
 
     private ChtSession session(long id, String title) {

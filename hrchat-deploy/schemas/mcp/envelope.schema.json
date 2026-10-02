@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hrchat.local/schemas/mcp/envelope.schema.json",
+  "title": "MCP JSON-RPC 2.0 Envelope",
+  "description": "Java POST /mcp 请求与响应机读契约（阶段 B；1001 方案 §6）",
+  "oneOf": [
+    { "$ref": "#/$defs/request" },
+    { "$ref": "#/$defs/response" }
+  ],
+  "$defs": {
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id", "method"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "number", "null"] },
+        "method": {
+          "type": "string",
+          "enum": ["tools/list", "tools/call"]
+        },
+        "params": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["jsonrpc", "id"],
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "type": ["string", "number", "null"] },
+        "result": {},
+        "error": { "$ref": "#/$defs/errorBody" }
+      }
+    },
+    "errorBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "integer",
+          "enum": [-32000, -32600, -32601, -32602]
+        },
+        "message": { "type": "string" },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string", "description": "HRC/HRD/HRA 业务错误码" },
+            "message": { "type": "string" },
+            "retryable": { "type": ["boolean", "null"] }
+          }
+        }
+      }
+    },
+    "toolContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool_context_token", "invocation_id"],
+      "properties": {
+        "trace_id": { "type": ["string", "null"] },
+        "tool_context_token": { "type": "string", "minLength": 1 },
+        "invocation_id": { "type": "string", "minLength": 1 },
+        "tool_call_id": { "type": ["string", "null"] }
+      }
+    },
+    "toolCallParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "arguments", "context"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["get_semantic_meta", "permission_check", "semantic_query"]
+        },
+        "arguments": { "type": "object" },
+        "context": { "$ref": "#/$defs/toolContext" }
+      }
+    }
+  }
+}

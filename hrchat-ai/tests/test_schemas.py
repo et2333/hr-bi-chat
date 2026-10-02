@@ -26,10 +26,25 @@ def test_context_override_uses_nested_snake_case_contract():
             "org": {"org_id": "35", "include_children": False},
             "metrics": ["headcount"],
         },
+        "invocation_id": "inv-1",
+        "tool_context_token": "jwt.example",
+        "trace_id": "tr1",
     })
     assert req.context_override.time_range.preset == "LAST_MONTH"
     assert req.context_override.org.org_id == "35"
     assert req.context_override.org.include_children is False
+    assert req.invocation_id == "inv-1"
+    assert req.tool_context_token == "jwt.example"
+
+
+def test_clarify_accepts_tool_context_token_passthrough():
+    req = ClarifyAnswerRequest.model_validate({
+        "answers": [{"question_id": "q1", "option_ids": ["headcount"]}],
+        "invocation_id": "inv-2",
+        "tool_context_token": "jwt.refresh",
+    })
+    assert req.tool_context_token == "jwt.refresh"
+    assert req.invocation_id == "inv-2"
 
 
 def test_terminal_response_has_fixed_envelope():
