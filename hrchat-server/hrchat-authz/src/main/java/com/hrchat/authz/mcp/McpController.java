@@ -5,7 +5,6 @@ import com.hrchat.api.mcp.McpToolDtos;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,16 +15,24 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
- * MCP JSON-RPC 入口（阶段 B：鉴权 + tools/list；tools/call 鉴权后对业务工具返回未实现）。
+ * MCP JSON-RPC 入口：鉴权 + tools/list；tools/call 分发给 {@link McpToolHandler}。
  */
 @Slf4j
 @RestController
-@RequiredArgsConstructor
 public class McpController {
 
     private final McpAuthService mcpAuthService;
+    private final Map<String, McpToolHandler> handlers;
+
+    public McpController(McpAuthService mcpAuthService, List<McpToolHandler> handlers) {
+        this.mcpAuthService = mcpAuthService;
+        this.handlers = handlers == null ? Map.of() : handlers.stream()
+                .collect(Collectors.toMap(McpToolHandler::toolName, Function.identity(), (a, b) -> a));
+    }
 
     @PostMapping(value = "/mcp", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public McpEnvelope.Response handle(
@@ -77,10 +84,15 @@ public class McpController {
             return McpEnvelope.Response.fail(id, McpEnvelope.ERR_METHOD_NOT_FOUND, "未知工具: " + name,
                     new McpEnvelope.ErrorData(ErrorCode.PARAM_INVALID.getCode(), name, false));
         }
-        // 阶段 B：鉴权闭环完成；业务执行留给阶段 C
-        return McpEnvelope.Response.fail(id, McpEnvelope.ERR_BUSINESS, "工具尚未实现: " + name,
-                new McpEnvelope.ErrorData(ErrorCode.SERVICE_UNAVAILABLE.getCode(),
-                        ErrorCode.SERVICE_UNAVAILABLE.format(name), false));
+        McpToolHandler handler = handlers.get(name);
+        if (handler == null) {
+            return McpEnvelope.Response.fail(id, McpEnvelope.ERR_BUSINESS, "工具尚未实现: " + name,
+                    new McpEnvelope.ErrorData(ErrorCode.SERVICE_UNAVAILABLE.getCode(),
+                            ErrorCode.SERVICE_UNAVAILABLE.format(name), false));
+        }
+        Map<String, Object> arguments = mapVal(params.get("arguments"));
+        Object result = handler.call(user, arguments, context);
+        return McpEnvelope.Response.ok(id, result);
     }
 
     private static McpToolDtos.ToolsListResult toolsList() {
@@ -90,7 +102,7 @@ public class McpController {
                 new McpToolDtos.ToolDescriptor(McpEnvelope.TOOL_PERMISSION_CHECK,
                         "按最新 UserContext 预检查询/导出权限", Map.of("type", "object")),
                 new McpToolDtos.ToolDescriptor(McpEnvelope.TOOL_SEMANTIC_QUERY,
-                        "语义取数唯一入口（阶段 C 实现）", Map.of("type", "object"))
+                        "语义取数唯一入口", Map.of("type", "object"))
         ));
     }
 
