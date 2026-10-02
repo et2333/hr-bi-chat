@@ -7,6 +7,7 @@ import com.hrchat.api.chat.AnswerPayload;
 import com.hrchat.api.chat.AskRequest;
 import com.hrchat.api.chat.ClarifyAnswerRequest;
 import com.hrchat.api.chat.ContextOverride;
+import com.hrchat.api.chat.TimeRange;
 import com.hrchat.api.sse.SseEvents;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.exception.BizException;
@@ -15,10 +16,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
@@ -37,7 +40,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** 远程 agent-gateway 客户端单测：answer_payload/questions/降级/澄清透传。 */
+/** 远程 agent-gateway 客户端单测：固定终态信封、上下文契约及澄清会话绑定。 */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class RemoteAgentRuntimeClientTest {
@@ -53,7 +56,7 @@ class RemoteAgentRuntimeClientTest {
     void setUp() {
         client = new RemoteAgentRuntimeClient("http://gateway:8000", "sk-1", "qwen-max",
                 objectMapper, restTemplate);
-        ctx = UserContext.builder().empNo("hr01").build();
+        ctx = UserContext.builder().empNo("hr01").tenantId("t01").build();
     }
 
     @Test
@@ -62,7 +65,7 @@ class RemoteAgentRuntimeClientTest {
                 new AnswerPayload.Conclusion("NUMBER_CARD", "120", "人", null),
                 new AnswerPayload.TableData(List.of(), List.of(), 120, 1, 1), null, null, List.of(), 100L);
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("answer_payload", payload), HttpStatus.OK));
+                .thenReturn(new ResponseEntity<>(completed(payload), HttpStatus.OK));
 
         AgentResult result = client.ask(new AskRequest("2026年7月各部门在职人数", "SYNC", null), ctx);
 
@@ -81,7 +84,8 @@ class RemoteAgentRuntimeClientTest {
                 "options", List.of(Map.of("option_id", "o1", "label", "正式员工"),
                         Map.of("option_id", "o2", "label", "含实习生")));
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("ask_id", "ask_9", "questions", List.of(question)),
+                .thenReturn(new ResponseEntity<>(Map.of("ask_id", "ask_9", "status", "CLARIFYING",
+                                "questions", List.of(question)),
                         HttpStatus.OK));
 
         AgentResult result = client.ask(new AskRequest("在职人数", "SYNC", null), ctx);
@@ -112,7 +116,7 @@ class RemoteAgentRuntimeClientTest {
         AnswerPayload payload = new AnswerPayload(null, "ans_1", "COMPLETED", "QUERY", false, null,
                 null, null, null, null, List.of(), 10L);
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("answer_payload", payload), HttpStatus.OK));
+                .thenReturn(new ResponseEntity<>(completed(payload), HttpStatus.OK));
         assertEquals("ask_remote", client.ask(new AskRequest("问题", "SYNC", null), ctx).askId());
     }
 
@@ -121,7 +125,7 @@ class RemoteAgentRuntimeClientTest {
         AnswerPayload payload = new AnswerPayload("ask_7", "ans_2", "COMPLETED", "QUERY", false, null,
                 new AnswerPayload.Conclusion("TEXT", "完成", null, null), null, null, null, List.of(), 80L);
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("answer_payload", payload), HttpStatus.OK));
+                .thenReturn(new ResponseEntity<>(completed(payload), HttpStatus.OK));
 
         ClarifyAnswerRequest.Answer answer = new ClarifyAnswerRequest.Answer("q1", List.of("o1"));
         AgentResult result = client.clarify("ask_7", "问题", answer, ctx);
@@ -137,10 +141,65 @@ class RemoteAgentRuntimeClientTest {
         AnswerPayload payload = new AnswerPayload("ask_7", "ans_1", "COMPLETED", "QUERY", false, null,
                 null, null, null, null, List.of(), 10L);
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("answer_payload", payload), HttpStatus.OK));
+                .thenReturn(new ResponseEntity<>(completed(payload), HttpStatus.OK));
         client.ask(new AskRequest("问题", "SYNC",
-                new ContextOverride(null, "35", null, null)), ctx);
-        verify(restTemplate).postForEntity(argThat((String url) -> url.contains("/sessions/java-hr01/asks")),
-                any(), eq(Map.class));
+                new ContextOverride(new TimeRange("LAST_MONTH", null, null, "MONTH"),
+                        "35", false, List.of("headcount"))), ctx);
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).postForEntity(
+                argThat((String url) -> url.contains("/sessions/java-") && url.endsWith("/asks")),
+                entityCaptor.capture(), eq(Map.class));
+        Map<?, ?> body = (Map<?, ?>) entityCaptor.getValue().getBody();
+        Map<?, ?> context = (Map<?, ?>) body.get("context_override");
+        assertEquals(Map.of("preset", "LAST_MONTH", "grain", "MONTH"), context.get("time_range"));
+        assertEquals(Map.of("org_id", "35", "include_children", false), context.get("org"));
+        assertEquals(List.of("headcount"), context.get("metrics"));
+        assertEquals("t01", entityCaptor.getValue().getHeaders().getFirst("X-Tenant-No"));
+    }
+
+    @Test
+    void ask_failedEnvelope_preservesBusinessErrorCode() {
+        Map<String, Object> error = Map.of(
+                "code", "HRC-2003", "message", "无权查询研发中心数据", "recoverable", false);
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(new ResponseEntity<>(Map.of(
+                        "ask_id", "ask_denied", "status", "FAILED", "error", error), HttpStatus.OK));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> client.ask(new AskRequest("问题", "SYNC", null), ctx));
+
+        assertEquals(ErrorCode.DATA_RANGE_FORBIDDEN, ex.getErrorCode());
+    }
+
+    @Test
+    void clarify_reusesSessionAllocatedForOriginalAsk() {
+        Map<String, Object> question = Map.of(
+                "question_id", "q1", "question", "请选择指标",
+                "options", List.of(Map.of("option_id", "headcount", "label", "在职人数")));
+        AnswerPayload payload = new AnswerPayload("ask_9", "ans_9", "COMPLETED", "QUERY", false, null,
+                null, null, null, null, List.of(), 10L);
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(new ResponseEntity<>(Map.of(
+                                "ask_id", "ask_9", "status", "CLARIFYING", "questions", List.of(question)),
+                                HttpStatus.OK),
+                        new ResponseEntity<>(completed(payload), HttpStatus.OK));
+
+        client.ask(new AskRequest("人数", "SYNC", null), ctx);
+        client.clarify("ask_9", "人数",
+                new ClarifyAnswerRequest.Answer("q1", List.of("headcount")), ctx);
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(restTemplate, org.mockito.Mockito.times(2))
+                .postForEntity(urlCaptor.capture(), any(), eq(Map.class));
+        String askUrl = urlCaptor.getAllValues().get(0);
+        String clarifyUrl = urlCaptor.getAllValues().get(1);
+        String sessionPrefix = askUrl.substring(0, askUrl.length() - "/asks".length());
+        assertEquals(sessionPrefix + "/asks/ask_9/clarifications", clarifyUrl);
+    }
+
+    private Map<String, Object> completed(AnswerPayload payload) {
+        return Map.of("ask_id", payload.askId() == null ? "ask_remote" : payload.askId(),
+                "status", "COMPLETED", "answer_payload", payload);
     }
 }

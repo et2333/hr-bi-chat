@@ -73,8 +73,25 @@ def test_sync_mode_returns_json():
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "COMPLETED"
-    assert data["conclusion"]["value"] == 58
-    assert data["caliber"]["metric"] == "入职人数"
+    assert data["ask_id"].startswith("ask_")
+    assert data["answer_payload"]["conclusion"]["value"] == 58
+    assert data["answer_payload"]["caliber"]["metric"] == "入职人数"
+    assert data["questions"] == []
+    assert data["error"] is None
+
+
+def test_sync_error_preserves_business_error_code():
+    resp = _ask(
+        "s2-error",
+        "研发中心离职率是多少",
+        headers={"X-User-No": "hr02"},
+        mode="SYNC",
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "FAILED"
+    assert data["error"]["code"] == ERR_DATA_RANGE_FORBIDDEN
+    assert data["answer_payload"] is None
 
 
 def test_clarification_flow():
@@ -85,15 +102,15 @@ def test_clarification_flow():
     assert interrupt["payload"]["interrupt_type"] == "CLARIFY"
     ask_id = interrupt["payload"]["ask_id"]
     q = interrupt["payload"]["questions"][0]
-    # 澄清应答续跑 → ANSWER_DONE
+    # 澄清应答续跑 → 与 SYNC 问数相同的 JSON 终态信封
     resp2 = client.post(
         f"/v1/chat/sessions/s3/asks/{ask_id}/clarifications",
         json={"answers": [{"question_id": q["question_id"], "option_ids": [q["options"][0]["option_id"]]}]},
     )
     assert resp2.status_code == 200
-    frames2 = _frames(resp2.text)
-    assert frames2[-1]["event"] == EVENT_ANSWER_DONE
-    assert frames2[-1]["payload"]["conclusion"]["value"] == 1.88
+    terminal = resp2.json()
+    assert terminal["status"] == "COMPLETED"
+    assert terminal["answer_payload"]["conclusion"]["value"] == 1.88
 
 
 def test_no_permission_stream_error():

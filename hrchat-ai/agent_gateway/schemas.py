@@ -70,6 +70,16 @@ class ContextOverride(BaseModel):
     metrics: Optional[list[str]] = None
 
 
+class TerminalResponse(BaseModel):
+    """SYNC 问数与澄清续答共用的固定终态信封。"""
+
+    ask_id: str
+    status: Literal["COMPLETED", "CLARIFYING", "FAILED"]
+    answer_payload: Optional[dict[str, Any]] = None
+    questions: list[dict[str, Any]] = Field(default_factory=list)
+    error: Optional[dict[str, Any]] = None
+
+
 class AskRequest(BaseModel):
     """提交问句请求体（2.2.5）。"""
 

@@ -6,6 +6,7 @@ from agent_gateway.schemas import (
     AskRequest,
     ClarifyAnswerRequest,
     SseEvent,
+    TerminalResponse,
 )
 from agent_gateway.sse import EventBuffer, SseFramer
 
@@ -14,6 +15,31 @@ def test_ask_request_validation():
     req = AskRequest(question="本月离职率", mode="STREAM")
     assert req.mode == "STREAM"
     assert req.context_override is None
+
+
+def test_context_override_uses_nested_snake_case_contract():
+    req = AskRequest.model_validate({
+        "question": "研发中心上月在职人数",
+        "mode": "SYNC",
+        "context_override": {
+            "time_range": {"preset": "LAST_MONTH", "grain": "MONTH"},
+            "org": {"org_id": "35", "include_children": False},
+            "metrics": ["headcount"],
+        },
+    })
+    assert req.context_override.time_range.preset == "LAST_MONTH"
+    assert req.context_override.org.org_id == "35"
+    assert req.context_override.org.include_children is False
+
+
+def test_terminal_response_has_fixed_envelope():
+    response = TerminalResponse(
+        ask_id="ask_1",
+        status="FAILED",
+        error={"code": "HRC-2003", "message": "无权限", "recoverable": False},
+    ).model_dump()
+    assert set(response) == {"ask_id", "status", "answer_payload", "questions", "error"}
+    assert response["error"]["code"] == "HRC-2003"
 
 
 def test_clarify_answer_request_max_options():

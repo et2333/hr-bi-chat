@@ -2,15 +2,14 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_gateway.app import apply_llm_config, create_app
+from agent_gateway.app import _runtimes, apply_llm_config, create_app
 
 
 @pytest.fixture(autouse=True)
 def _reset_runtime():
+    _runtimes.clear()
     yield
-    apply_llm_config({"llm_profile": "mock", "tenant_no": "t01"})
-    apply_llm_config({"llm_profile": "mock", "tenant_no": "t02"})
-    apply_llm_config({"llm_profile": "mock"})
+    _runtimes.clear()
 
 
 def test_tenant_config_isolation():
@@ -66,3 +65,29 @@ def test_default_fallback_when_tenant_not_configured():
     # 未配置 t03 → 与默认槽位一致
     assert client.get("/v1/config/current?tenant_no=t03").json()["llm_profile"] == "openai"
     assert client.get("/v1/config/current?tenant_no=t03").json()["model"] == "gpt-def"
+
+
+def test_default_update_invalidates_only_inherited_tenants():
+    """默认配置变更后继承槽位随之刷新，显式租户配置不受影响。"""
+    client = TestClient(create_app())
+    client.post("/v1/config", json={
+        "llm_profile": "openai", "base_url": "http://default-v1",
+        "model": "gpt-v1", "config_version": 1,
+    })
+    assert client.get("/v1/config/current?tenant_no=inherited").json()["config_version"] == 1
+    client.post("/v1/config", json={
+        "tenant_no": "explicit", "llm_profile": "openai",
+        "base_url": "http://explicit", "model": "gpt-explicit", "config_version": 9,
+    })
+
+    client.post("/v1/config", json={
+        "llm_profile": "openai", "base_url": "http://default-v2",
+        "model": "gpt-v2", "config_version": 2,
+    })
+
+    inherited = client.get("/v1/config/current?tenant_no=inherited").json()
+    explicit = client.get("/v1/config/current?tenant_no=explicit").json()
+    assert inherited["model"] == "gpt-v2"
+    assert inherited["config_version"] == 2
+    assert explicit["model"] == "gpt-explicit"
+    assert explicit["config_version"] == 9
