@@ -1,0 +1,117 @@
+"""ask_flow 在 java_mcp 下走 SemanticToolClient，权限错误不回退 Demo。"""
+from __future__ import annotations
+
+from typing import Any, Optional
+
+import pytest
+
+from adapters.mcp_client import McpBusinessError
+from adapters.mock_llm import MockLlmAdapter
+from adapters.semantic_tool_client import MetricView
+from langgraph_flows.ask_flow import run_ask_flow
+from langgraph_flows.demo_data import Window
+
+
+class FakeJavaTools:
+    """模拟 Java MCP 语义客户端。"""
+
+    backend = "java_mcp"
+
+    def __init__(self, *, query_error: McpBusinessError | None = None, value: float = 88.0) -> None:
+        self.query_error = query_error
+        self.value = value
+        self.query_calls: list[dict[str, Any]] = []
+        self.catalog_contexts: list[dict[str, Any]] = []
+
+    async def metric_catalog(self, context: dict[str, Any]) -> dict[str, MetricView]:
+        self.catalog_contexts.append(context)
+        return {
+            "headcount": MetricView(
+                code="headcount", name="在职人数", definition="COUNT(*)", unit="人"
+            ),
+            "turnover_rate": MetricView(
+                code="turnover_rate", name="离职率", definition="...", percent=True
+            ),
+        }
+
+    def check_org(self, user_no: Optional[str], org_keys: list[str]) -> None:
+        return
+
+    async def query_metric(
+        self,
+        *,
+        code: str,
+        window: Optional[Window],
+        org_keys: list[str],
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.query_calls.append(
+            {"code": code, "org_keys": org_keys, "context": context, "window": window}
+        )
+        if self.query_error:
+            raise self.query_error
+        return {
+            "current": self.value,
+            "compare": None,
+            "prev_period": None,
+            "rows": 1,
+            "metric": MetricView(code=code, name="在职人数", definition="", unit="人"),
+        }
+
+
+ADAPTER = MockLlmAdapter()
+
+
+@pytest.mark.asyncio
+async def test_java_mcp_execute_uses_client_not_demo_value():
+    tools = FakeJavaTools(value=88.0)
+    result = await run_ask_flow(
+        question="研发中心在职人数",
+        session_id="s1",
+        ask_id="ask_jm1",
+        adapter=ADAPTER,
+        tools=tools,  # type: ignore[arg-type]
+        tool_context_token="jwt.ctx",
+        invocation_id="inv-9",
+        trace_id="tr-9",
+        use_langgraph=False,
+    )
+    assert result["answer_payload"]["conclusion"]["value"] == 88
+    assert result["answer_payload"]["conclusion"]["value"] != 1275
+    assert tools.query_calls
+    assert tools.query_calls[0]["context"]["tool_context_token"] == "jwt.ctx"
+    assert tools.query_calls[0]["context"]["invocation_id"] == "inv-9"
+    assert tools.catalog_contexts[0]["tool_context_token"] == "jwt.ctx"
+
+
+@pytest.mark.asyncio
+async def test_java_mcp_permission_error_no_demo_fallback():
+    tools = FakeJavaTools(
+        query_error=McpBusinessError("HRC-2003", "无权访问该组织数据", retryable=False)
+    )
+    result = await run_ask_flow(
+        question="研发中心在职人数",
+        session_id="s1",
+        ask_id="ask_jm2",
+        adapter=ADAPTER,
+        tools=tools,  # type: ignore[arg-type]
+        user_no="hr02",
+        use_langgraph=False,
+    )
+    assert result["error"]["code"] == "HRC-2003"
+    assert not result.get("answer_payload")
+    # 终态事件带 ERROR，数值绝非 Demo 1275
+    error_events = [e for e in result["events"] if e["event"] == "ERROR"]
+    assert error_events
+    assert error_events[0]["payload"]["code"] == "HRC-2003"
+
+
+@pytest.mark.asyncio
+async def test_build_semantic_tool_client_java_requires_config():
+    from adapters.semantic_tool_client import build_semantic_tool_client
+
+    with pytest.raises(ValueError, match="JAVA_MCP_BASE_URL"):
+        build_semantic_tool_client("java_mcp", mcp_base_url="", mcp_service_token="")
+
+    demo = build_semantic_tool_client("demo")
+    assert demo.backend == "demo"

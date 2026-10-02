@@ -3,7 +3,7 @@
 节点产出「语义事件」列表（event+payload，无 seq/ts），由 agent-gateway 负责
 帧化分配 seq/ts 与持久化（与 Java AgentResult.events 契约一致）。
 
-确定性保证：MockLLMImpl 下全链路无外部依赖；OpenAIClientImpl 仅替换文本生成。
+阶段 D：取数经 SemanticToolClient（java_mcp → Java MCP；demo → DemoQueryExecutor）。
 """
 from __future__ import annotations
 
@@ -24,12 +24,11 @@ from agent_gateway.schemas import (
     INTENT_QUERY,
 )
 from adapters.llm_adapter import ModelAdapter
+from adapters.mcp_client import McpBusinessError
+from adapters.semantic_tool_client import MetricView, SemanticToolClient
 from langgraph_flows.demo_data import (
     DATA_UPDATED_AT,
-    METRICS,
     Window,
-    DemoQueryExecutor,
-    check_org_permission,
     resolve_metrics,
     resolve_orgs,
     resolve_window,
@@ -43,15 +42,10 @@ except ImportError:  # pragma: no cover
 
 LANGGRAPH_AVAILABLE = StateGraph is not None
 
-# 归因/追问固定文案（Java buildPayload 对齐）
 FOLLOWUPS = ["查看明细", "按组织对比", "查看近三月趋势"]
+MAX_CLARIFY_OPTIONS = 5
 
-MAX_CLARIFY_OPTIONS = 5  # BR-07：每问 ≤5 选项
 
-
-# =====================================================================
-# 事件构造（语义事件，无 seq/ts）
-# =====================================================================
 def _delta(phase: str, text: str) -> dict[str, Any]:
     return {"event": EVENT_MESSAGE_DELTA, "payload": {"delta": text, "phase": phase}}
 
@@ -68,40 +62,35 @@ def _error(code: str, message: str, recoverable: bool) -> dict[str, Any]:
     return {"event": EVENT_ERROR, "payload": {"code": code, "message": message, "recoverable": recoverable}}
 
 
-def _interrupt(ask_id: str, candidates: list[str]) -> dict[str, Any]:
-    options = [
-        {"option_id": c, "label": METRICS[c].name}
-        for c in candidates[:MAX_CLARIFY_OPTIONS]
-    ]
-    payload = {
-        "interrupt_type": "CLARIFY",
-        "ask_id": ask_id,
-        "questions": [
-            {
-                "question_id": f"{ask_id}-q1",
-                "question": "您指的是哪个指标？",
-                "multiple": False,
-                "options": options,
-            }
-        ],
-    }
-    return {"event": EVENT_INTERRUPT, "payload": payload}
+def _metric_view(state: dict[str, Any]) -> MetricView:
+    mv = state.get("metric_view")
+    if isinstance(mv, MetricView):
+        return mv
+    if isinstance(mv, dict):
+        return MetricView(
+            code=str(mv.get("code") or state.get("metric_code") or ""),
+            name=str(mv.get("name") or ""),
+            definition=str(mv.get("definition") or ""),
+            unit=str(mv.get("unit") or ""),
+            percent=bool(mv.get("percent")),
+        )
+    code = state.get("metric_code") or ""
+    return MetricView(code=code, name=code, definition="")
 
 
-# =====================================================================
-# 数值呈现
-# =====================================================================
-def _display_value(code: str, value: Optional[float]) -> Any:
+def _display_value(meta: MetricView, value: Optional[float]) -> Any:
     if value is None:
         return None
-    meta = METRICS[code]
     if meta.percent:
         return round(value * 100, 2)
-    return int(value)
+    try:
+        return int(value) if float(value).is_integer() else value
+    except (TypeError, ValueError):
+        return value
 
 
-def _display_suffix(code: str) -> str:
-    return "%" if METRICS[code].percent else METRICS[code].unit
+def _display_suffix(meta: MetricView) -> str:
+    return "%" if meta.percent else (meta.unit or "")
 
 
 def _window_to_dict(w) -> Optional[dict[str, Any]]:
@@ -116,14 +105,14 @@ def _window_to_dict(w) -> Optional[dict[str, Any]]:
 
 
 def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
-    code = state["metric_code"]
+    meta = _metric_view(state)
+    code = meta.code
     current = state["current"]
     compare = state["compare"]
     prev_period = state["prev_period"]
-    meta = METRICS[code]
-    unit = _display_suffix(code)
-    cur_display = _display_value(code, current)
-    cmp_display = _display_value(code, compare)
+    unit = _display_suffix(meta)
+    cur_display = _display_value(meta, current)
+    cmp_display = _display_value(meta, compare)
 
     direction = "FLAT"
     if compare is not None and current is not None:
@@ -154,7 +143,7 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
     window = state.get("time_window")
     caliber = {
         "metric": meta.name,
-        "definition": meta.formula,
+        "definition": meta.definition,
         "time_range": window.get("label") if window else None,
         "data_updated_at": DATA_UPDATED_AT,
     }
@@ -174,11 +163,17 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-# =====================================================================
-# 节点（LangGraph Node）
-# =====================================================================
-def _make_nodes(adapter: ModelAdapter, executor: DemoQueryExecutor):
-    """绑定适配器/执行器，返回节点函数字典。"""
+def _mcp_context(state: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tool_context_token": state.get("tool_context_token"),
+        "invocation_id": state.get("invocation_id"),
+        "trace_id": state.get("trace_id"),
+        "tool_call_id": state.get("tool_call_id"),
+    }
+
+
+def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
+    """绑定适配器/语义工具客户端，返回节点函数字典。"""
 
     async def router(state: dict[str, Any]) -> dict[str, Any]:
         question = state["question"]
@@ -195,96 +190,150 @@ def _make_nodes(adapter: ModelAdapter, executor: DemoQueryExecutor):
         question = state["question"]
         events = [_tool_start("semantic_search", "正在检索指标语义…")]
         t0 = time.perf_counter()
+        ctx = _mcp_context(state)
 
-        # 澄清续跑（forced_metric_code）已由入口写入 metric_code：跳过歧义解析
+        try:
+            catalog = await tools.metric_catalog(ctx)
+        except McpBusinessError as exc:
+            events.append(_error(exc.code, exc.message, exc.retryable))
+            return {"events": events, "error": events[-1]["payload"]}
+
         forced = state.get("metric_code")
         if forced:
-            candidates = [forced]
+            candidates = [forced] if forced in catalog or tools.backend == "demo" else []
+            if forced and forced not in catalog and tools.backend == "demo":
+                candidates = [forced]
         else:
-            candidates = resolve_metrics(question)
+            candidates = [c for c in resolve_metrics(question) if c in catalog or tools.backend == "demo"]
+            # java_mcp：仅保留目录内指标
+            if tools.backend == "java_mcp":
+                candidates = [c for c in candidates if c in catalog]
+
         org_keys = resolve_orgs(question)
         try:
-            check_org_permission(state.get("user_no"), org_keys)
+            tools.check_org(state.get("user_no"), org_keys)
         except PermissionError as exc:
             events.append(_error(ERR_DATA_RANGE_FORBIDDEN, f"无权查询「{exc}」数据", False))
-            return {"events": events, "error": events[-1]["payload"]}
+            return {"events": events, "error": events[-1]["payload"], "org_keys": org_keys}
 
         events.append(_tool_end("semantic_search", int((time.perf_counter() - t0) * 1000), len(candidates)))
 
         if not candidates:
             events.append(_error(ERR_INTENT_NOT_UNDERSTOOD, "未能理解您的问句，请换个说法试试", True))
-            return {"events": events, "error": events[-1]["payload"]}
+            return {"events": events, "error": events[-1]["payload"], "org_keys": org_keys}
         if len(candidates) > 1:
-            events.append(_interrupt(ask_id, candidates))
+            options = []
+            for c in candidates[:MAX_CLARIFY_OPTIONS]:
+                label = catalog[c].name if c in catalog else c
+                options.append({"option_id": c, "label": label})
+            events.append({
+                "event": EVENT_INTERRUPT,
+                "payload": {
+                    "interrupt_type": "CLARIFY",
+                    "ask_id": ask_id,
+                    "questions": [{
+                        "question_id": f"{ask_id}-q1",
+                        "question": "您指的是哪个指标？",
+                        "multiple": False,
+                        "options": options,
+                    }],
+                },
+            })
             clarify = [{
                 "question_id": f"{ask_id}-q1",
                 "question": "您指的是哪个指标？",
-                "options": [{"option_id": c, "label": METRICS[c].name} for c in candidates[:MAX_CLARIFY_OPTIONS]],
+                "options": options,
             }]
             return {
                 "events": events,
                 "metric_candidates": candidates,
                 "clarify_questions": clarify,
+                "org_keys": org_keys,
             }
-        return {"events": events, "metric_candidates": candidates, "metric_code": candidates[0]}
+
+        code = candidates[0]
+        view = catalog.get(code) or MetricView(code=code, name=code, definition="")
+        return {
+            "events": events,
+            "metric_candidates": candidates,
+            "metric_code": code,
+            "metric_name": view.name,
+            "metric_view": view,
+            "org_keys": org_keys,
+        }
 
     async def nl2sql(state: dict[str, Any]) -> dict[str, Any]:
         code = state["metric_code"]
-        meta = METRICS[code]
+        meta = _metric_view(state)
         window = resolve_window(state["question"], state.get("context_override"))
-        org_comment = ""
-        if state.get("org_keys"):
-            org_comment = f" /* authz: org_path IN ('/G/{state['org_keys'][0]}') */"
-        sql = f'SELECT ({meta.formula}) AS "{code}"' + org_comment
-        if window is not None:
-            sql += (
-                f" WHERE dt >= '{window.start.isoformat()}' AND dt < '{window.end.isoformat()}'"
-            )
-        events = [_tool_start("sql_exec", f"正在查询「{meta.name}」…")]
+        events = [_tool_start("sql_exec", f"正在查询「{meta.name or code}」…")]
         return {
             "time_window": _window_to_dict(window),
-            "sql": sql,
+            "sql": None,
             "events": events,
-            "metric_name": meta.name,
+            "metric_name": meta.name or code,
         }
 
     async def execute(state: dict[str, Any]) -> dict[str, Any]:
         code = state["metric_code"]
-        sql = state["sql"]
         window_obj = None
         if state.get("time_window"):
             from datetime import date as _date
 
             w = state["time_window"]
-            start = _date.fromisoformat(w["start"])
-            end = _date.fromisoformat(w["end"])
-            window_obj = Window(start, end)
+            window_obj = Window(
+                _date.fromisoformat(w["start"]),
+                _date.fromisoformat(w["end"]),
+            )
 
         t0 = time.perf_counter()
-        current_result = executor.execute(sql, window_obj, prev_window=False)
-        current = current_result["value"]
-        ms = int((time.perf_counter() - t0) * 1000)
-        events = [_tool_end("sql_exec", ms, current_result["rows"])]
+        try:
+            result = await tools.query_metric(
+                code=code,
+                window=window_obj,
+                org_keys=list(state.get("org_keys") or []),
+                context=_mcp_context(state),
+            )
+        except McpBusinessError as exc:
+            return {
+                "events": [_error(exc.code, exc.message, exc.retryable)],
+                "error": {"code": exc.code, "message": exc.message, "recoverable": exc.retryable},
+            }
+        except PermissionError as exc:
+            return {
+                "events": [_error(ERR_DATA_RANGE_FORBIDDEN, f"无权查询「{exc}」数据", False)],
+                "error": {
+                    "code": ERR_DATA_RANGE_FORBIDDEN,
+                    "message": f"无权查询「{exc}」数据",
+                    "recoverable": False,
+                },
+            }
 
-        compare, prev_period = None, None
-        if window_obj is not None:
-            prev_result = executor.execute(sql, window_obj, prev_window=True)
-            compare = prev_result["value"]
-            prev_period = window_obj.prev().label
-        return {"current": current, "compare": compare, "prev_period": prev_period, "events": events}
+        ms = int((time.perf_counter() - t0) * 1000)
+        events = [_tool_end("sql_exec", ms, int(result.get("rows") or 0))]
+        metric = result.get("metric")
+        out: dict[str, Any] = {
+            "current": result.get("current"),
+            "compare": result.get("compare"),
+            "prev_period": result.get("prev_period"),
+            "events": events,
+        }
+        if isinstance(metric, MetricView):
+            out["metric_view"] = metric
+            out["metric_name"] = metric.name
+        return out
 
     async def present(state: dict[str, Any]) -> dict[str, Any]:
-        code = state["metric_code"]
-        meta = METRICS[code]
+        meta = _metric_view(state)
         current = state["current"]
         compare = state["compare"]
         prev_period = state["prev_period"]
-        unit = _display_suffix(code)
+        unit = _display_suffix(meta)
         percent = 1 if meta.percent else 0
 
         prompt = (
-            f"【结论摘要】metric={meta.name}|current={_display_value(code, current)}"
-            f"|compare={_display_value(code, compare) if compare is not None else ''}"
+            f"【结论摘要】metric={meta.name}|current={_display_value(meta, current)}"
+            f"|compare={_display_value(meta, compare) if compare is not None else ''}"
             f"|prev_period={prev_period or ''}|unit={unit}|percent={percent}"
         )
         sentence = await adapter.generate(prompt)
@@ -327,12 +376,9 @@ def _make_nodes(adapter: ModelAdapter, executor: DemoQueryExecutor):
     }
 
 
-# =====================================================================
-# 图构建与执行入口
-# =====================================================================
-def build_graph(adapter: ModelAdapter, executor: DemoQueryExecutor):
+def build_graph(adapter: ModelAdapter, tools: SemanticToolClient):
     """构建 LangGraph 有状态图（router→retrieve→nl2sql→execute→present）。"""
-    nodes = _make_nodes(adapter, executor)
+    nodes = _make_nodes(adapter, tools)
     graph = StateGraph(AskState)
     graph.add_node("router", nodes["router"])
     graph.add_node("retrieve", nodes["retrieve"])
@@ -356,15 +402,18 @@ def build_graph(adapter: ModelAdapter, executor: DemoQueryExecutor):
         ),
         {"nl2sql": "nl2sql", "end": END},
     )
+    graph.add_conditional_edges(
+        "execute",
+        lambda s: "end" if s.get("error") else "present",
+        {"present": "present", "end": END},
+    )
     graph.add_edge("nl2sql", "execute")
-    graph.add_edge("execute", "present")
     graph.add_edge("present", END)
     graph.add_edge("present_chitchat", END)
     return graph.compile()
 
 
 def _apply(state: dict[str, Any], node_result: dict[str, Any]) -> dict[str, Any]:
-    """按 LangGraph 语义应用节点返回：events 追加，其余覆盖。"""
     node_events = node_result.pop("events", None)
     state.update(node_result)
     if node_events:
@@ -378,17 +427,28 @@ async def run_ask_flow(
     session_id: str,
     ask_id: str,
     adapter: ModelAdapter,
-    executor: DemoQueryExecutor,
+    tools: Optional[SemanticToolClient] = None,
     mode: str = "STREAM",
     context_override: Optional[dict[str, Any]] = None,
     user_no: Optional[str] = None,
     forced_metric_code: Optional[str] = None,
     use_langgraph: Optional[bool] = None,
+    tool_context_token: Optional[str] = None,
+    invocation_id: Optional[str] = None,
+    trace_id: Optional[str] = None,
+    executor: Any = None,
 ) -> dict[str, Any]:
-    """执行一次问数（SYNC/STREAM 共用），返回完整状态（含 events 与 answer_payload）。
+    """执行一次问数（SYNC/STREAM 共用）。
 
-    澄清续跑：传入 ``forced_metric_code`` 跳过歧义分支。
+    ``tools`` 为 SemanticToolClient；若仅传遗留 ``executor``（DemoQueryExecutor），
+    自动包装为 DemoSemanticToolClient。
     """
+    if tools is None and executor is not None:
+        from adapters.semantic_tool_client import DemoSemanticToolClient
+        tools = DemoSemanticToolClient(executor)
+    if tools is None:
+        raise TypeError("run_ask_flow 需要 tools=SemanticToolClient")
+
     start_ts = time.perf_counter()
     state = new_state(
         session_id=session_id,
@@ -397,18 +457,21 @@ async def run_ask_flow(
         mode=mode,
         context_override=context_override,
         user_no=user_no,
+        tool_context_token=tool_context_token,
+        invocation_id=invocation_id,
+        trace_id=trace_id,
     )
     if forced_metric_code:
         state["metric_code"] = forced_metric_code
 
     if use_langgraph is None:
         use_langgraph = LANGGRAPH_AVAILABLE
-    graph = build_graph(adapter, executor) if use_langgraph else None
+    graph = build_graph(adapter, tools) if use_langgraph else None
 
     if graph is not None:
         result = await graph.ainvoke(state)
-    else:  # 退化顺序执行（无 langgraph 环境）
-        nodes = _make_nodes(adapter, executor)
+    else:
+        nodes = _make_nodes(adapter, tools)
         result = dict(state)
         _apply(result, await nodes["router"](result))
         if result.get("intent") == INTENT_CHITCHAT:
@@ -418,7 +481,8 @@ async def run_ask_flow(
             if not result.get("error") and not result.get("clarify_questions"):
                 _apply(result, await nodes["nl2sql"](result))
                 _apply(result, await nodes["execute"](result))
-                _apply(result, await nodes["present"](result))
+                if not result.get("error"):
+                    _apply(result, await nodes["present"](result))
 
     result["elapsed_ms"] = int((time.perf_counter() - start_ts) * 1000)
     if result.get("answer_payload"):

@@ -35,15 +35,16 @@ def test_tenant_config_isolation():
 
 
 def test_tenant_config_isolated_apply_keeps_other_slots():
-    """默认槽位与租户槽位相互独立：t02 下发不影响默认，t01 保持既有 mock 配置。"""
+    """默认槽位与租户槽位相互独立：t02 下发不影响默认，显式 t01 mock 不被冲掉。"""
     client = TestClient(create_app())
+    # 先给 t01 显式 mock，再改默认与 t02，验证显式租户槽位隔离
+    client.post("/v1/config", json={"tenant_no": "t01", "llm_profile": "mock"})
     client.post("/v1/config", json={"llm_profile": "openai", "base_url": "http:d", "model": "gpt-def"})
     client.post("/v1/config", json={"tenant_no": "t02", "llm_profile": "openai", "model": "gpt-t02"})
 
     # 默认槽位模型仍是 default 下发的 gpt-def，不受 t02 影响
     assert client.get("/v1/config/current").json()["model"] == "gpt-def"
     assert client.get("/v1/config/current?tenant_no=t02").json()["model"] == "gpt-t02"
-    # t01 未被下发 openai，保持既有 mock 配置（槽位隔离；未配置租户回退见 t03 用例）
     assert client.get("/v1/config/current?tenant_no=t01").json()["llm_profile"] == "mock"
 
 

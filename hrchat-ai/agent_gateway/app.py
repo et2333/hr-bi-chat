@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from adapters.llm_adapter import ModelAdapter
 from adapters.mock_llm import get_llm_adapter
+from adapters.semantic_tool_client import SemanticToolClient, build_semantic_tool_client
 from agent_gateway.schemas import (
     ASK_CLARIFYING,
     ASK_COMPLETED,
@@ -34,18 +35,30 @@ from agent_gateway.schemas import (
 )
 from agent_gateway.sse import EventBuffer, SseFramer
 from langgraph_flows.ask_flow import run_ask_flow
-from langgraph_flows.demo_data import DemoQueryExecutor
 from agentscope_teams.attribution_team import AttributionTeam
 
 # 环境变量：LLM_PROFILE=mock|openai；HEARTBEAT_INTERVAL=15
+# QUERY_BACKEND=java_mcp（默认）|demo；java_mcp 需 JAVA_MCP_BASE_URL + HRCHAT_MCP_SERVICE_TOKEN
 LLM_PROFILE = os.getenv("LLM_PROFILE", "mock")
 HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "15"))
 ALLOW_ORIGINS = os.getenv(
     "ALLOW_ORIGINS", "http://localhost:5173,http://localhost:5175"
 ).split(",")
+QUERY_BACKEND = os.getenv("QUERY_BACKEND", "java_mcp").strip().lower()
+JAVA_MCP_BASE_URL = os.getenv("JAVA_MCP_BASE_URL", "http://127.0.0.1:8080/mcp")
+HRCHAT_MCP_SERVICE_TOKEN = os.getenv("HRCHAT_MCP_SERVICE_TOKEN", "")
 
 # 无租户上下文时的默认运行时 key（P2：多租户运行时按 tenant_no 隔离）
 DEFAULT_TENANT_KEY = "default"
+
+
+def resolve_semantic_tools() -> SemanticToolClient:
+    """按 QUERY_BACKEND 装配语义工具客户端；java_mcp 缺配置时启动失败。"""
+    return build_semantic_tool_client(
+        QUERY_BACKEND,
+        mcp_base_url=JAVA_MCP_BASE_URL,
+        mcp_service_token=HRCHAT_MCP_SERVICE_TOKEN,
+    )
 
 
 class AskStore:
@@ -82,7 +95,6 @@ class AskStore:
 
 
 store = AskStore()
-executor = DemoQueryExecutor()
 
 # 可重建 LLM 适配器运行池（P2）：tenant_no → {"profile","adapter"}，缺省槽位 key=DEFAULT_TENANT_KEY。
 # Java 管理台经 POST /v1/config 热应用（带 tenant_no 则落到对应租户槽位，缺省走默认槽位）。
@@ -236,9 +248,18 @@ def build_insight(report_name: str, metric_name: str, categories: list, series: 
             "points": points}
 
 
-def create_app() -> FastAPI:
-    """创建 FastAPI 应用实例。"""
+def create_app(
+    *,
+    semantic_tools: Optional[SemanticToolClient] = None,
+) -> FastAPI:
+    """创建 FastAPI 应用实例。
+
+    默认按环境变量 ``QUERY_BACKEND`` 装配取数客户端；
+    单测可注入 ``semantic_tools``（通常为 DemoSemanticToolClient）。
+    """
+    tools = semantic_tools if semantic_tools is not None else resolve_semantic_tools()
     app = FastAPI(title="HR Chat AI Gateway", version="0.1.0")
+    app.state.semantic_tools = tools
 
     app.add_middleware(
         CORSMiddleware,
@@ -307,10 +328,13 @@ def create_app() -> FastAPI:
                 session_id=session_id,
                 ask_id=ask_id,
                 adapter=get_current_adapter(x_tenant_no),
-                executor=executor,
+                tools=tools,
                 mode=body.mode,
                 context_override=context_override,
                 user_no=x_user_no,
+                tool_context_token=body.tool_context_token,
+                invocation_id=body.invocation_id,
+                trace_id=body.trace_id,
             )
 
         if body.mode == "SYNC":
@@ -354,9 +378,18 @@ def create_app() -> FastAPI:
             for evt in result["events"]:
                 yield evt
             if result.get("answer_payload"):
-                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
-                                        "question": body.question, "user_no": x_user_no,
-                                        "status": ASK_COMPLETED, "answer_payload": result["answer_payload"]})
+                store.save_ask(ask_id, {
+                    "ask_id": ask_id,
+                    "session_id": session_id,
+                    "question": body.question,
+                    "user_no": x_user_no,
+                    "tenant_no": x_tenant_no,
+                    "invocation_id": body.invocation_id,
+                    "tool_context_token": body.tool_context_token,
+                    "trace_id": body.trace_id,
+                    "status": ASK_COMPLETED,
+                    "answer_payload": result["answer_payload"],
+                })
 
         async def stream_gen() -> AsyncGenerator[str, None]:
             for frame in replay_frames:
@@ -393,11 +426,14 @@ def create_app() -> FastAPI:
             session_id=session_id,
             ask_id=ask_id,
             adapter=get_current_adapter(stored.get("tenant_no")),
-            executor=executor,
+            tools=tools,
             mode="SYNC",
             context_override=stored.get("context_override"),
             user_no=x_user_no or stored.get("user_no"),
             forced_metric_code=forced_metric_code,
+            tool_context_token=stored.get("tool_context_token"),
+            invocation_id=stored.get("invocation_id"),
+            trace_id=stored.get("trace_id"),
         )
         terminal = _terminal_response(ask_id, result)
         store.save_ask(ask_id, {

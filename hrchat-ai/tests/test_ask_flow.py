@@ -1,4 +1,4 @@
-"""LangGraph 问数状态机用例（MockLLM 确定性链路）。"""
+"""LangGraph 问数状态机用例（MockLLM + QUERY_BACKEND=demo）。"""
 import pytest
 
 from agent_gateway.schemas import (
@@ -14,11 +14,12 @@ from agent_gateway.schemas import (
     INTENT_QUERY,
 )
 from adapters.mock_llm import MockLlmAdapter
+from adapters.semantic_tool_client import DemoSemanticToolClient
 from langgraph_flows.ask_flow import build_graph, run_ask_flow
 from langgraph_flows.demo_data import DemoQueryExecutor
 
 ADAPTER = MockLlmAdapter()
-EXECUTOR = DemoQueryExecutor()
+TOOLS = DemoSemanticToolClient(DemoQueryExecutor())
 
 
 async def _ask(question: str, **kwargs):
@@ -27,7 +28,7 @@ async def _ask(question: str, **kwargs):
         session_id="s1",
         ask_id="ask_test01",
         adapter=ADAPTER,
-        executor=EXECUTOR,
+        tools=TOOLS,
         **kwargs,
     )
 
@@ -109,7 +110,7 @@ async def test_not_understood_error():
 
 @pytest.mark.asyncio
 async def test_langgraph_build_and_invoke():
-    graph = build_graph(ADAPTER, EXECUTOR)
+    graph = build_graph(ADAPTER, TOOLS)
     result = await graph.ainvoke({
         "session_id": "s1", "ask_id": "ask_g", "question": "研发中心在职人数",
         "events": [], "clarify_questions": [],
@@ -122,10 +123,24 @@ async def test_sync_mode_result():
     result = await run_ask_flow(
         question="入职人数",
         session_id="s1", ask_id="ask_sync",
-        adapter=ADAPTER, executor=EXECUTOR, mode="SYNC",
+        adapter=ADAPTER, tools=TOOLS, mode="SYNC",
     )
     assert result["answer_payload"]["conclusion"]["value"] == 58
     assert result["answer_payload"]["elapsed_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_executor_kwarg_still_works():
+    """兼容旧参数名 executor=DemoQueryExecutor。"""
+    result = await run_ask_flow(
+        question="入职人数",
+        session_id="s1",
+        ask_id="ask_legacy",
+        adapter=ADAPTER,
+        executor=DemoQueryExecutor(),
+        mode="SYNC",
+    )
+    assert result["answer_payload"]["conclusion"]["value"] == 58
 
 
 @pytest.mark.asyncio
