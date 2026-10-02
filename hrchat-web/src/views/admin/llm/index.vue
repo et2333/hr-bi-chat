@@ -52,7 +52,7 @@
             <a-tag :color="record.status === 1 ? 'green' : 'red'">{{ record.status === 1 ? '启用' : '停用' }}</a-tag>
           </template>
           <template v-else-if="column.key === 'deployState'">
-            <a-tag :color="deployColor(record.deployState)">{{ record.deployState }}</a-tag>
+            <a-tag :color="deployColor(record.deployState)">{{ deployLabel(record.deployState) }}</a-tag>
           </template>
           <template v-else-if="column.key === 'healthStatus'">
             <a-tag :color="healthColor(record.healthStatus)">{{ record.healthStatus }}</a-tag>
@@ -132,9 +132,12 @@
           <div class="version-item">
             <div class="version-head">
               <span class="version-no">v{{ v.versionNo }}</span>
-              <a-tag :color="applyColor(v.applyResult)">{{ v.applyResult }}</a-tag>
+              <a-tag :color="applyColor(v.applyResult)">{{ applyLabel(v.applyResult) }}</a-tag>
             </div>
-            <div class="version-meta">应用时间：{{ formatDateTime(v.appliedAt) }} · 操作人：{{ v.appliedBy }}</div>
+            <div class="version-meta">
+              应用时间：{{ v.appliedAt ? formatDateTime(v.appliedAt) : '-' }}
+              · 操作人：{{ v.appliedBy || '-' }}
+            </div>
             <div v-if="v.changeNote" class="version-note">备注：{{ v.changeNote }}</div>
             <pre class="version-json">{{ v.configJson }}</pre>
             <a-popconfirm title="确定回滚到该版本？" @confirm="rollback(v)">
@@ -188,7 +191,11 @@ const columns = [
 ]
 
 function deployColor(s: string): string {
-  return { ACTIVE: 'green', FAILED: 'red', PENDING: 'default', APPLYING: 'blue' }[s] ?? 'default'
+  return { ACTIVE: 'green', SIMULATED: 'orange', FAILED: 'red', PENDING: 'default', APPLYING: 'blue' }[s] ?? 'default'
+}
+
+function deployLabel(s: string): string {
+  return s === 'SIMULATED' ? '模拟生效' : s
 }
 
 function healthColor(s: string): string {
@@ -238,11 +245,18 @@ const form = reactive<LlmForm>({
   deployUrl: '',
 })
 
-const rules = {
+const rules = computed(() => ({
   modelCode: [{ required: true, message: '请填写模型编码', trigger: 'blur' }],
   modelName: [{ required: true, message: '请填写模型名称', trigger: 'blur' }],
   vendor: [{ required: true, message: '请选择厂商', trigger: 'change' }],
-}
+  model: [{ required: true, message: '请填写模型标识（如 deepseek-chat）', trigger: 'blur' }],
+  ...(modalMode.value === 'create'
+    ? {
+        baseUrl: [{ required: true, message: '请填写模型 API Base URL', trigger: 'blur' }],
+        deployUrl: [{ required: true, message: '请填写 Python 网关 deployUrl', trigger: 'blur' }],
+      }
+    : {}),
+}))
 
 function openCreate() {
   modalMode.value = 'create'
@@ -363,11 +377,15 @@ const versionsLoading = ref(false)
 const rollingBackId = ref<number | null>(null)
 
 function versionColor(r: string): string {
-  return { SUCCESS: 'green', ROLLBACK: 'orange', FAILED: 'red', PENDING: 'gray' }[r] ?? 'gray'
+  return { SUCCESS: 'green', SIMULATED: 'orange', ROLLBACK: 'orange', FAILED: 'red', PENDING: 'gray' }[r] ?? 'gray'
 }
 
 function applyColor(r: string): string {
-  return { SUCCESS: 'green', ROLLBACK: 'orange', FAILED: 'red', PENDING: 'default' }[r] ?? 'default'
+  return { SUCCESS: 'green', SIMULATED: 'orange', ROLLBACK: 'orange', FAILED: 'red', PENDING: 'default' }[r] ?? 'default'
+}
+
+function applyLabel(r: string): string {
+  return r === 'SIMULATED' ? '模拟应用' : r
 }
 
 async function openVersions(record: LlmModelView) {

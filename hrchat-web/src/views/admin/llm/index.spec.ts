@@ -144,4 +144,23 @@ describe('views/admin/llm', () => {
     expect(text).toContain('健康')
     expect(text).toContain('删除')
   })
+
+  it('将 SIMULATED 状态展示为模拟生效', async () => {
+    getMock.mockImplementation((url: string) => {
+      if (url === '/admin/llm/monitor') {
+        return Promise.resolve({
+          code: 'SUCCESS', message: 'ok', traceId: 't',
+          data: { total: 1, active: 0, failed: 0, degraded: 0, items: [] },
+        })
+      }
+      return Promise.resolve({
+        code: 'SUCCESS', message: 'ok', traceId: 't',
+        data: { records: [{ ...RECORD, deployState: 'SIMULATED' }], total: 1, page: 1, size: 20 },
+      })
+    })
+
+    const wrapper = mount(LlmAdmin, { global: { plugins: [Antd] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('模拟生效')
+  })
 })

@@ -96,7 +96,7 @@ class LlmAdminControllerTest {
 
     @Test
     void listVersions_ok() throws Exception {
-        when(configService.versions(1L)).thenReturn(List.of(
+        when(configService.versions(eq(1L), any())).thenReturn(List.of(
                 new LlmViews.VersionView(2L, 2, "{}", "SUCCESS", LocalDateTime.now(), "hr01", "一键部署")));
         mockMvc.perform(get("/api/v1/admin/llm/models/1/versions").header("X-User-No", "hr01"))
                 .andExpect(status().isOk())
@@ -125,7 +125,7 @@ class LlmAdminControllerTest {
 
     @Test
     void health_ok() throws Exception {
-        when(healthService.check(1L)).thenReturn(new LlmViews.HealthView("qwen-max", "ACTIVE",
+        when(healthService.check(eq(1L), any())).thenReturn(new LlmViews.HealthView("qwen-max", "ACTIVE",
                 "UP", 12, "openai", LocalDateTime.now()));
         mockMvc.perform(get("/api/v1/admin/llm/models/1/health").header("X-User-No", "hr01"))
                 .andExpect(status().isOk())

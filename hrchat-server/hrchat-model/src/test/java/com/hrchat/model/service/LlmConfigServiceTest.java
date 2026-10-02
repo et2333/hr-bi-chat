@@ -18,6 +18,7 @@ import com.hrchat.model.entity.LlmModelVersion;
 import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
 import com.hrchat.model.mapper.LlmModelVersionMapper;
+import com.hrchat.model.runtime.AgentRuntimeFactory;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -55,6 +56,8 @@ class LlmConfigServiceTest {
     private LlmDeployStateMapper deployStateMapper;
     @Mock
     private AuditCollector auditCollector;
+    @Mock
+    private AgentRuntimeFactory runtimeFactory;
 
     private LlmConfigService service;
 
@@ -64,11 +67,15 @@ class LlmConfigServiceTest {
         TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""),
                 LlmModelConfig.class);
         service = new LlmConfigService(configMapper, versionMapper, deployStateMapper, auditCollector,
-                new ObjectMapper());
+                new ObjectMapper(), runtimeFactory);
     }
 
     private UserContext ctx() {
-        return UserContext.builder().empNo("hr01").build();
+        return UserContext.builder().empNo("hr01").roles(List.of("ADMIN")).build();
+    }
+
+    private UserContext tenantCtx(String tenantId, String role) {
+        return UserContext.builder().empNo("tenant-admin").tenantId(tenantId).roles(List.of(role)).build();
     }
 
     @Test
@@ -88,6 +95,8 @@ class LlmConfigServiceTest {
         assertEquals(1, vc.getValue().getVersionNo());
         assertEquals("PENDING", vc.getValue().getApplyResult());
         assertEquals(10L, vc.getValue().getConfigId());
+        assertTrue(!vc.getValue().getConfigJson().contains("apiKey"));
+        assertTrue(!vc.getValue().getConfigJson().contains("sk-1"));
         ArgumentCaptor<LlmDeployState> sc = ArgumentCaptor.forClass(LlmDeployState.class);
         verify(deployStateMapper).insert(sc.capture());
         assertEquals("PENDING", sc.getValue().getState());
@@ -114,6 +123,35 @@ class LlmConfigServiceTest {
                 new LlmViews.ModelCreateRequest(" ", "通义千问", "qwen", null, null, null,
                         null, null, null), ctx()));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+    }
+
+    @Test
+    void create_normalizesHttpUrls() {
+        when(configMapper.selectCount(any())).thenReturn(0L);
+        doAnswer(inv -> {
+            ((LlmModelConfig) inv.getArgument(0)).setId(13L);
+            return 1;
+        }).when(configMapper).insert(any());
+
+        service.create(new LlmViews.ModelCreateRequest("normalized", "规范地址", "qwen",
+                " https://model.example.com/v1/ ", null, "qwen-max", null, null,
+                "http://agent.example.com:8000/"), ctx());
+
+        verify(configMapper).insert(org.mockito.ArgumentMatchers.argThat(c ->
+                "https://model.example.com/v1".equals(c.getBaseUrl())
+                        && "http://agent.example.com:8000".equals(c.getDeployUrl())));
+    }
+
+    @Test
+    void create_rejectsInvalidHttpUrl() {
+        when(configMapper.selectCount(any())).thenReturn(0L);
+
+        BizException ex = assertThrows(BizException.class, () -> service.create(
+                new LlmViews.ModelCreateRequest("bad-url", "非法地址", "qwen",
+                        "file:///tmp/model", null, "qwen-max", null, null, null), ctx()));
+
+        assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+        assertEquals("baseUrl", ex.getArgs()[0]);
     }
 
     @Test
@@ -155,7 +193,7 @@ class LlmConfigServiceTest {
         c.setApiKey("sk-test12345678");
         c.setCreatedAt(LocalDateTime.of(2026, 9, 28, 10, 0));
         when(configMapper.selectById(1L)).thenReturn(c);
-        LlmViews.ModelDetailView d = service.detail(1L);
+        LlmViews.ModelDetailView d = service.detail(1L, ctx());
         assertEquals("sk-****5678", d.apiKeyMasked());
         assertEquals("qwen-max", d.modelCode());
     }
@@ -165,13 +203,13 @@ class LlmConfigServiceTest {
         LlmModelConfig c = config("qwen-max", "通义千问");
         c.setApiKey("");
         when(configMapper.selectById(1L)).thenReturn(c);
-        assertNull(service.detail(1L).apiKeyMasked());
+        assertNull(service.detail(1L, ctx()).apiKeyMasked());
     }
 
     @Test
     void detail_missing_throwsParamInvalid() {
         when(configMapper.selectById(99L)).thenReturn(null);
-        BizException ex = assertThrows(BizException.class, () -> service.detail(99L));
+        BizException ex = assertThrows(BizException.class, () -> service.detail(99L, ctx()));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
     }
 
@@ -200,8 +238,10 @@ class LlmConfigServiceTest {
         verify(versionMapper).insert(vc.capture());
         assertEquals(3, vc.getValue().getVersionNo());
         assertEquals("PENDING", vc.getValue().getApplyResult());
+        assertTrue(!vc.getValue().getConfigJson().contains("apiKey"));
         verify(deployStateMapper).updateById(org.mockito.ArgumentMatchers.argThat(
                 s -> "PENDING".equals(s.getState())));
+        verify(runtimeFactory).evictAfterCommit(c.getTenantId());
     }
 
     @Test
@@ -213,14 +253,32 @@ class LlmConfigServiceTest {
     }
 
     @Test
+    void patch_blankUrls_doNotOverwriteExistingValues() {
+        LlmModelConfig c = config("qwen-max", "通义千问");
+        c.setBaseUrl("https://model.example.com/v1");
+        c.setDeployUrl("http://agent.example.com:8000");
+        when(configMapper.selectById(1L)).thenReturn(c);
+        when(versionMapper.selectList(any())).thenReturn(List.of());
+
+        service.patch(1L, new LlmViews.ModelCreateRequest(null, null, null, "  ", null,
+                null, null, null, ""), ctx());
+
+        verify(configMapper).updateById(org.mockito.ArgumentMatchers.argThat(updated ->
+                "https://model.example.com/v1".equals(updated.getBaseUrl())
+                        && "http://agent.example.com:8000".equals(updated.getDeployUrl())));
+    }
+
+    @Test
     void delete_logicalDeleteAndAudit() {
         LlmModelConfig c = config("qwen-max", "通义千问");
         when(configMapper.selectById(1L)).thenReturn(c);
         service.delete(1L, ctx());
         verify(configMapper).updateById(org.mockito.ArgumentMatchers.argThat(
-                x -> x.getIsDeleted() != null && x.getIsDeleted() == 1));
+                x -> x.getStatus() != null && x.getStatus() == 0));
+        verify(configMapper).deleteById(1L);
         verify(auditCollector).record(org.mockito.ArgumentMatchers.argThat(
                 e -> AuditEvents.LLM_CONFIG_CHANGE.equals(e.eventType())));
+        verify(runtimeFactory).evictAfterCommit(c.getTenantId());
     }
 
     @Test
@@ -239,7 +297,9 @@ class LlmConfigServiceTest {
         v2.setApplyResult("SUCCESS");
         when(versionMapper.selectList(any())).thenReturn(List.of(v2, v1));
 
-        List<LlmViews.VersionView> views = service.versions(1L);
+        when(configMapper.selectById(1L)).thenReturn(config("qwen-max", "通义千问"));
+
+        List<LlmViews.VersionView> views = service.versions(1L, ctx());
 
         assertEquals(2, views.size());
         assertEquals(2, views.get(0).versionNo());
@@ -314,7 +374,8 @@ class LlmConfigServiceTest {
         when(configMapper.selectById(1L)).thenReturn(c);
         try {
             TenantContextHolder.set("t02");
-            BizException ex = assertThrows(BizException.class, () -> service.detail(1L));
+            BizException ex = assertThrows(BizException.class,
+                    () -> service.detail(1L, tenantCtx("t02", "TENANT_ADMIN")));
             assertEquals(ErrorCode.FUNC_FORBIDDEN, ex.getErrorCode());
         } finally {
             TenantContextHolder.clear();
@@ -328,7 +389,7 @@ class LlmConfigServiceTest {
         when(configMapper.selectById(1L)).thenReturn(c);
         try {
             TenantContextHolder.set("t02");
-            assertEquals("qwen-max", service.detail(1L).modelCode());
+            assertEquals("qwen-max", service.detail(1L, tenantCtx("t02", "TENANT_ADMIN")).modelCode());
         } finally {
             TenantContextHolder.clear();
         }
@@ -341,11 +402,87 @@ class LlmConfigServiceTest {
         when(configMapper.selectById(1L)).thenReturn(c);
         try {
             TenantContextHolder.set("t02");
-            BizException ex = assertThrows(BizException.class, () -> service.delete(1L, ctx()));
+            BizException ex = assertThrows(BizException.class,
+                    () -> service.delete(1L, tenantCtx("t02", "TENANT_ADMIN")));
             assertEquals(ErrorCode.FUNC_FORBIDDEN, ex.getErrorCode());
         } finally {
             TenantContextHolder.clear();
         }
+    }
+
+    @Test
+    void versions_redactsLegacyApiKey() {
+        LlmModelConfig c = config("qwen-max", "通义千问");
+        c.setTenantId("t01");
+        when(configMapper.selectById(1L)).thenReturn(c);
+        LlmModelVersion version = new LlmModelVersion();
+        version.setId(1L);
+        version.setConfigId(1L);
+        version.setVersionNo(1);
+        version.setConfigJson("{\"model\":\"qwen-max\",\"apiKey\":\"legacy-secret\",\"api_key\":\"legacy-snake\"}");
+        when(versionMapper.selectList(any())).thenReturn(List.of(version));
+
+        List<LlmViews.VersionView> views = service.versions(1L, tenantCtx("t01", "TENANT_ADMIN"));
+
+        assertEquals("{\"model\":\"qwen-max\"}", views.get(0).configJson());
+    }
+
+    @Test
+    void versions_otherTenant_throwsFuncForbidden() {
+        LlmModelConfig c = config("qwen-max", "通义千问");
+        c.setTenantId("t01");
+        when(configMapper.selectById(1L)).thenReturn(c);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> service.versions(1L, tenantCtx("t02", "TENANT_ADMIN")));
+
+        assertEquals(ErrorCode.FUNC_FORBIDDEN, ex.getErrorCode());
+    }
+
+    @Test
+    void tenantAdmin_canReadButCannotModifySystemDefault() {
+        LlmModelConfig systemDefault = config("default", "系统默认");
+        systemDefault.setTenantId(null);
+        when(configMapper.selectById(1L)).thenReturn(systemDefault);
+        UserContext tenantAdmin = tenantCtx("t01", "TENANT_ADMIN");
+
+        assertEquals("default", service.detail(1L, tenantAdmin).modelCode());
+        BizException patchError = assertThrows(BizException.class, () -> service.patch(1L,
+                new LlmViews.ModelCreateRequest(null, "changed", null, null, null, null,
+                        null, null, null), tenantAdmin));
+        BizException deleteError = assertThrows(BizException.class, () -> service.delete(1L, tenantAdmin));
+
+        assertEquals(ErrorCode.FUNC_FORBIDDEN, patchError.getErrorCode());
+        assertEquals(ErrorCode.FUNC_FORBIDDEN, deleteError.getErrorCode());
+    }
+
+    @Test
+    void platformAdmin_canModifySystemDefault() {
+        LlmModelConfig systemDefault = config("default", "系统默认");
+        systemDefault.setTenantId(null);
+        when(configMapper.selectById(1L)).thenReturn(systemDefault);
+
+        service.delete(1L, tenantCtx("t01", "ADMIN"));
+
+        verify(configMapper).updateById(org.mockito.ArgumentMatchers.argThat(
+                x -> Integer.valueOf(1).equals(x.getIsDeleted())));
+    }
+
+    @Test
+    void loadManageableVersion_validatesConfigAndVersionOwnership() {
+        LlmModelConfig c = config("qwen-max", "通义千问");
+        c.setTenantId("t01");
+        when(configMapper.selectById(1L)).thenReturn(c);
+        LlmModelVersion otherConfigVersion = new LlmModelVersion();
+        otherConfigVersion.setId(5L);
+        otherConfigVersion.setConfigId(2L);
+        when(versionMapper.selectById(5L)).thenReturn(otherConfigVersion);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> service.loadManageableVersion(1L, 5L, tenantCtx("t01", "TENANT_ADMIN")));
+
+        assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+        assertEquals("versionId", ex.getArgs()[0]);
     }
 
     private LlmModelConfig config(String code, String name) {
