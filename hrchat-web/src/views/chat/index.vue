@@ -73,11 +73,11 @@
           :auto-size="{ minRows: 1, maxRows: 4 }"
           placeholder="输入您的问题，Enter 发送，Shift+Enter 换行"
           :disabled="chat.asking"
-          @keydown.enter.exact.prevent="send(input)"
+          @keydown.enter.exact.prevent="send()"
         />
         <div class="input-actions">
           <span class="input-hint">支持「研发中心在职人数」「上月离职率」等自然语言问句</span>
-          <a-button type="primary" :loading="chat.asking" :disabled="!input.trim()" @click="send(input)">
+          <a-button type="primary" :loading="chat.asking" :disabled="!input.trim()" @click="send()">
             发送
           </a-button>
         </div>
@@ -169,12 +169,13 @@ async function loadTurns() {
 
 // ---------------- 问句发送与 SSE 消费 ----------------
 
-async function send(question: string) {
-  const q = (question ?? '').trim()
+async function send(question?: string) {
+  const q = (question ?? input.value).trim()
   if (!q || chat.asking) return
   const sessionId = chat.currentSessionId
   if (sessionId == null) return
 
+  // 先清输入框，避免 v-model 与按钮传参竞态导致问句残留
   input.value = ''
   chat.pushUserTurn(q)
   const turnId = chat.pushAssistantTurn()
@@ -190,12 +191,12 @@ async function send(question: string) {
       case 'INTERRUPT':
         chat.updateTurn(turnId, {
           state: 'clarifying',
-          clarify: payload as unknown as ClarifyQuestions,
+          clarify: normalizeClarify(payload),
         })
         break
       case 'ANSWER_DONE':
         // 先保存 payload；摘要仍在逐字打字时等 typingDone 再切完成态
-        chat.updateTurn(turnId, { payload: payload as unknown as AnswerPayload })
+        chat.updateTurn(turnId, { payload: normalizeAnswerPayload(payload) })
         tryFinalize(turnId)
         break
       case 'ERROR':
@@ -267,7 +268,25 @@ function handleError(turnId: string, payload: Record<string, unknown>) {
 }
 
 function retry(t: ChatTurn) {
-  if (t.question) send(t.question)
+  if (t.question) void send(t.question)
+}
+
+/** 兼容 Python snake_case 与 Java camelCase 的 askId */
+function resolveAskId(payload: Record<string, unknown> | AnswerPayload | null | undefined): string {
+  if (!payload) return ''
+  const raw = payload as Record<string, unknown>
+  const askId = raw.askId ?? raw.ask_id
+  return askId == null ? '' : String(askId)
+}
+
+function normalizeAnswerPayload(payload: Record<string, unknown>): AnswerPayload {
+  const askId = resolveAskId(payload)
+  return { ...(payload as unknown as AnswerPayload), askId }
+}
+
+function normalizeClarify(payload: Record<string, unknown>): ClarifyQuestions {
+  const askId = resolveAskId(payload)
+  return { ...(payload as unknown as ClarifyQuestions), askId }
 }
 
 async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; optionIds: string[] }>) {
@@ -282,7 +301,7 @@ async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; o
     if (event === 'MESSAGE_DELTA') {
       applyDelta(t.id, payload)
     } else if (event === 'ANSWER_DONE') {
-      chat.updateTurn(t.id, { payload: payload as unknown as AnswerPayload })
+      chat.updateTurn(t.id, { payload: normalizeAnswerPayload(payload) })
       tryFinalize(t.id)
     } else if (event === 'ERROR') {
       handleError(t.id, payload)
@@ -298,8 +317,12 @@ async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; o
 async function showSql(t: ChatTurn) {
   sqlView.value = null
   sqlVisible.value = true
-  const askId = t.payload?.askId
-  if (!askId) return
+  const askId = resolveAskId(t.payload as unknown as Record<string, unknown>)
+  if (!askId) {
+    message.error('缺少 askId，无法查看 SQL')
+    sqlVisible.value = false
+    return
+  }
   try {
     const res = await chatApi.getSql(askId)
     sqlView.value = res.data
@@ -310,7 +333,7 @@ async function showSql(t: ChatTurn) {
 }
 
 async function loadMoreTable(t: ChatTurn) {
-  const askId = t.payload?.askId
+  const askId = resolveAskId(t.payload as unknown as Record<string, unknown>)
   if (!askId || !t.payload?.table) return
   const nextPage = t.payload.table.page + 1
   const res = await chatApi.getTable(askId, nextPage, t.payload.table.size)
@@ -321,7 +344,7 @@ async function loadMoreTable(t: ChatTurn) {
 }
 
 function sendFeedback(t: ChatTurn, rating: 'UP' | 'DOWN') {
-  const askId = t.payload?.askId
+  const askId = resolveAskId(t.payload as unknown as Record<string, unknown>)
   if (!askId) return
   chatApi
     .feedback(askId, { rating, reason: rating === 'DOWN' ? 'OTHER' : undefined })
