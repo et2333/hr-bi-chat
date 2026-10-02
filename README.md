@@ -92,6 +92,9 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
 | 环境变量 | 用途 | 默认值 |
 |---|---|---|
 | `HRCHAT_PUSH_OUTPUT_DIR` | 订阅推送附件输出目录 | `./push-out` |
+| `HRCHAT_MCP_SERVICE_TOKEN` | Python→Java `/mcp` 服务令牌（禁止提交真实值） | `local-dev-mcp-service-token` |
+| `HRCHAT_TOOL_TOKEN_SECRET` | Java 签发短期工具 JWT 的 HS256 密钥（≥32 字节） | `local-dev-tool-token-secret-32b` |
+| `JAVA_MCP_BASE_URL` | Python 调用 Java MCP 的地址（阶段 D 客户端使用） | `http://127.0.0.1:8080/mcp` |
 | `LLM_PROFILE` | Python AI 模型配置，支持 `mock` 或 `openai` | `mock` |
 | `OPENAI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | OpenAI 兼容接口密钥 | 未设置 |
