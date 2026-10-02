@@ -70,8 +70,13 @@ cd hrchat-ai
 py -3.11 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e ".[dev]"
 $env:LLM_PROFILE = "mock"
+$env:QUERY_BACKEND = "java_mcp"
+$env:JAVA_MCP_BASE_URL = "http://127.0.0.1:8080/mcp"
+$env:HRCHAT_MCP_SERVICE_TOKEN = "local-dev-mcp-service-token"
 .\.venv\Scripts\python.exe -m uvicorn agent_gateway.app:app --host 127.0.0.1 --port 8000
 ```
+
+默认 `QUERY_BACKEND=java_mcp`：问数取数走 Java `/mcp`（`get_semantic_meta` / `semantic_query`），需同时配置 `JAVA_MCP_BASE_URL` 与 `HRCHAT_MCP_SERVICE_TOKEN`，否则 Python **启动失败**（避免误当正式）。仅本地假数据演示时显式设 `QUERY_BACKEND=demo`。MCP 客户端使用 `trust_env=False`，避免 Windows 系统代理把本机 `127.0.0.1` 请求变成空 body 的 HTTP 502。
 
 Python 健康检查：http://localhost:8000/health。随后在原 Java 终端停止后端（`Ctrl+C`），确认当前目录为 `hrchat-server`，再启动远程运行时：
 
@@ -85,7 +90,7 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
   --hrchat.ai.remote-base-url=http://localhost:8000
 ```
 
-注意：Python 当前仍使用独立的 `DemoQueryExecutor`，尚未统一到 Java 的数据执行链路，不能用它替代 Java 数据权限验收。后台 ACTIVE 模型部署配置优先于 `hrchat.ai.runtime`；测试默认本地链路时不要点击模型“一键部署”。
+注意：Java `hrchat.ai.runtime=local`（默认）不进 Python，现有本地演示不受影响。remote 链路与 MCP/`semantic_query` 同源（H2 种子），不再使用 Python 字典假数。ask/clarify 在 MVC 异步线程执行，以便 Python 回调本机 `/mcp`。后台 ACTIVE 模型部署配置优先于 `hrchat.ai.runtime`；测试默认本地链路时不要点击模型“一键部署”。
 
 ## 常用配置
 
@@ -94,7 +99,8 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
 | `HRCHAT_PUSH_OUTPUT_DIR` | 订阅推送附件输出目录 | `./push-out` |
 | `HRCHAT_MCP_SERVICE_TOKEN` | Python→Java `/mcp` 服务令牌（禁止提交真实值） | `local-dev-mcp-service-token` |
 | `HRCHAT_TOOL_TOKEN_SECRET` | Java 签发短期工具 JWT 的 HS256 密钥（≥32 字节） | `local-dev-tool-token-secret-32b` |
-| `JAVA_MCP_BASE_URL` | Python 调用 Java MCP 的地址（阶段 D 客户端使用） | `http://127.0.0.1:8080/mcp` |
+| `JAVA_MCP_BASE_URL` | Python 调用 Java MCP 的地址 | `http://127.0.0.1:8080/mcp` |
+| `QUERY_BACKEND` | Python 取数后端：`java_mcp`（正式）/ `demo`（假数据） | `java_mcp` |
 | `LLM_PROFILE` | Python AI 模型配置，支持 `mock` 或 `openai` | `mock` |
 | `OPENAI_BASE_URL` | OpenAI 兼容接口地址 | `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | OpenAI 兼容接口密钥 | 未设置 |
