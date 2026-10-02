@@ -1,6 +1,7 @@
 package com.hrchat.aiclient.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
 import com.hrchat.aiclient.model.InsightRequest;
@@ -64,17 +65,21 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
 
     @Override
     public AgentResult ask(AskRequest request, UserContext ctx) {
+        return ask(request, ctx, null);
+    }
+
+    @Override
+    public AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation) {
         long start = System.currentTimeMillis();
-        // AgentRuntimeClient 暂未接收 Java 会话 ID；先为每次新问答分配隔离 ID，
-        // 并将澄清请求绑定回同一远程会话，避免同工号并发会话互相污染。
-        String sessionId = "java-" + UUID.randomUUID();
+        String sessionId = resolveSessionId(invocation, null);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("question", request.question());
         body.put("mode", "SYNC");
         if (request.contextOverride() != null) {
             body.put("context_override", toRemoteContext(request.contextOverride()));
         }
-        HttpHeaders headers = requestHeaders(ctx);
+        putInvocationFields(body, invocation);
+        HttpHeaders headers = requestHeaders(ctx, invocation);
         ResponseEntity<Map> resp = restTemplate.postForEntity(
                 baseUrl + "/v1/chat/sessions/" + sessionId + "/asks",
                 new HttpEntity<>(body, headers), Map.class);
@@ -87,13 +92,21 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
 
     @Override
     public AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers, UserContext ctx) {
+        return clarify(askId, question, answers, ctx, null);
+    }
+
+    @Override
+    public AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers,
+                               UserContext ctx, AgentInvocationContext invocation) {
         long start = System.currentTimeMillis();
-        String sessionId = pendingSessionIds.getOrDefault(askId, "java-" + UUID.randomUUID());
+        String sessionId = resolveSessionId(invocation, askId);
         Map<String, Object> answer = new LinkedHashMap<>();
         answer.put("question_id", answers.questionId());
         answer.put("option_ids", answers.optionIds());
-        Map<String, Object> body = Map.of("answers", List.of(answer));
-        HttpHeaders headers = requestHeaders(ctx);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("answers", List.of(answer));
+        putInvocationFields(body, invocation);
+        HttpHeaders headers = requestHeaders(ctx, invocation);
         ResponseEntity<Map> resp = restTemplate.postForEntity(
                 baseUrl + "/v1/chat/sessions/" + sessionId + "/asks/" + askId + "/clarifications",
                 new HttpEntity<>(body, headers), Map.class);
@@ -180,18 +193,46 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         throw new BizException(ErrorCode.AI_DEGRADED);
     }
 
-    private HttpHeaders requestHeaders(UserContext ctx) {
+    private String resolveSessionId(AgentInvocationContext invocation, String askId) {
+        if (invocation != null && invocation.sessionId() != null && !invocation.sessionId().isBlank()) {
+            return invocation.sessionId();
+        }
+        if (askId != null) {
+            return pendingSessionIds.getOrDefault(askId, "java-" + UUID.randomUUID());
+        }
+        return "java-" + UUID.randomUUID();
+    }
+
+    private void putInvocationFields(Map<String, Object> body, AgentInvocationContext invocation) {
+        if (invocation == null) {
+            return;
+        }
+        putIfNotNull(body, "invocation_id", invocation.invocationId());
+        putIfNotNull(body, "tool_context_token", invocation.toolContextToken());
+        putIfNotNull(body, "trace_id", invocation.traceId());
+        putIfNotNull(body, "java_ask_id", invocation.javaAskId());
+    }
+
+    private HttpHeaders requestHeaders(UserContext ctx, AgentInvocationContext invocation) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("X-User-No", ctx.getEmpNo());
-        String effectiveTenant = tenantNo != null && !tenantNo.isBlank() ? tenantNo : ctx.getTenantId();
+        String effectiveTenant = invocation != null && invocation.tenantId() != null && !invocation.tenantId().isBlank()
+                ? invocation.tenantId()
+                : (tenantNo != null && !tenantNo.isBlank() ? tenantNo : ctx.getTenantId());
         if (effectiveTenant != null && !effectiveTenant.isBlank()) {
             headers.set("X-Tenant-No", effectiveTenant);
+        }
+        if (invocation != null && invocation.traceId() != null && !invocation.traceId().isBlank()) {
+            headers.set("X-Trace-Id", invocation.traceId());
         }
         return headers;
     }
 
-    private Map<String, Object> toRemoteContext(ContextOverride context) {
+    /**
+     * Web camelCase 扁平 ContextOverride → 跨栈嵌套 snake_case（阶段 B 契约 3A）。
+     */
+    public static Map<String, Object> toRemoteContext(ContextOverride context) {
         Map<String, Object> remote = new LinkedHashMap<>();
         if (context.timeRange() != null) {
             Map<String, Object> timeRange = new LinkedHashMap<>();
@@ -211,7 +252,7 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         return remote;
     }
 
-    private void putIfNotNull(Map<String, Object> target, String key, Object value) {
+    private static void putIfNotNull(Map<String, Object> target, String key, Object value) {
         if (value != null) {
             target.put(key, value);
         }

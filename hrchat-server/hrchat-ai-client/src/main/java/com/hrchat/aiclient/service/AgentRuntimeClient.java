@@ -1,5 +1,6 @@
 package com.hrchat.aiclient.service;
 
+import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.api.chat.AskRequest;
@@ -28,6 +29,14 @@ public interface AgentRuntimeClient {
     AgentResult ask(AskRequest request, UserContext ctx);
 
     /**
+     * 提交问句（带显式调用上下文：invocation/tool token/session）。
+     * 默认忽略上下文并回退到 {@link #ask(AskRequest, UserContext)}；远程实现必须覆盖。
+     */
+    default AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation) {
+        return ask(request, ctx);
+    }
+
+    /**
      * 澄清续答：基于原问句 + 用户选项继续原问答流（接口文档 2.2.6）。
      *
      * @param askId    原问句 id
@@ -37,6 +46,12 @@ public interface AgentRuntimeClient {
      * @return 续跑后的编排结果
      */
     AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers, UserContext ctx);
+
+    /** 澄清续答（带显式调用上下文）。默认忽略上下文。 */
+    default AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers,
+                                UserContext ctx, AgentInvocationContext invocation) {
+        return clarify(askId, question, answers, ctx);
+    }
 
     /**
      * 报表 AI 洞察（P3-C）：默认实现为本地确定性模板解读（均值/趋势/极值）；

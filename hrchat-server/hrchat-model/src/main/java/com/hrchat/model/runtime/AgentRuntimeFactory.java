@@ -2,6 +2,7 @@ package com.hrchat.model.runtime;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
@@ -203,8 +204,19 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     }
 
     @Override
+    public AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation) {
+        return resolve(ctx).ask(request, ctx, invocation);
+    }
+
+    @Override
     public AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers, UserContext ctx) {
         return resolve(ctx).clarify(askId, question, answers, ctx);
+    }
+
+    @Override
+    public AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers,
+                               UserContext ctx, AgentInvocationContext invocation) {
+        return resolve(ctx).clarify(askId, question, answers, ctx, invocation);
     }
 
     /**

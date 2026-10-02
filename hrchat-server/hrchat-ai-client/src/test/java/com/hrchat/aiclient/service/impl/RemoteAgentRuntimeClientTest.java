@@ -1,6 +1,7 @@
 package com.hrchat.aiclient.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
 import com.hrchat.api.chat.AnswerPayload;
@@ -156,6 +157,28 @@ class RemoteAgentRuntimeClientTest {
         assertEquals(Map.of("org_id", "35", "include_children", false), context.get("org"));
         assertEquals(List.of("headcount"), context.get("metrics"));
         assertEquals("t01", entityCaptor.getValue().getHeaders().getFirst("X-Tenant-No"));
+    }
+
+    @Test
+    void ask_withInvocation_sendsRealSessionAndToolToken() {
+        AnswerPayload payload = new AnswerPayload("ask_7", "ans_1", "COMPLETED", "QUERY", false, null,
+                null, null, null, null, List.of(), 10L);
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(new ResponseEntity<>(completed(payload), HttpStatus.OK));
+        AgentInvocationContext invocation = new AgentInvocationContext(
+                "t01", "42", null, "inv-9", "traceabc", "tool-jwt");
+
+        client.ask(new AskRequest("问题", "SYNC", null), ctx, invocation);
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).postForEntity(
+                argThat((String url) -> url.contains("/sessions/42/") && url.endsWith("/asks")),
+                entityCaptor.capture(), eq(Map.class));
+        Map<?, ?> body = (Map<?, ?>) entityCaptor.getValue().getBody();
+        assertEquals("inv-9", body.get("invocation_id"));
+        assertEquals("tool-jwt", body.get("tool_context_token"));
+        assertEquals("traceabc", body.get("trace_id"));
+        assertEquals("traceabc", entityCaptor.getValue().getHeaders().getFirst("X-Trace-Id"));
     }
 
     @Test

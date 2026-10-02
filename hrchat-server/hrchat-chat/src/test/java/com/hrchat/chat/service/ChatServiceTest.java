@@ -71,6 +71,8 @@ class ChatServiceTest {
     @Mock
     private AuthzService authzService;
     @Mock
+    private com.hrchat.authz.mcp.ToolContextTokenService toolContextTokenService;
+    @Mock
     private AuditCollector auditCollector;
     @Mock
     private IdempotencyService idempotencyService;
@@ -83,8 +85,9 @@ class ChatServiceTest {
     void setUp() {
         askStore = new ChatAskStore();
         chatService = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
-                feedbackMapper, askStore, idempotencyService, agentRuntime, authzService, auditCollector,
-                new ObjectMapper());
+                feedbackMapper, askStore, idempotencyService, agentRuntime, authzService,
+                toolContextTokenService, auditCollector, new ObjectMapper());
+        lenient().when(toolContextTokenService.issue(any(), any(), any())).thenReturn("test-tool-token");
         lenient().when(idempotencyService.execute(any(UserContext.class), anyString(), anyString(), anyString(),
                         nullable(String.class), any(), eq(ChatService.AskOutcome.class), any()))
                 .thenAnswer(invocation -> {
@@ -141,7 +144,7 @@ class ChatServiceTest {
             inv.getArgument(0, ChtTurn.class).setId(10L);
             return 1;
         }).when(turnMapper).insert(any());
-        when(agentRuntime.ask(any(), any())).thenReturn(completedResult("ask_abc"));
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(completedResult("ask_abc"));
 
         ChatService.AskOutcome outcome = chatService.ask(hr01, 1L,
                 new AskRequest("研发中心在职人数", "STREAM", null), null);
@@ -169,7 +172,7 @@ class ChatServiceTest {
             inv.getArgument(0, ChtTurn.class).setId(10L);
             return 1;
         }).when(turnMapper).insert(any());
-        when(agentRuntime.ask(any(), any())).thenReturn(completedResult("ask_sync"));
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(completedResult("ask_sync"));
 
         ChatService.AskOutcome outcome = chatService.ask(hr01, 1L,
                 new AskRequest("研发中心在职人数", "SYNC", null), null);
@@ -188,7 +191,7 @@ class ChatServiceTest {
             inv.getArgument(0, ChtTurn.class).setId(10L);
             return 1;
         }).when(turnMapper).insert(any());
-        when(agentRuntime.ask(any(), any())).thenReturn(completedResult("ask_idem1"));
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(completedResult("ask_idem1"));
 
         AtomicReference<ChatService.AskOutcome> stored = new AtomicReference<>();
         doAnswer(invocation -> {
@@ -211,7 +214,7 @@ class ChatServiceTest {
                 new AskRequest("研发中心在职人数", "SYNC", null), "key-1");
         assertEquals("ask_idem1", replay.askId());
         assertTrue(replay.replayed());
-        verify(agentRuntime).ask(any(), any());
+        verify(agentRuntime).ask(any(), any(), any());
 
         // 处理中不可重入。
         BizException ex = assertThrows(BizException.class,
@@ -229,7 +232,7 @@ class ChatServiceTest {
             inv.getArgument(0, ChtTurn.class).setId(10L);
             return 1;
         }).when(turnMapper).insert(any());
-        when(agentRuntime.ask(any(), any())).thenReturn(clarifyingResult("ask_clr"));
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(clarifyingResult("ask_clr"));
 
         ChatService.AskOutcome first = chatService.ask(hr01, 1L,
                 new AskRequest("上月离职人数和入职人数", "STREAM", null), null);
@@ -241,7 +244,7 @@ class ChatServiceTest {
         answer.setId(100L);
         answer.setTurnId(10L);
         when(answerMapper.selectOne(any())).thenReturn(answer);
-        when(agentRuntime.clarify(any(), any(), any(), any())).thenReturn(completedResult("ask_clr"));
+        when(agentRuntime.clarify(any(), any(), any(), any(), any())).thenReturn(completedResult("ask_clr"));
 
         ChatService.AskOutcome second = chatService.clarify(hr01, 1L, "ask_clr",
                 new ClarifyAnswerRequest(List.of(new ClarifyAnswerRequest.Answer("ask_clr-q1", List.of("hire_count")))));

@@ -295,6 +295,9 @@ def create_app() -> FastAPI:
             "context_override": context_override,
             "user_no": x_user_no,
             "tenant_no": x_tenant_no,
+            "invocation_id": body.invocation_id,
+            "tool_context_token": body.tool_context_token,
+            "trace_id": body.trace_id,
             "status": "RUNNING",
         })
 
@@ -312,20 +315,25 @@ def create_app() -> FastAPI:
 
         if body.mode == "SYNC":
             result = await run()
+            # 澄清态必须保留 tool_context_token / invocation_id，供后续 MCP 转交
+            base_ask = {
+                "ask_id": ask_id,
+                "session_id": session_id,
+                "question": body.question,
+                "context_override": context_override,
+                "user_no": x_user_no,
+                "tenant_no": x_tenant_no,
+                "invocation_id": body.invocation_id,
+                "tool_context_token": body.tool_context_token,
+                "trace_id": body.trace_id,
+            }
             if result.get("answer_payload"):
-                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
-                                        "question": body.question, "user_no": x_user_no,
-                                        "status": ASK_COMPLETED, "answer_payload": result["answer_payload"]})
+                store.save_ask(ask_id, {**base_ask, "status": ASK_COMPLETED,
+                                        "answer_payload": result["answer_payload"]})
             elif result.get("clarify_questions"):
-                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
-                                        "question": body.question,
-                                        "context_override": context_override,
-                                        "user_no": x_user_no, "tenant_no": x_tenant_no,
-                                        "status": ASK_CLARIFYING})
+                store.save_ask(ask_id, {**base_ask, "status": ASK_CLARIFYING})
             else:
-                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
-                                        "question": body.question, "user_no": x_user_no,
-                                        "tenant_no": x_tenant_no, "status": ASK_FAILED,
+                store.save_ask(ask_id, {**base_ask, "status": ASK_FAILED,
                                         "error": result.get("error")})
             return _terminal_response(ask_id, result)
 
@@ -372,6 +380,13 @@ def create_app() -> FastAPI:
         if not body.answers:
             raise HTTPException(400, "answers 不能为空")
         forced_metric_code = body.answers[0].option_ids[0]
+        # Java 澄清续签时覆盖；未携带则沿用首次问数落库的令牌
+        if body.invocation_id:
+            stored["invocation_id"] = body.invocation_id
+        if body.tool_context_token:
+            stored["tool_context_token"] = body.tool_context_token
+        if body.trace_id:
+            stored["trace_id"] = body.trace_id
 
         result = await run_ask_flow(
             question=stored["question"],
