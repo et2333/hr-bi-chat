@@ -49,6 +49,11 @@ hrchat:
     remote-base-url: http://localhost:8000
     # 本地演示：一键部署跳过 Python 调用（true）；生产置 false 走真实下发+健康检查
     deploy-mock: true
+  mcp:
+    # 生产请用环境变量 HRCHAT_MCP_SERVICE_TOKEN / HRCHAT_TOOL_TOKEN_SECRET 覆盖，禁止提交真实密钥
+    service-token: ${HRCHAT_MCP_SERVICE_TOKEN:local-dev-mcp-service-token}
+    tool-token-secret: ${HRCHAT_TOOL_TOKEN_SECRET:local-dev-tool-token-secret-32b}
+    tool-token-ttl-seconds: 300
   chat:
     max-question-length: 500
     sse-heartbeat-seconds: 15
