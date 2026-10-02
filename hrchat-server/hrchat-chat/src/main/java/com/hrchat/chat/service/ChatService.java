@@ -192,7 +192,9 @@ public class ChatService {
                 ? SseEvents.ASK_CLARIFYING
                 : (result.payload() == null ? SseEvents.ASK_FAILED : SseEvents.ASK_COMPLETED);
         AnswerPayload payload = result.payload() != null ? result.payload()
-                : clarifyingPayload(askId, result.intent(), result.clarifyQuestions());
+                : (result.isClarifying()
+                ? clarifyingPayload(askId, result.intent(), result.clarifyQuestions())
+                : null);
         String sseBody = buildSse(result);
 
         askStore.put(new ChatAskStore.AskRecord(askId, sessionId, ctx.getUserId(), ctx.getTenantId(), turnId,
@@ -225,7 +227,9 @@ public class ChatService {
                 ? SseEvents.ASK_CLARIFYING
                 : (result.payload() == null ? SseEvents.ASK_FAILED : SseEvents.ASK_COMPLETED);
         AnswerPayload payload = result.payload() != null ? result.payload()
-                : clarifyingPayload(askId, result.intent(), result.clarifyQuestions());
+                : (result.isClarifying()
+                ? clarifyingPayload(askId, result.intent(), result.clarifyQuestions())
+                : null);
         String sseBody = buildSse(result);
 
         updateTurnAnswer(record.turnId(), ctx, payload, result.elapsedMs());

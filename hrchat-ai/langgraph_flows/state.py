@@ -13,12 +13,17 @@ class AskState(TypedDict, total=False):
     mode: str  # STREAM / SYNC
     context_override: Optional[dict[str, Any]]
     user_no: Optional[str]
+    tool_context_token: Optional[str]
+    invocation_id: Optional[str]
+    trace_id: Optional[str]
+    tool_call_id: Optional[str]
 
     # 意图 / 语义解析
     intent: str  # QUERY / CHITCHAT
     metric_candidates: list[str]
     metric_code: Optional[str]
     metric_name: Optional[str]
+    metric_view: Optional[Any]
     org_keys: list[str]
 
     # 时间窗口 / SQL / 执行
@@ -45,7 +50,12 @@ def new_state(**kwargs: Any) -> dict[str, Any]:
         "metric_candidates": [],
         "metric_code": None,
         "metric_name": None,
+        "metric_view": None,
         "org_keys": [],
+        "tool_context_token": None,
+        "invocation_id": None,
+        "trace_id": None,
+        "tool_call_id": None,
         "time_window": None,
         "sql": None,
         "current": None,

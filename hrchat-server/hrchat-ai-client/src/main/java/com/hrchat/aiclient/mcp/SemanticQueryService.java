@@ -24,6 +24,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * MCP semantic_query 门面：语义对象 → SQL 模板 → 权限改写 → 只读执行 → 字段脱敏。
@@ -139,9 +141,11 @@ public class SemanticQueryService {
 
     private Map<String, Object> toMaskedResult(UserContext user, List<MetricDetail> metrics,
                                                QueryResult raw, int limit) {
+        Set<String> metricCodes = metrics.stream().map(MetricDetail::code).collect(Collectors.toSet());
         List<Map<String, Object>> columns = new ArrayList<>();
         for (QueryResult.ColumnMeta col : raw.columns()) {
-            int policy = authzService.decideFieldPolicy(user, col.key());
+            // 指标聚合列是 KPI 结果，不是 PII 字段；未知 fieldCode 默认脱敏会导致 Python 无法数值化
+            int policy = fieldPolicyForColumn(user, col.key(), metricCodes);
             boolean masked = policy != 4;
             Map<String, Object> c = new LinkedHashMap<>();
             c.put("key", col.key());
@@ -160,7 +164,7 @@ public class SemanticQueryService {
             for (Map<String, Object> col : columns) {
                 String key = String.valueOf(col.get("key"));
                 Object value = row.get(key);
-                int policy = authzService.decideFieldPolicy(user, key);
+                int policy = fieldPolicyForColumn(user, key, metricCodes);
                 if (policy == 1) {
                     values.add(null);
                 } else if (policy == 4 || value == null) {
@@ -185,6 +189,13 @@ public class SemanticQueryService {
         out.put("permission_rewrite_applied", true);
         out.put("row_count", rows.size());
         return out;
+    }
+
+    private int fieldPolicyForColumn(UserContext user, String columnKey, Set<String> metricCodes) {
+        if (columnKey != null && metricCodes.contains(columnKey)) {
+            return 4;
+        }
+        return authzService.decideFieldPolicy(user, columnKey);
     }
 
     /**

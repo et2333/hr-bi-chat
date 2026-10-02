@@ -192,10 +192,15 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     }
 
     /**
-     * 请求租户解析：优先线程上下文（X-Tenant-No），否则默认槽位。
+     * 请求租户解析：优先线程上下文，其次 UserContext.tenantId，否则默认槽位。
+     * ask/clarify 在 MVC 异步线程执行时过滤器可能已清空 TenantContextHolder，需回退 ctx。
      */
     private AgentRuntimeClient resolve(UserContext ctx) {
-        return getDelegate(TenantContextHolder.get());
+        String tenant = TenantContextHolder.get();
+        if ((tenant == null || tenant.isBlank()) && ctx != null) {
+            tenant = ctx.getTenantId();
+        }
+        return getDelegate(tenant);
     }
 
     @Override

@@ -342,4 +342,13 @@ local 的 `X-User-No` 仅用于浏览器到 Java 的 mock 身份切换。它不�
 - `McpController` 留 authz 鉴权分发；业务 handler 与 `SemanticQueryService` 放 `hrchat-ai-client`。
 - 行数默认封顶 200；请求 `limit` 不可超过；结果强制字段策略脱敏；禁止 Python 指定 SQL/数据源。
 
+阶段 D 实施决策（2026-10-02）：
+
+- 默认 `QUERY_BACKEND=java_mcp`；缺 `JAVA_MCP_BASE_URL` / `HRCHAT_MCP_SERVICE_TOKEN` 时 Python 启动失败。
+- 正式链路：`retrieve` ← `get_semantic_meta`；`execute` ← `semantic_query`；去掉远程路径上的 `GRANTED_ORGS`。
+- `QUERY_BACKEND=demo` 仅单测/独立演示（假数据）；Java `runtime=local` 不受影响。
+- MCP 超时 8s，传输/5xx 重试 1 次（同一 `tool_call_id`）；业务 `-32000`（如 HRC-2003）不重试、不回退 Demo。
+- 归因（AttributionTeam）本期不动。
+- remote 问数：`ChatController` ask/clarify 以 MVC `Callable` 异步执行，释放 Tomcat 请求线程，避免 Python 回调 `/mcp` 同进程回环 502。
+
 当前没有需要产品侧补充的业务决策。若进入生产部署阶段，需要再确认企业内部服务认证设施（统一服务 JWT 或 mTLS）以及密钥管理平台；这不阻塞当前 local/demo 编码。

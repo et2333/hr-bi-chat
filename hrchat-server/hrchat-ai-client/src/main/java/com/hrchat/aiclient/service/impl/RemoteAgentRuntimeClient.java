@@ -1,6 +1,7 @@
 package com.hrchat.aiclient.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
@@ -43,6 +44,8 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
     private final String model;
     private final String tenantNo;
     private final ObjectMapper objectMapper;
+    /** Python 信封/payload 为 snake_case，与 Web camelCase 区分。 */
+    private final ObjectMapper snakeCaseMapper;
     private final RestTemplate restTemplate;
     private final Map<String, String> pendingSessionIds = new ConcurrentHashMap<>();
 
@@ -60,6 +63,8 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         this.model = model;
         this.tenantNo = tenantNo;
         this.objectMapper = objectMapper;
+        this.snakeCaseMapper = objectMapper.copy()
+                .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
         this.restTemplate = restTemplate;
     }
 
@@ -148,15 +153,24 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         String status = json == null ? null : stringValue(json.get("status"));
         if (SseEvents.ASK_COMPLETED.equals(status) && json.get("answer_payload") != null) {
             Object answerPayload = json.get("answer_payload");
-            AnswerPayload payload = objectMapper.convertValue(answerPayload, AnswerPayload.class);
+            // Python 输出 snake_case；SSE/前端契约为 camelCase
+            AnswerPayload payload = snakeCaseMapper.convertValue(answerPayload, AnswerPayload.class);
             String askId = payload.askId() != null && !payload.askId().isBlank()
                     ? payload.askId() : stringValue(json.get("ask_id"));
             if (askId == null || askId.isBlank()) {
                 askId = "ask_remote";
             }
+            if (payload.askId() == null || payload.askId().isBlank()) {
+                payload = new AnswerPayload(askId, payload.answerId(), payload.status(), payload.intent(),
+                        payload.degraded(), payload.degradedTip(), payload.conclusion(), payload.table(),
+                        payload.chart(), payload.caliber(), payload.followups(), payload.elapsedMs());
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> payloadMap = objectMapper.convertValue(payload, Map.class);
+            payloadMap.put("askId", askId);
             return new AgentResult(askId,
-                    List.of(new SseEvent(SseEvents.ANSWER_DONE, objectMapper.convertValue(payload, Map.class))),
-                    payload, List.of(), null, SseEvents.INTENT_QUERY, false, elapsedMs);
+                    List.of(new SseEvent(SseEvents.ANSWER_DONE, payloadMap)),
+                    payload, List.of(), sqlFromCaliber(payload), SseEvents.INTENT_QUERY, false, elapsedMs);
         }
         Object questionsObj = json == null ? null : json.get("questions");
         if (SseEvents.ASK_CLARIFYING.equals(status)
@@ -186,11 +200,44 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         if (SseEvents.ASK_FAILED.equals(status) && json.get("error") instanceof Map<?, ?> error) {
             String remoteCode = stringValue(error.get("code"));
             String remoteMessage = stringValue(error.get("message"));
-            ErrorCode mapped = findErrorCode(remoteCode);
+            if (remoteMessage == null || remoteMessage.isBlank()) {
+                ErrorCode mapped = findErrorCode(remoteCode);
+                remoteMessage = mapped.format();
+            }
+            String askId = stringValue(json.get("ask_id"));
+            if (askId == null || askId.isBlank()) {
+                askId = "ask_remote";
+            }
+            boolean recoverable = Boolean.TRUE.equals(error.get("recoverable"));
             log.warn("agent-gateway 返回业务失败, code={}, message={}", remoteCode, remoteMessage);
-            throw new BizException(mapped);
+            // 不抛异常：走 SSE ERROR 事件，避免 MVC 异步线程未捕获 BizException 变成 HTTP 500
+            Map<String, Object> errPayload = new LinkedHashMap<>();
+            errPayload.put("code", remoteCode == null ? ErrorCode.AI_DEGRADED.getCode() : remoteCode);
+            errPayload.put("message", remoteMessage);
+            errPayload.put("recoverable", recoverable);
+            return new AgentResult(askId,
+                    List.of(new SseEvent(SseEvents.ERROR, errPayload)),
+                    null, List.of(), null, SseEvents.INTENT_QUERY, false, elapsedMs);
         }
-        throw new BizException(ErrorCode.AI_DEGRADED);
+        Map<String, Object> degraded = new LinkedHashMap<>();
+        degraded.put("code", ErrorCode.AI_DEGRADED.getCode());
+        degraded.put("message", ErrorCode.AI_DEGRADED.format());
+        degraded.put("recoverable", true);
+        String askId = json == null ? "ask_remote" : stringValue(json.get("ask_id"));
+        if (askId == null || askId.isBlank()) {
+            askId = "ask_remote";
+        }
+        return new AgentResult(askId,
+                List.of(new SseEvent(SseEvents.ERROR, degraded)),
+                null, List.of(), null, SseEvents.INTENT_QUERY, true, elapsedMs);
+    }
+
+    private static String sqlFromCaliber(AnswerPayload payload) {
+        if (payload == null || payload.caliber() == null) {
+            return null;
+        }
+        String definition = payload.caliber().definition();
+        return definition == null || definition.isBlank() ? null : definition;
     }
 
     private String resolveSessionId(AgentInvocationContext invocation, String askId) {
