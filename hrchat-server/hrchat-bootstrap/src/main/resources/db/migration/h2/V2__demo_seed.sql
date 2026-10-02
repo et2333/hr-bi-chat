@@ -322,8 +322,8 @@ INSERT INTO t_sys_setting (setting_key, setting_value, description) VALUES
 
 -- ---------------- 租户级 LLM 配置（P2：t01/t02 各一 + 系统默认 NULL；PENDING 待 UI 一键部署） ----------------
 INSERT INTO llm_model_config (id, model_code, model_name, vendor, base_url, api_key, model, temperature, max_tokens, deploy_url, tenant_id, status, is_deleted) VALUES
-(1, 'qwen-turbo-demo', '通义千问-轻量(演示)', 'qwen', 'http://localhost:8000', 'sk-demo', 'qwen-turbo', 0.2, 4096, 'http://localhost:8000', 't01', 1, 0),
-(2, 'qwen-plus-demo', '通义千问-标准(演示)', 'qwen', 'http://localhost:8000', 'sk-demo', 'qwen-plus', 0.3, 4096, 'http://localhost:8000', 't02', 1, 0),
+(1, 'qwen-turbo-demo', '通义千问-轻量(演示)', 'qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'sk-demo', 'qwen-turbo', 0.2, 4096, 'http://localhost:8000', 't01', 1, 0),
+(2, 'qwen-plus-demo', '通义千问-标准(演示)', 'qwen', 'https://dashscope.aliyuncs.com/compatible-mode/v1', 'sk-demo', 'qwen-plus', 0.3, 4096, 'http://localhost:8000', 't02', 1, 0),
 (3, 'mock-default', '系统默认-演示档位', 'mock', 'http://localhost:8000', NULL, 'mock-default', 0.2, 1024, 'http://localhost:8000', NULL, 1, 0);
 
 INSERT INTO llm_deploy_state (config_id, state, health_status, latency_ms, llm_profile, last_checked_at, updated_at) VALUES

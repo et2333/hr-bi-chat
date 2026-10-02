@@ -14,13 +14,24 @@ import java.time.LocalDateTime;
 @TableName("llm_deploy_state")
 public class LlmDeployState {
 
+    public static final String PENDING = "PENDING";
+    public static final String APPLYING = "APPLYING";
+    public static final String ACTIVE = "ACTIVE";
+    public static final String INACTIVE = "INACTIVE";
+    public static final String FAILED = "FAILED";
+    public static final String SIMULATED = "SIMULATED";
+
+    public static final String HEALTH_UP = "UP";
+    public static final String HEALTH_DOWN = "DOWN";
+    public static final String HEALTH_UNKNOWN = "UNKNOWN";
+
     @TableId(type = IdType.AUTO)
     private Long id;
 
     /** 关联配置 id（唯一） */
     private Long configId;
 
-    /** PENDING/APPLYING/ACTIVE/FAILED */
+    /** PENDING/APPLYING/ACTIVE/INACTIVE/FAILED/SIMULATED */
     private String state;
 
     /** UP/DOWN/UNKNOWN */

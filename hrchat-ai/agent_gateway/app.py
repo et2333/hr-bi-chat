@@ -2,7 +2,7 @@
 
 端点契约对齐《HR智能问数接口设计文档》：
 - ``POST /v1/chat/sessions/{session_id}/asks``  SSE 流式问数（2.2.5）
-- ``POST /v1/chat/sessions/{session_id}/asks/{ask_id}/clarifications``  澄清应答续跑（2.2.6）
+- ``POST /v1/chat/sessions/{session_id}/asks/{ask_id}/clarifications``  澄清应答同步终态（2.2.6）
 - ``GET  /v1/chat/asks/{ask_id}``             答案兜底拉取（2.2.7）
 - ``POST /v1/chat/asks/{ask_id}/attribution`` 归因分析 SSE（2.2.10）
 - ``POST /v1/chat/asks/{ask_id}/feedback``    纠错反馈 204（2.2.9）
@@ -26,9 +26,11 @@ from adapters.mock_llm import get_llm_adapter
 from agent_gateway.schemas import (
     ASK_CLARIFYING,
     ASK_COMPLETED,
+    ASK_FAILED,
     AskRequest,
     ClarifyAnswerRequest,
     FeedbackRequest,
+    TerminalResponse,
 )
 from agent_gateway.sse import EventBuffer, SseFramer
 from langgraph_flows.ask_flow import run_ask_flow
@@ -88,7 +90,15 @@ _runtimes: dict[str, dict[str, Any]] = {}
 
 
 def _default_runtime() -> dict[str, Any]:
-    return {"profile": LLM_PROFILE, "adapter": get_llm_adapter(LLM_PROFILE)}
+    adapter = get_llm_adapter(LLM_PROFILE)
+    return {
+        "profile": LLM_PROFILE,
+        "adapter": adapter,
+        "model": getattr(adapter, "model", None) or ("mock" if LLM_PROFILE == "mock" else ""),
+        "base_url": getattr(adapter, "base_url", None),
+        "config_version": None,
+        "inherited": False,
+    }
 
 
 def _ensure_runtime(tenant_no: Optional[str]) -> dict[str, Any]:
@@ -103,7 +113,14 @@ def _ensure_runtime(tenant_no: Optional[str]) -> dict[str, Any]:
         base = _default_runtime()
     else:
         base = _ensure_runtime(None)  # 继承默认槽位
-    runtime = {"profile": base["profile"], "adapter": base["adapter"]}
+    runtime = {
+        "profile": base["profile"],
+        "adapter": base["adapter"],
+        "model": base.get("model"),
+        "base_url": base.get("base_url"),
+        "config_version": base.get("config_version"),
+        "inherited": key != DEFAULT_TENANT_KEY,
+    }
     _runtimes[key] = runtime
     return runtime
 
@@ -116,7 +133,6 @@ def get_current_adapter(tenant_no: Optional[str] = None) -> ModelAdapter:
 def apply_llm_config(payload: dict) -> dict:
     """热应用 LLM 配置：按下发参数重建适配器并切换到指定租户（缺省默认）槽位。"""
     tenant_no = payload.get("tenant_no")
-    runtime = _ensure_runtime(tenant_no)
     profile = payload.get("llm_profile") or LLM_PROFILE
     adapter = get_llm_adapter(
         profile,
@@ -125,10 +141,67 @@ def apply_llm_config(payload: dict) -> dict:
         model=payload.get("model"),
         temperature=float(payload.get("temperature") or 0.2),
     )
-    runtime["profile"] = profile
-    runtime["adapter"] = adapter
-    return {"status": "ok", "llm_profile": profile, "model": payload.get("model") or "",
-            "tenant_no": tenant_no or ""}
+    key = tenant_no or DEFAULT_TENANT_KEY
+    model = payload.get("model") or getattr(adapter, "model", None) or ("mock" if profile == "mock" else "")
+    runtime = {
+        "profile": profile,
+        "adapter": adapter,
+        "model": model,
+        "base_url": payload.get("base_url") or getattr(adapter, "base_url", None),
+        "config_version": payload.get("config_version"),
+        "inherited": False,
+    }
+    _runtimes[key] = runtime
+
+    # 更新系统默认配置后，只清理从默认槽位继承的租户；显式租户配置保持隔离。
+    if key == DEFAULT_TENANT_KEY:
+        inherited_keys = [
+            runtime_key for runtime_key, value in _runtimes.items()
+            if runtime_key != DEFAULT_TENANT_KEY and value.get("inherited")
+        ]
+        for runtime_key in inherited_keys:
+            _runtimes.pop(runtime_key, None)
+
+    return _runtime_view(runtime, tenant_no)
+
+
+def _runtime_view(runtime: dict[str, Any], tenant_no: Optional[str]) -> dict[str, Any]:
+    """返回可供 Java 核对的运行时摘要，不暴露 API Key。"""
+    return {
+        "status": "ok",
+        "llm_profile": runtime["profile"],
+        "model": runtime.get("model") or "",
+        "base_url": runtime.get("base_url"),
+        "tenant_no": tenant_no or "",
+        "config_version": runtime.get("config_version"),
+    }
+
+
+def _terminal_response(ask_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    """把流程结果收敛为 Java/Python 共用的固定终态信封。"""
+    if result.get("answer_payload"):
+        terminal = TerminalResponse(
+            ask_id=ask_id,
+            status=ASK_COMPLETED,
+            answer_payload=result["answer_payload"],
+        )
+    elif result.get("clarify_questions"):
+        terminal = TerminalResponse(
+            ask_id=ask_id,
+            status=ASK_CLARIFYING,
+            questions=result["clarify_questions"],
+        )
+    else:
+        terminal = TerminalResponse(
+            ask_id=ask_id,
+            status=ASK_FAILED,
+            error=result.get("error") or {
+                "code": "HRA-4004",
+                "message": "智能解析暂不可用",
+                "recoverable": False,
+            },
+        )
+    return terminal.model_dump()
 
 
 def _insight_label(categories: list, index: int) -> str:
@@ -176,8 +249,9 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health")
-    async def health() -> dict:
-        return {"status": "ok", "llm_profile": _ensure_runtime(None)["profile"]}
+    async def health(tenant_no: Optional[str] = None) -> dict:
+        """返回指定租户实际命中的运行时摘要，供 Java 发布后核对。"""
+        return _runtime_view(_ensure_runtime(tenant_no), tenant_no)
 
     @app.post("/v1/config")
     async def apply_config(body: dict):
@@ -191,11 +265,7 @@ def create_app() -> FastAPI:
     async def config_current(tenant_no: Optional[str] = None) -> dict:
         """当前生效配置；?tenant_no= 可查指定租户槽位（缺省默认）。"""
         runtime = _ensure_runtime(tenant_no)
-        adapter = runtime["adapter"]
-        model_name = getattr(adapter, "model", None) or ("mock" if runtime["profile"] == "mock" else "")
-        base_url = getattr(adapter, "base_url", None)
-        return {"llm_profile": runtime["profile"], "model": model_name, "base_url": base_url,
-                "tenant_no": tenant_no or ""}
+        return _runtime_view(runtime, tenant_no)
 
     @app.post("/v1/insight")
     async def insight(body: dict):
@@ -215,7 +285,7 @@ def create_app() -> FastAPI:
         x_tenant_no: Optional[str] = Header(default=None),
         last_event_id: Optional[str] = Header(default=None),
     ):
-        """提交问句：mode=STREAM 返回 SSE 事件流；mode=SYNC 返回 ANSWER_DONE.payload JSON。"""
+        """提交问句：mode=STREAM 返回 SSE；mode=SYNC 返回固定终态信封。"""
         ask_id = "ask_" + uuid.uuid4().hex[:8]
         context_override = body.context_override.model_dump() if body.context_override else None
         store.save_ask(ask_id, {
@@ -246,12 +316,18 @@ def create_app() -> FastAPI:
                 store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
                                         "question": body.question, "user_no": x_user_no,
                                         "status": ASK_COMPLETED, "answer_payload": result["answer_payload"]})
-                return result["answer_payload"]
-            if result.get("clarify_questions"):
-                return {"ask_id": ask_id, "status": ASK_CLARIFYING,
-                        "questions": result["clarify_questions"]}
-            return {"ask_id": ask_id, "status": "FAILED",
-                    "error": result.get("error") or {"code": "HRA-4999", "message": "未知错误", "recoverable": False}}
+            elif result.get("clarify_questions"):
+                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
+                                        "question": body.question,
+                                        "context_override": context_override,
+                                        "user_no": x_user_no, "tenant_no": x_tenant_no,
+                                        "status": ASK_CLARIFYING})
+            else:
+                store.save_ask(ask_id, {"ask_id": ask_id, "session_id": session_id,
+                                        "question": body.question, "user_no": x_user_no,
+                                        "tenant_no": x_tenant_no, "status": ASK_FAILED,
+                                        "error": result.get("error")})
+            return _terminal_response(ask_id, result)
 
         # STREAM：Last-Event-ID 断线回放优先
         framer = store.framer(session_id)
@@ -289,7 +365,7 @@ def create_app() -> FastAPI:
         body: ClarifyAnswerRequest,
         x_user_no: Optional[str] = Header(default=None),
     ):
-        """澄清应答后续跑原问数流（2.2.6）。"""
+        """澄清应答后续跑原问数流，并返回与 SYNC 问数一致的终态信封。"""
         stored = store.get_ask(ask_id)
         if not stored:
             raise HTTPException(404, f"ask {ask_id} 不存在")
@@ -297,31 +373,25 @@ def create_app() -> FastAPI:
             raise HTTPException(400, "answers 不能为空")
         forced_metric_code = body.answers[0].option_ids[0]
 
-        framer = store.framer(session_id)
-        buffer = store.buffer(session_id)
-
-        async def flow_events() -> AsyncGenerator[dict[str, Any], None]:
-            result = await run_ask_flow(
-                question=stored["question"],
-                session_id=session_id,
-                ask_id=ask_id,
-                adapter=get_current_adapter(stored.get("tenant_no")),
-                executor=executor,
-                context_override=stored.get("context_override"),
-                user_no=x_user_no or stored.get("user_no"),
-                forced_metric_code=forced_metric_code,
-            )
-            for evt in result["events"]:
-                yield evt
-            if result.get("answer_payload"):
-                store.save_ask(ask_id, {**stored, "status": ASK_COMPLETED,
-                                        "answer_payload": result["answer_payload"]})
-
-        async def stream_gen() -> AsyncGenerator[str, None]:
-            async for frame in _with_heartbeat(flow_events(), framer, buffer):
-                yield frame
-
-        return StreamingResponse(stream_gen(), media_type="text/event-stream")
+        result = await run_ask_flow(
+            question=stored["question"],
+            session_id=session_id,
+            ask_id=ask_id,
+            adapter=get_current_adapter(stored.get("tenant_no")),
+            executor=executor,
+            mode="SYNC",
+            context_override=stored.get("context_override"),
+            user_no=x_user_no or stored.get("user_no"),
+            forced_metric_code=forced_metric_code,
+        )
+        terminal = _terminal_response(ask_id, result)
+        store.save_ask(ask_id, {
+            **stored,
+            "status": terminal["status"],
+            "answer_payload": terminal.get("answer_payload"),
+            "error": terminal.get("error"),
+        })
+        return terminal
 
     @app.get("/v1/chat/asks/{ask_id}")
     async def get_ask(ask_id: str):

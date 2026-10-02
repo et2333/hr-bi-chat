@@ -7,7 +7,9 @@ import com.hrchat.aiclient.service.llm.LlmChatClientProvider;
 import com.hrchat.aiclient.service.llm.LlmConnection;
 import com.hrchat.aiclient.service.llm.NoopLlmChatClient;
 import com.hrchat.aiclient.service.llm.OpenAiCompatChatClient;
+import com.hrchat.model.entity.LlmDeployState;
 import com.hrchat.model.entity.LlmModelConfig;
+import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
 import lombok.extern.slf4j.Slf4j;
 
@@ -29,6 +31,7 @@ public class TenantLlmChatClientProvider implements LlmChatClientProvider {
     private static final String DEMO_KEY = "sk-demo";
 
     private final LlmModelConfigMapper configMapper;
+    private final LlmDeployStateMapper deployStateMapper;
     private final ObjectMapper objectMapper;
     private final int timeoutMs;
 
@@ -36,9 +39,11 @@ public class TenantLlmChatClientProvider implements LlmChatClientProvider {
     private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
     public TenantLlmChatClientProvider(LlmModelConfigMapper configMapper,
+                                       LlmDeployStateMapper deployStateMapper,
                                        ObjectMapper objectMapper,
                                        int timeoutMs) {
         this.configMapper = configMapper;
+        this.deployStateMapper = deployStateMapper;
         this.objectMapper = objectMapper;
         this.timeoutMs = timeoutMs;
     }
@@ -46,12 +51,14 @@ public class TenantLlmChatClientProvider implements LlmChatClientProvider {
     @Override
     public LlmChatClient forTenant(String tenantNo) {
         String slot = tenantNo == null || tenantNo.isBlank() ? AgentRuntimeFactory.DEFAULT_KEY : tenantNo;
-        LlmModelConfig config = pickConfig(tenantNo);
-        if (config == null) {
+        DeployedConfig deployed = pickConfig(tenantNo);
+        if (deployed == null) {
             cache.remove(slot);
             return NoopLlmChatClient.INSTANCE;
         }
-        String signature = config.getBaseUrl() + "|" + config.getApiKey() + "|" + config.getModel();
+        LlmModelConfig config = deployed.config();
+        String signature = config.getId() + "|" + config.getBaseUrl() + "|" + config.getApiKey() + "|"
+                + config.getModel() + "|" + deployed.state().getUpdatedAt();
         CacheEntry entry = cache.get(slot);
         if (entry != null && signature.equals(entry.signature)) {
             return entry.client;
@@ -69,21 +76,30 @@ public class TenantLlmChatClientProvider implements LlmChatClientProvider {
         return client;
     }
 
-    /** 本租户启用配置优先，其次系统默认；仅取含真实 key 的配置。 */
-    private LlmModelConfig pickConfig(String tenantNo) {
-        List<LlmModelConfig> configs = configMapper.selectList(new LambdaQueryWrapper<LlmModelConfig>()
-                .eq(LlmModelConfig::getStatus, 1)
-                .eq(LlmModelConfig::getIsDeleted, 0));
-        LlmModelConfig systemDefault = null;
-        for (LlmModelConfig c : configs) {
+    /** 本租户真实 ACTIVE 配置优先，其次系统默认；SIMULATED/PENDING 配置绝不接入本地 LLM。 */
+    private DeployedConfig pickConfig(String tenantNo) {
+        List<LlmDeployState> states = deployStateMapper.selectList(new LambdaQueryWrapper<LlmDeployState>()
+                .eq(LlmDeployState::getState, LlmDeployState.ACTIVE)
+                .orderByDesc(LlmDeployState::getUpdatedAt)
+                .orderByDesc(LlmDeployState::getId));
+        DeployedConfig systemDefault = null;
+        for (LlmDeployState state : states) {
+            if ("mock".equalsIgnoreCase(state.getLlmProfile())) {
+                continue;
+            }
+            LlmModelConfig c = configMapper.selectById(state.getConfigId());
+            if (c == null || (c.getStatus() != null && c.getStatus() != 1)
+                    || (c.getIsDeleted() != null && c.getIsDeleted() == 1)) {
+                continue;
+            }
             if (!hasRealKey(c)) {
                 continue;
             }
             if (tenantNo != null && tenantNo.equals(c.getTenantId())) {
-                return c;
+                return new DeployedConfig(c, state);
             }
             if ((c.getTenantId() == null || c.getTenantId().isBlank()) && systemDefault == null) {
-                systemDefault = c;
+                systemDefault = new DeployedConfig(c, state);
             }
         }
         return systemDefault;
@@ -96,5 +112,8 @@ public class TenantLlmChatClientProvider implements LlmChatClientProvider {
     }
 
     private record CacheEntry(String signature, LlmChatClient client) {
+    }
+
+    private record DeployedConfig(LlmModelConfig config, LlmDeployState state) {
     }
 }

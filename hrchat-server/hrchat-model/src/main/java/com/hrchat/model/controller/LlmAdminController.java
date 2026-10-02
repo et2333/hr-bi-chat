@@ -83,7 +83,7 @@ public class LlmAdminController {
     public ApiResponse<List<LlmViews.VersionView>> listVersions(@PathVariable Long modelId,
                                                                 @CurrentUser UserContext ctx) {
         authzService.checkFunc(ctx, LlmConfigService.PERM_VIEW);
-        return ApiResponse.ok(configService.versions(modelId));
+        return ApiResponse.ok(configService.versions(modelId, ctx));
     }
 
     @Operation(summary = "一键部署模型")
@@ -107,7 +107,7 @@ public class LlmAdminController {
     @GetMapping("/models/{modelId}/health")
     public ApiResponse<LlmViews.HealthView> health(@PathVariable Long modelId, @CurrentUser UserContext ctx) {
         authzService.checkFunc(ctx, LlmConfigService.PERM_VIEW);
-        return ApiResponse.ok(healthService.check(modelId));
+        return ApiResponse.ok(healthService.check(modelId, ctx));
     }
 
     @Operation(summary = "部署监控摘要")

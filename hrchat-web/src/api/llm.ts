@@ -4,7 +4,7 @@ import type { ApiResponse, PageResult } from './types'
 // ---------------- LLM 大模型配置管理（/admin/llm） ----------------
 
 /** 部署状态 */
-export type LlmDeployState = 'PENDING' | 'APPLYING' | 'ACTIVE' | 'FAILED'
+export type LlmDeployState = 'PENDING' | 'APPLYING' | 'ACTIVE' | 'SIMULATED' | 'FAILED'
 /** 健康状态 */
 export type LlmHealthStatus = 'UP' | 'DOWN' | 'UNKNOWN'
 
@@ -38,7 +38,7 @@ export interface LlmVersionView {
   id: number
   versionNo: string
   configJson: string
-  applyResult: 'PENDING' | 'SUCCESS' | 'FAILED' | 'ROLLBACK'
+  applyResult: 'PENDING' | 'SUCCESS' | 'SIMULATED' | 'FAILED' | 'ROLLBACK'
   appliedAt: string
   appliedBy: string
   changeNote: string

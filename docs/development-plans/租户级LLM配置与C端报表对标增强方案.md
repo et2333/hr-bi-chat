@@ -1,5 +1,7 @@
 # 租户级 LLM 配置 + C 端报表对标 QuickBI 增强方案
 
+> 后续修订：租户运行时缓存刷新、默认配置重放、`baseUrl/deployUrl` 语义和模拟部署状态，以《权限单一事实源与 Java/Python 问数链路收敛实施方案》为准。
+
 ## Context（背景）
 
 用户反馈三点，据此重设计（取代被拒的上一版方案）：
@@ -22,7 +24,7 @@
 - **LlmModelConfig.java** 加 `tenantId`；**LlmConfigService** create/patch 从 `TenantContextHolder.get()` 写租户（null 回退 't01'），`list` 过滤 `tenant_id=当前 OR IS NULL`。
 - **LlmDeployService** ACTIVE 查询按 config 归属过滤。
 - **AgentRuntimeFactory**：单例 → `Map<String, AgentRuntimeClient>` 按租户懒加载缓存 + default 条目（保留 build 逻辑）；`getForTenant(String tenant)` 替代 getDelegate，调用方用 `TenantContextHolder.get()`（null 用 default）；`RemoteAgentRuntimeClient` 构造加 tenantNo、请求头带 X-Tenant-No；`ApplicationReadyEvent` 预热 default。
-- **Flyway V2 demo seed**：t01 ACTIVE 模型、t02 ACTIVE 模型、一条 tenant_id NULL 默认 ACTIVE（演示回退）。
+- **Flyway V2 demo seed**：t01、t02 和 tenant_id NULL 默认配置均保持 PENDING；完成真实下发和健康检查后才可转为 ACTIVE。
 
 ### Python（hrchat-ai/agent_gateway）
 - `_runtime` → `_runtimes: dict[str, runtime]` + `_default`（yml LLM_PROFILE 兜底）。

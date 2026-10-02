@@ -6,8 +6,8 @@ import com.hrchat.audit.model.AuditEvent;
 import com.hrchat.audit.model.AuditEvents;
 import com.hrchat.audit.service.AuditCollector;
 import com.hrchat.authz.model.UserContext;
-import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
+import com.hrchat.common.exception.BizException;
 import com.hrchat.model.dto.LlmViews;
 import com.hrchat.model.entity.LlmDeployState;
 import com.hrchat.model.entity.LlmModelConfig;
@@ -15,9 +15,13 @@ import com.hrchat.model.entity.LlmModelVersion;
 import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
 import com.hrchat.model.mapper.LlmModelVersionMapper;
+import com.hrchat.model.runtime.AgentRuntimeFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -30,9 +34,11 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
- * LLM 模型部署/回滚（阶段1）：调用 Python 运行时 /v1/config 下发配置，健康检查后置 ACTIVE。
+ * LLM 模型部署/回滚：真实下发经 Python {@code /v1/config} + 健康核对后置 ACTIVE；
+ * {@code deploy-mock=true} 仅写 {@code SIMULATED}，不参与远程路由。
  */
 @Slf4j
 @Service
@@ -41,7 +47,9 @@ public class LlmDeployService {
     private final LlmModelConfigMapper configMapper;
     private final LlmModelVersionMapper versionMapper;
     private final LlmDeployStateMapper deployStateMapper;
+    private final LlmConfigService configService;
     private final LlmHealthService healthService;
+    private final AgentRuntimeFactory runtimeFactory;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
@@ -50,7 +58,9 @@ public class LlmDeployService {
     public LlmDeployService(LlmModelConfigMapper configMapper,
                             LlmModelVersionMapper versionMapper,
                             LlmDeployStateMapper deployStateMapper,
+                            LlmConfigService configService,
                             LlmHealthService healthService,
+                            AgentRuntimeFactory runtimeFactory,
                             AuditCollector auditCollector,
                             ObjectMapper objectMapper,
                             @Qualifier("llmDeployRestTemplate") RestTemplate restTemplate,
@@ -58,7 +68,9 @@ public class LlmDeployService {
         this.configMapper = configMapper;
         this.versionMapper = versionMapper;
         this.deployStateMapper = deployStateMapper;
+        this.configService = configService;
         this.healthService = healthService;
+        this.runtimeFactory = runtimeFactory;
         this.auditCollector = auditCollector;
         this.objectMapper = objectMapper;
         this.restTemplate = restTemplate;
@@ -66,73 +78,27 @@ public class LlmDeployService {
     }
 
     /**
-     * 一键部署：APPLYING → 下发配置（mock 跳过）→ 健康检查 → ACTIVE + 新版本快照(SUCCESS)。
+     * 一键部署：APPLYING →（mock→SIMULATED）或（真实下发+健康检查→ACTIVE）+ 版本快照。
      */
     @Transactional
     public LlmViews.DeployStateView deploy(Long configId, UserContext ctx) {
-        LlmModelConfig config = configMapper.selectById(configId);
-        if (config == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
-        }
+        LlmModelConfig config = configService.loadManageableConfig(configId, ctx);
+        requireDeployUrl(config);
+        requireModelId(config);
         LlmDeployState state = loadOrCreateState(configId);
-        state.setState("APPLYING");
-        state.setUpdatedAt(LocalDateTime.now());
-        deployStateMapper.updateById(state);
+        markApplying(state);
+        int nextVersion = maxVersionNo(configId) + 1;
         try {
-            if (!deployMock) {
-                String deployUrl = config.getDeployUrl() != null && !config.getDeployUrl().isBlank()
-                        ? config.getDeployUrl() : config.getBaseUrl();
-                Map<String, Object> payload = new LinkedHashMap<>();
-                payload.put("base_url", config.getBaseUrl());
-                payload.put("api_key", config.getApiKey());
-                payload.put("model", config.getModel());
-                payload.put("temperature", config.getTemperature());
-                payload.put("max_tokens", config.getMaxTokens());
-                payload.put("llm_profile", llmProfile(config));
-                payload.put("tenant_no", config.getTenantId());
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                ResponseEntity<Map> resp = restTemplate.postForEntity(
-                        deployUrl + "/v1/config", new HttpEntity<>(payload, headers), Map.class);
-                if (resp.getStatusCode() == null || !resp.getStatusCode().is2xxSuccessful()) {
-                    throw new BizException(ErrorCode.SERVICE_UNAVAILABLE,
-                            "部署接口返回 " + (resp.getStatusCode() == null ? "null" : resp.getStatusCode().value()));
-                }
-                LlmViews.HealthView health = healthService.check(configId);
-                if (health == null || !"UP".equals(health.healthStatus())) {
-                    throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "健康检查未通过");
-                }
+            if (deployMock) {
+                return finishSimulated(config, state, nextVersion, ctx, "SIMULATED", "一键部署");
             }
-            // 成功路径
-            LocalDateTime now = LocalDateTime.now();
-            state.setState("ACTIVE");
-            state.setHealthStatus("UP");
-            state.setLlmProfile(llmProfile(config));
-            state.setLastCheckedAt(now);
-            state.setUpdatedAt(now);
-            deployStateMapper.updateById(state);
-
-            LlmModelVersion version = new LlmModelVersion();
-            version.setConfigId(configId);
-            version.setVersionNo(maxVersionNo(configId) + 1);
-            version.setConfigJson(toJson(config));
-            version.setApplyResult("SUCCESS");
-            version.setAppliedAt(now);
-            version.setAppliedBy(ctx.getEmpNo());
-            version.setChangeNote("一键部署");
-            versionMapper.insert(version);
-
-            config.setStatus(1);
-            config.setUpdatedAt(now);
-            config.setUpdatedBy(ctx.getEmpNo());
-            configMapper.updateById(config);
-
-            auditCollector.record(AuditEvent.of(AuditEvents.LLM_DEPLOY, ctx.getEmpNo(), "llm_model_config",
-                    String.valueOf(configId),
-                    toJson(Map.of("op", "DEPLOY", "model_code", config.getModelCode(), "result", "SUCCESS")), false));
-            log.info("LLM 模型部署成功: configId={}, modelCode={}, operator={}", configId, config.getModelCode(),
-                    ctx.getEmpNo());
-            return toDeployStateView(state);
+            pushConfig(config, nextVersion);
+            LlmViews.HealthView health = healthService.checkApplied(config, nextVersion);
+            if (health == null || !LlmDeployState.HEALTH_UP.equals(health.healthStatus())) {
+                throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "健康检查未通过");
+            }
+            deactivatePeerActive(config);
+            return finishActive(config, state, nextVersion, ctx, "SUCCESS", "一键部署", health);
         } catch (BizException e) {
             throw fail(configId, state, e.getMessageText());
         } catch (Exception e) {
@@ -142,65 +108,272 @@ public class LlmDeployService {
     }
 
     /**
-     * 版本回滚：解析快照回填配置，落 ROLLBACK 新版本，部署状态置 ACTIVE。
+     * 版本回滚：恢复非敏感快照（沿用当前 API Key）→ 重新下发/模拟 → 刷新运行时缓存。
      */
     @Transactional
     public LlmViews.DeployStateView rollback(Long configId, LlmViews.RollbackRequest req, UserContext ctx) {
         if (req == null || req.versionId() == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "versionId");
         }
-        LlmModelVersion version = versionMapper.selectById(req.versionId());
-        if (version == null || !configId.equals(version.getConfigId())) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "versionId");
-        }
-        LlmModelConfig config = configMapper.selectById(configId);
-        if (config == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
-        }
+        LlmModelVersion version = configService.loadManageableVersion(configId, req.versionId(), ctx);
+        LlmModelConfig config = configService.loadManageableConfig(configId, ctx);
         LlmModelConfig snapshot = parseSnapshot(version.getConfigJson());
+        applySnapshotKeepingApiKey(config, snapshot, ctx.getEmpNo());
+        requireDeployUrl(config);
+        requireModelId(config);
+        configMapper.updateById(config);
+
+        LlmDeployState state = loadOrCreateState(configId);
+        markApplying(state);
+        int nextVersion = maxVersionNo(configId) + 1;
+        try {
+            if (deployMock) {
+                return finishSimulated(config, state, nextVersion, ctx, "ROLLBACK", "版本回滚");
+            }
+            pushConfig(config, nextVersion);
+            LlmViews.HealthView health = healthService.checkApplied(config, nextVersion);
+            if (health == null || !LlmDeployState.HEALTH_UP.equals(health.healthStatus())) {
+                throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "健康检查未通过");
+            }
+            deactivatePeerActive(config);
+            return finishActive(config, state, nextVersion, ctx, "ROLLBACK", "版本回滚", health);
+        } catch (BizException e) {
+            throw fail(configId, state, e.getMessageText());
+        } catch (Exception e) {
+            log.warn("LLM 模型回滚调用异常: configId={}, err={}", configId, e.getMessage());
+            throw fail(configId, state, e.getMessage());
+        }
+    }
+
+    /**
+     * 启动重放：将库中 ACTIVE 配置重新下发到 Python；失败时保持 ACTIVE，仅标记 health=DOWN（决策 A）。
+     */
+    @Order(100)
+    @EventListener(ApplicationReadyEvent.class)
+    public void reconcileActiveConfigs() {
+        List<LlmDeployState> actives = deployStateMapper.selectList(new LambdaQueryWrapper<LlmDeployState>()
+                .eq(LlmDeployState::getState, LlmDeployState.ACTIVE));
+        for (LlmDeployState state : actives) {
+            LlmModelConfig config = configMapper.selectById(state.getConfigId());
+            if (config == null || Integer.valueOf(1).equals(config.getIsDeleted())) {
+                continue;
+            }
+            if (config.getDeployUrl() == null || config.getDeployUrl().isBlank()) {
+                markHealthDown(state, "缺少 deployUrl，跳过重放");
+                continue;
+            }
+            Integer version = latestVersionNo(config.getId());
+            if (version == null) {
+                markHealthDown(state, "ACTIVE 配置缺少版本快照");
+                continue;
+            }
+            if (deployMock) {
+                // mock 模式不访问 Python；降级 health，避免遗留 ACTIVE/UP 被远程路由选中
+                markHealthDown(state, "deploy-mock 模式跳过真实重放");
+                continue;
+            }
+            try {
+                pushConfig(config, version);
+                LlmViews.HealthView health = healthService.checkApplied(config, version);
+                if (health == null || !LlmDeployState.HEALTH_UP.equals(health.healthStatus())) {
+                    log.warn("ACTIVE 配置重放后健康检查未通过: configId={}", config.getId());
+                }
+            } catch (Exception e) {
+                markHealthDown(state, e.getMessage());
+            }
+        }
+        runtimeFactory.evict(null);
+        log.info("LLM ACTIVE 配置重放完成, count={}", actives.size());
+    }
+
+    private LlmViews.DeployStateView finishSimulated(LlmModelConfig config, LlmDeployState state,
+                                                     int versionNo, UserContext ctx,
+                                                     String applyResult, String changeNote) {
         LocalDateTime now = LocalDateTime.now();
-        config.setModelCode(snapshot.getModelCode());
-        config.setModelName(snapshot.getModelName());
-        config.setVendor(snapshot.getVendor());
-        config.setBaseUrl(snapshot.getBaseUrl());
-        config.setApiKey(snapshot.getApiKey());
-        config.setModel(snapshot.getModel());
-        config.setTemperature(snapshot.getTemperature());
-        config.setMaxTokens(snapshot.getMaxTokens());
-        config.setDeployUrl(snapshot.getDeployUrl());
+        state.setState(LlmDeployState.SIMULATED);
+        state.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
+        state.setLatencyMs(null);
+        state.setLlmProfile(llmProfile(config));
+        state.setLastCheckedAt(now);
+        state.setUpdatedAt(now);
+        deployStateMapper.updateById(state);
+
+        deactivatePeerSimulated(config);
+
+        insertVersion(config, versionNo, applyResult, changeNote, ctx.getEmpNo(), now);
         config.setStatus(1);
-        config.setIsDeleted(0);
         config.setUpdatedAt(now);
         config.setUpdatedBy(ctx.getEmpNo());
         configMapper.updateById(config);
 
-        LlmModelVersion newVersion = new LlmModelVersion();
-        newVersion.setConfigId(configId);
-        newVersion.setVersionNo(maxVersionNo(configId) + 1);
-        newVersion.setConfigJson(toJson(config));
-        newVersion.setApplyResult("ROLLBACK");
-        newVersion.setAppliedAt(now);
-        newVersion.setAppliedBy(ctx.getEmpNo());
-        newVersion.setChangeNote("版本回滚");
-        versionMapper.insert(newVersion);
-
-        LlmDeployState state = loadOrCreateState(configId);
-        state.setState("ACTIVE");
-        state.setUpdatedAt(now);
-        deployStateMapper.updateById(state);
-
+        runtimeFactory.evictAfterCommit(config.getTenantId());
         auditCollector.record(AuditEvent.of(AuditEvents.LLM_DEPLOY, ctx.getEmpNo(), "llm_model_config",
-                String.valueOf(configId),
-                toJson(Map.of("op", "ROLLBACK", "model_code", config.getModelCode(), "version", newVersion.getVersionNo())),
+                String.valueOf(config.getId()),
+                toJson(Map.of("op", applyResult, "model_code", config.getModelCode(), "result", "SIMULATED")),
                 false));
-        log.info("LLM 模型回滚: configId={}, toVersion={}, operator={}", configId, req.versionId(), ctx.getEmpNo());
+        log.info("LLM 模型模拟部署: configId={}, modelCode={}, result={}, operator={}",
+                config.getId(), config.getModelCode(), applyResult, ctx.getEmpNo());
         return toDeployStateView(state);
     }
 
+    private LlmViews.DeployStateView finishActive(LlmModelConfig config, LlmDeployState state,
+                                                  int versionNo, UserContext ctx, String applyResult,
+                                                  String changeNote, LlmViews.HealthView health) {
+        LocalDateTime now = LocalDateTime.now();
+        state.setState(LlmDeployState.ACTIVE);
+        state.setHealthStatus(LlmDeployState.HEALTH_UP);
+        state.setLatencyMs(health == null ? null : health.latencyMs());
+        state.setLlmProfile(health != null && health.llmProfile() != null
+                ? health.llmProfile() : llmProfile(config));
+        state.setLastCheckedAt(now);
+        state.setUpdatedAt(now);
+        deployStateMapper.updateById(state);
+
+        insertVersion(config, versionNo, applyResult, changeNote, ctx.getEmpNo(), now);
+        config.setStatus(1);
+        config.setUpdatedAt(now);
+        config.setUpdatedBy(ctx.getEmpNo());
+        configMapper.updateById(config);
+
+        runtimeFactory.evictAfterCommit(config.getTenantId());
+        auditCollector.record(AuditEvent.of(AuditEvents.LLM_DEPLOY, ctx.getEmpNo(), "llm_model_config",
+                String.valueOf(config.getId()),
+                toJson(Map.of("op", applyResult, "model_code", config.getModelCode(), "result", "SUCCESS")),
+                false));
+        log.info("LLM 模型部署成功: configId={}, modelCode={}, result={}, operator={}",
+                config.getId(), config.getModelCode(), applyResult, ctx.getEmpNo());
+        return toDeployStateView(state);
+    }
+
+    private void pushConfig(LlmModelConfig config, int configVersion) {
+        String deployUrl = requireDeployUrl(config);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("base_url", config.getBaseUrl());
+        payload.put("api_key", config.getApiKey());
+        payload.put("model", config.getModel());
+        payload.put("temperature", config.getTemperature());
+        payload.put("max_tokens", config.getMaxTokens());
+        payload.put("llm_profile", llmProfile(config));
+        payload.put("tenant_no", config.getTenantId() == null ? "" : config.getTenantId());
+        payload.put("config_version", configVersion);
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        ResponseEntity<Map> resp = restTemplate.postForEntity(
+                trimTrailingSlash(deployUrl) + "/v1/config", new HttpEntity<>(payload, headers), Map.class);
+        if (resp.getStatusCode() == null || !resp.getStatusCode().is2xxSuccessful()) {
+            throw new BizException(ErrorCode.SERVICE_UNAVAILABLE,
+                    "部署接口返回 " + (resp.getStatusCode() == null ? "null" : resp.getStatusCode().value()));
+        }
+        Map body = resp.getBody();
+        if (body != null && !matchesPushSummary(body, config, configVersion)) {
+            throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "运行时配置摘要与目标租户/模型/版本不一致");
+        }
+    }
+
+    private boolean matchesPushSummary(Map body, LlmModelConfig config, int configVersion) {
+        String actualTenant = body.get("tenant_no") == null ? "" : String.valueOf(body.get("tenant_no"));
+        String actualModel = body.get("model") == null ? "" : String.valueOf(body.get("model"));
+        Integer actualVersion = integerValue(body.get("config_version"));
+        String expectedTenant = config.getTenantId() == null ? "" : config.getTenantId().trim();
+        return expectedTenant.equals(actualTenant)
+                && config.getModel() != null
+                && config.getModel().equals(actualModel)
+                && Integer.valueOf(configVersion).equals(actualVersion);
+    }
+
+    private void deactivatePeerActive(LlmModelConfig config) {
+        List<LlmDeployState> actives = deployStateMapper.selectList(new LambdaQueryWrapper<LlmDeployState>()
+                .eq(LlmDeployState::getState, LlmDeployState.ACTIVE));
+        for (LlmDeployState peer : actives) {
+            if (Objects.equals(peer.getConfigId(), config.getId())) {
+                continue;
+            }
+            LlmModelConfig other = configMapper.selectById(peer.getConfigId());
+            if (other == null || !sameTenant(config, other)) {
+                continue;
+            }
+            peer.setState(LlmDeployState.INACTIVE);
+            peer.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
+            peer.setUpdatedAt(LocalDateTime.now());
+            deployStateMapper.updateById(peer);
+            log.info("同租户原 ACTIVE 已停用: configId={}, tenant={}", other.getId(), other.getTenantId());
+        }
+    }
+
+    private void deactivatePeerSimulated(LlmModelConfig config) {
+        List<LlmDeployState> simulated = deployStateMapper.selectList(new LambdaQueryWrapper<LlmDeployState>()
+                .eq(LlmDeployState::getState, LlmDeployState.SIMULATED));
+        for (LlmDeployState peer : simulated) {
+            if (Objects.equals(peer.getConfigId(), config.getId())) {
+                continue;
+            }
+            LlmModelConfig other = configMapper.selectById(peer.getConfigId());
+            if (other == null || !sameTenant(config, other)) {
+                continue;
+            }
+            peer.setState(LlmDeployState.INACTIVE);
+            peer.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
+            peer.setUpdatedAt(LocalDateTime.now());
+            deployStateMapper.updateById(peer);
+        }
+    }
+
+    private static boolean sameTenant(LlmModelConfig a, LlmModelConfig b) {
+        String ta = a.getTenantId() == null || a.getTenantId().isBlank() ? null : a.getTenantId();
+        String tb = b.getTenantId() == null || b.getTenantId().isBlank() ? null : b.getTenantId();
+        return Objects.equals(ta, tb);
+    }
+
+    private void applySnapshotKeepingApiKey(LlmModelConfig config, LlmModelConfig snapshot, String operator) {
+        String currentApiKey = config.getApiKey();
+        config.setModelCode(snapshot.getModelCode());
+        config.setModelName(snapshot.getModelName());
+        config.setVendor(snapshot.getVendor());
+        config.setBaseUrl(snapshot.getBaseUrl());
+        config.setModel(snapshot.getModel());
+        config.setTemperature(snapshot.getTemperature());
+        config.setMaxTokens(snapshot.getMaxTokens());
+        config.setDeployUrl(snapshot.getDeployUrl());
+        config.setApiKey(currentApiKey);
+        config.setStatus(1);
+        config.setIsDeleted(0);
+        config.setUpdatedAt(LocalDateTime.now());
+        config.setUpdatedBy(operator);
+    }
+
+    private void insertVersion(LlmModelConfig config, int versionNo, String applyResult,
+                               String changeNote, String operator, LocalDateTime now) {
+        LlmModelVersion version = new LlmModelVersion();
+        version.setConfigId(config.getId());
+        version.setVersionNo(versionNo);
+        version.setConfigJson(configService.toVersionSnapshot(config));
+        version.setApplyResult(applyResult);
+        version.setAppliedAt(now);
+        version.setAppliedBy(operator);
+        version.setChangeNote(changeNote);
+        versionMapper.insert(version);
+    }
+
+    private void markApplying(LlmDeployState state) {
+        state.setState(LlmDeployState.APPLYING);
+        state.setUpdatedAt(LocalDateTime.now());
+        deployStateMapper.updateById(state);
+    }
+
+    private void markHealthDown(LlmDeployState state, String reason) {
+        state.setHealthStatus(LlmDeployState.HEALTH_DOWN);
+        state.setLatencyMs(null);
+        state.setLastCheckedAt(LocalDateTime.now());
+        state.setUpdatedAt(LocalDateTime.now());
+        deployStateMapper.updateById(state);
+        log.warn("ACTIVE 配置重放失败，保持 ACTIVE 并标记 DOWN: configId={}, reason={}",
+                state.getConfigId(), reason);
+    }
+
     private BizException fail(Long configId, LlmDeployState state, String msg) {
-        state.setState("FAILED");
-        if (!"UP".equals(state.getHealthStatus())) {
-            state.setHealthStatus("DOWN");
+        state.setState(LlmDeployState.FAILED);
+        if (!LlmDeployState.HEALTH_UP.equals(state.getHealthStatus())) {
+            state.setHealthStatus(LlmDeployState.HEALTH_DOWN);
         }
         state.setUpdatedAt(LocalDateTime.now());
         deployStateMapper.updateById(state);
@@ -222,8 +395,8 @@ public class LlmDeployService {
         if (state == null) {
             state = new LlmDeployState();
             state.setConfigId(configId);
-            state.setState("PENDING");
-            state.setHealthStatus("UNKNOWN");
+            state.setState(LlmDeployState.PENDING);
+            state.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
             state.setUpdatedAt(LocalDateTime.now());
             deployStateMapper.insert(state);
         }
@@ -235,6 +408,47 @@ public class LlmDeployService {
                 .eq(LlmModelVersion::getConfigId, configId)
                 .orderByDesc(LlmModelVersion::getVersionNo).last("LIMIT 1"));
         return list.isEmpty() ? 0 : list.get(0).getVersionNo();
+    }
+
+    private Integer latestVersionNo(Long configId) {
+        List<LlmModelVersion> versions = versionMapper.selectList(new LambdaQueryWrapper<LlmModelVersion>()
+                .eq(LlmModelVersion::getConfigId, configId)
+                .orderByDesc(LlmModelVersion::getVersionNo)
+                .last("LIMIT 1"));
+        return versions.isEmpty() ? null : versions.get(0).getVersionNo();
+    }
+
+    private static String requireDeployUrl(LlmModelConfig config) {
+        if (config.getDeployUrl() == null || config.getDeployUrl().isBlank()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "deployUrl");
+        }
+        return config.getDeployUrl();
+    }
+
+    /** 模型标识（如 deepseek-chat）参与 Python 摘要核对，部署前必须非空。 */
+    private static void requireModelId(LlmModelConfig config) {
+        if (config.getModel() == null || config.getModel().isBlank()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "model");
+        }
+    }
+
+    private static String trimTrailingSlash(String url) {
+        String result = url.trim();
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
+    }
+
+    private static Integer integerValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return value == null ? null : Integer.valueOf(String.valueOf(value));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     static String llmProfile(LlmModelConfig config) {

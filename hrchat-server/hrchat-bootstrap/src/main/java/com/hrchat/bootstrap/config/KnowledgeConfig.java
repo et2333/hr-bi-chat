@@ -11,7 +11,6 @@ import com.hrchat.semantic.service.SemanticMetaService;
 import com.hrchat.queryexec.service.QueryExecService;
 import com.hrchat.authz.service.SqlRewriteService;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hrchat.aiclient.service.AgentRuntimeClient;
 import com.hrchat.aiclient.service.impl.LocalAgentRuntimeImpl;
 import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
@@ -75,10 +74,12 @@ public class KnowledgeConfig {
                                                    BizSynonymMapper synonymMapper,
                                                    ObjectMapper objectMapper,
                                                    LlmModelConfigMapper configMapper,
+                                                   LlmDeployStateMapper deployStateMapper,
                                                    @Value("${hrchat.demo.now:2026-09-28}") LocalDate demoNow,
                                                    @Value("${hrchat.ai.llm-timeout-ms:12000}") int llmTimeoutMs) {
         // LLM 仅做自然语言增强（闲聊/答案润色），无真实 key 配置时 Provider 返回 NOOP，问数全程确定性模板
-        TenantLlmChatClientProvider llmProvider = new TenantLlmChatClientProvider(configMapper, objectMapper, llmTimeoutMs);
+        TenantLlmChatClientProvider llmProvider = new TenantLlmChatClientProvider(
+                configMapper, deployStateMapper, objectMapper, llmTimeoutMs);
         return new LocalAgentRuntimeImpl(hybridRetriever, semanticMetaService, sqlRewriteService,
                 queryExecService, synonymMapper, objectMapper, demoNow, llmProvider);
     }
@@ -89,7 +90,7 @@ public class KnowledgeConfig {
      */
     @Bean
     @Primary
-    public AgentRuntimeClient agentRuntimeClient(LocalAgentRuntimeImpl localAgentRuntime,
+    public AgentRuntimeFactory agentRuntimeClient(LocalAgentRuntimeImpl localAgentRuntime,
                                                  LlmModelConfigMapper configMapper,
                                                  LlmDeployStateMapper deployStateMapper,
                                                  ObjectMapper objectMapper,

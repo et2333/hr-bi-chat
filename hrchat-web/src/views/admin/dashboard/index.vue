@@ -42,7 +42,7 @@
           >
             <template #bodyCell="{ column, record }">
               <template v-if="column.key === 'deployState'">
-                <a-tag :color="deployColor(record.deployState)">{{ record.deployState }}</a-tag>
+                <a-tag :color="deployColor(record.deployState)">{{ deployLabel(record.deployState) }}</a-tag>
               </template>
               <template v-else-if="column.key === 'healthStatus'">
                 <a-tag :color="healthColor(record.healthStatus)">{{ record.healthStatus }}</a-tag>
@@ -109,7 +109,11 @@ const trendColumns = [
 ]
 
 function deployColor(s: string): string {
-  return { ACTIVE: 'green', FAILED: 'red', PENDING: 'default', APPLYING: 'blue' }[s] ?? 'default'
+  return { ACTIVE: 'green', SIMULATED: 'orange', FAILED: 'red', PENDING: 'default', APPLYING: 'blue' }[s] ?? 'default'
+}
+
+function deployLabel(s: string): string {
+  return s === 'SIMULATED' ? '模拟生效' : s
 }
 
 function healthColor(s: string): string {

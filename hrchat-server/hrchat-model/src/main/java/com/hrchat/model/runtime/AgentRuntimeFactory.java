@@ -17,8 +17,9 @@ import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
+import org.springframework.core.annotation.Order;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestTemplate;
 
@@ -34,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 无显式 {@code X-Tenant-No} 的调用使用默认（DEFAULT_KEY）槽位。</p>
  */
 @Slf4j
+@Order(200)
 public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListener<ApplicationReadyEvent> {
 
     /** 无租户上下文时的默认槽位 key */
@@ -83,6 +85,35 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
         return clients.computeIfAbsent(key, k -> build(DEFAULT_KEY.equals(k) ? null : k));
     }
 
+    /**
+     * 使指定租户的运行时槽位失效。系统默认配置变化会影响所有回退租户，因此清空全部槽位。
+     */
+    public void evict(String tenantNo) {
+        if (tenantNo == null || tenantNo.isBlank()) {
+            clients.clear();
+            log.info("agent runtime 系统默认配置缓存已失效");
+            return;
+        }
+        clients.remove(tenantNo);
+        log.info("agent runtime 租户配置缓存已失效: tenant={}", tenantNo);
+    }
+
+    /** 在当前事务成功提交后失效运行时，避免缓存先于数据库提交被重建。 */
+    public void evictAfterCommit(String tenantNo) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()
+                && org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            evict(tenantNo);
+                        }
+                    });
+            return;
+        }
+        evict(tenantNo);
+    }
+
     @Override
     public void onApplicationEvent(ApplicationReadyEvent event) {
         getDelegate(null);
@@ -94,20 +125,26 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
      */
     private AgentRuntimeClient build(String tenantNo) {
         List<LlmDeployState> activeStates = deployStateMapper.selectList(
-                new LambdaQueryWrapper<LlmDeployState>().eq(LlmDeployState::getState, "ACTIVE"));
+                new LambdaQueryWrapper<LlmDeployState>().eq(LlmDeployState::getState, LlmDeployState.ACTIVE));
         AgentRuntimeClient tenantMatch = null;
         for (LlmDeployState state : activeStates) {
             LlmModelConfig config = configMapper.selectById(state.getConfigId());
-            if (config == null || (config.getIsDeleted() != null && config.getIsDeleted() == 1)) {
+            if (!isRoutable(state, config)) {
                 continue;
             }
             if (tenantNo != null && tenantNo.equals(config.getTenantId())) {
-                log.info("agent runtime[{}] 使用本租户 ACTIVE 配置: {}", tenantNo, config.getModelCode());
-                return toRemote(config, tenantNo);
+                AgentRuntimeClient client = toRemote(config, tenantNo);
+                if (client != null) {
+                    log.info("agent runtime[{}] 使用本租户 ACTIVE 配置: {}", tenantNo, config.getModelCode());
+                    return client;
+                }
             }
             if (tenantNo == null && (config.getTenantId() == null || config.getTenantId().isBlank())) {
-                log.info("agent runtime 使用系统默认 ACTIVE 配置: {}", config.getModelCode());
-                return toRemote(config, null);
+                AgentRuntimeClient client = toRemote(config, null);
+                if (client != null) {
+                    log.info("agent runtime 使用系统默认 ACTIVE 配置: {}", config.getModelCode());
+                    return client;
+                }
             }
             if (tenantNo != null && (config.getTenantId() == null || config.getTenantId().isBlank())
                     && tenantMatch == null) {
@@ -126,10 +163,31 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     }
 
     private AgentRuntimeClient toRemote(LlmModelConfig config, String tenantNo) {
-        String url = config.getBaseUrl() != null && !config.getBaseUrl().isBlank()
-                ? config.getBaseUrl() : config.getDeployUrl();
-        return new RemoteAgentRuntimeClient(url, config.getApiKey(), config.getModel(), tenantNo,
+        if (config.getDeployUrl() == null || config.getDeployUrl().isBlank()) {
+            log.warn("忽略缺少 deployUrl 的 ACTIVE 配置: configId={}, modelCode={}",
+                    config.getId(), config.getModelCode());
+            return null;
+        }
+        return new RemoteAgentRuntimeClient(trimTrailingSlash(config.getDeployUrl()),
+                config.getApiKey(), config.getModel(), tenantNo,
                 objectMapper, restTemplate);
+    }
+
+    private boolean isRoutable(LlmDeployState state, LlmModelConfig config) {
+        return LlmDeployState.ACTIVE.equals(state.getState())
+                && LlmDeployState.HEALTH_UP.equals(state.getHealthStatus())
+                && config != null
+                && (config.getIsDeleted() == null || config.getIsDeleted() == 0)
+                && (config.getStatus() == null || config.getStatus() == 1)
+                && !"mock".equalsIgnoreCase(state.getLlmProfile());
+    }
+
+    private static String trimTrailingSlash(String url) {
+        String result = url.trim();
+        while (result.endsWith("/")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        return result;
     }
 
     /**

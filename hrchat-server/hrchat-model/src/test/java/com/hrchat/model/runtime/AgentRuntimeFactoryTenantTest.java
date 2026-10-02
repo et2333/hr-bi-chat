@@ -48,6 +48,7 @@ class AgentRuntimeFactoryTenantTest {
         LlmDeployState state = new LlmDeployState();
         state.setConfigId(configId);
         state.setState("ACTIVE");
+        state.setHealthStatus("UP");
         return state;
     }
 
@@ -56,8 +57,11 @@ class AgentRuntimeFactoryTenantTest {
         c.setId(1L);
         c.setTenantId(tenantId);
         c.setModelCode("m");
-        c.setBaseUrl("http://cfg");
-        c.setDeployUrl("http://cfg");
+        c.setBaseUrl("https://model.example/v1");
+        c.setDeployUrl("http://cfg:8000");
+        c.setApiKey("sk-1");
+        c.setModel("m");
+        c.setStatus(1);
         c.setIsDeleted(0);
         return c;
     }

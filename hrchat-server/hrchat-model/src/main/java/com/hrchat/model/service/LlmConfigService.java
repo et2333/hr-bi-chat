@@ -1,7 +1,9 @@
 package com.hrchat.model.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.hrchat.audit.model.AuditEvent;
 import com.hrchat.audit.model.AuditEvents;
 import com.hrchat.audit.service.AuditCollector;
@@ -17,12 +19,16 @@ import com.hrchat.model.entity.LlmModelVersion;
 import com.hrchat.model.mapper.LlmDeployStateMapper;
 import com.hrchat.model.mapper.LlmModelConfigMapper;
 import com.hrchat.model.mapper.LlmModelVersionMapper;
+import com.hrchat.model.runtime.AgentRuntimeFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +51,7 @@ public class LlmConfigService {
     private final LlmDeployStateMapper deployStateMapper;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
+    private final AgentRuntimeFactory runtimeFactory;
 
     /**
      * 创建模型配置：写初始版本快照（v1 PENDING）+ 部署状态（PENDING）。
@@ -65,13 +72,13 @@ public class LlmConfigService {
         config.setModelCode(req.modelCode());
         config.setModelName(req.modelName());
         config.setVendor(req.vendor() == null || req.vendor().isBlank() ? "openai" : req.vendor());
-        config.setBaseUrl(req.baseUrl());
+        config.setBaseUrl(normalizeHttpUrl(req.baseUrl(), "baseUrl"));
         config.setApiKey(req.apiKey());
         config.setModel(req.model());
         config.setTemperature(req.temperature());
         config.setMaxTokens(req.maxTokens());
-        config.setDeployUrl(req.deployUrl());
-        config.setTenantId(resolveWriteTenant());
+        config.setDeployUrl(normalizeHttpUrl(req.deployUrl(), "deployUrl"));
+        config.setTenantId(resolveWriteTenant(ctx));
         config.setStatus(1);
         config.setIsDeleted(0);
         config.setCreatedAt(now);
@@ -83,7 +90,7 @@ public class LlmConfigService {
         LlmModelVersion version = new LlmModelVersion();
         version.setConfigId(config.getId());
         version.setVersionNo(1);
-        version.setConfigJson(toJson(config));
+        version.setConfigJson(toVersionSnapshot(config));
         version.setApplyResult("PENDING");
         versionMapper.insert(version);
 
@@ -131,12 +138,8 @@ public class LlmConfigService {
     /**
      * 模型详情（apiKey 脱敏展示）。
      */
-    public LlmViews.ModelDetailView detail(Long modelId) {
-        LlmModelConfig config = configMapper.selectById(modelId);
-        if (config == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
-        }
-        ensureTenantScoped(config);
+    public LlmViews.ModelDetailView detail(Long modelId, UserContext ctx) {
+        LlmModelConfig config = loadAccessibleConfig(modelId, ctx);
         return new LlmViews.ModelDetailView(config.getId(), config.getModelCode(), config.getModelName(),
                 config.getVendor(), config.getBaseUrl(), maskApiKey(config.getApiKey()), config.getModel(),
                 config.getTemperature(), config.getMaxTokens(), config.getDeployUrl(), config.getStatus(),
@@ -148,11 +151,7 @@ public class LlmConfigService {
      */
     @Transactional
     public void patch(Long modelId, LlmViews.ModelCreateRequest req, UserContext ctx) {
-        LlmModelConfig config = configMapper.selectById(modelId);
-        if (config == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
-        }
-        ensureTenantScoped(config);
+        LlmModelConfig config = loadManageableConfig(modelId, ctx);
         if (req == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
         }
@@ -162,8 +161,8 @@ public class LlmConfigService {
         if (req.vendor() != null && !req.vendor().isBlank()) {
             config.setVendor(req.vendor());
         }
-        if (req.baseUrl() != null) {
-            config.setBaseUrl(req.baseUrl());
+        if (req.baseUrl() != null && !req.baseUrl().isBlank()) {
+            config.setBaseUrl(normalizeHttpUrl(req.baseUrl(), "baseUrl"));
         }
         if (req.apiKey() != null) {
             config.setApiKey(req.apiKey());
@@ -177,8 +176,8 @@ public class LlmConfigService {
         if (req.maxTokens() != null) {
             config.setMaxTokens(req.maxTokens());
         }
-        if (req.deployUrl() != null) {
-            config.setDeployUrl(req.deployUrl());
+        if (req.deployUrl() != null && !req.deployUrl().isBlank()) {
+            config.setDeployUrl(normalizeHttpUrl(req.deployUrl(), "deployUrl"));
         }
         config.setUpdatedAt(LocalDateTime.now());
         config.setUpdatedBy(ctx.getEmpNo());
@@ -187,7 +186,7 @@ public class LlmConfigService {
         LlmModelVersion version = new LlmModelVersion();
         version.setConfigId(modelId);
         version.setVersionNo(maxVersionNo(modelId) + 1);
-        version.setConfigJson(toJson(config));
+        version.setConfigJson(toVersionSnapshot(config));
         version.setApplyResult("PENDING");
         versionMapper.insert(version);
 
@@ -195,9 +194,12 @@ public class LlmConfigService {
                 .eq(LlmDeployState::getConfigId, modelId));
         if (state != null) {
             state.setState("PENDING");
+            state.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
             state.setUpdatedAt(LocalDateTime.now());
             deployStateMapper.updateById(state);
         }
+
+        runtimeFactory.evictAfterCommit(config.getTenantId());
 
         auditCollector.record(AuditEvent.of(AuditEvents.LLM_CONFIG_CHANGE, ctx.getEmpNo(), "llm_model_config",
                 String.valueOf(modelId),
@@ -206,19 +208,30 @@ public class LlmConfigService {
     }
 
     /**
-     * 逻辑删除模型配置。
+     * 逻辑删除模型配置：置停用 + 部署 INACTIVE，再经 MyBatis-Plus 逻辑删除字段隐藏列表。
+     *
+     * <p>不可对 {@code isDeleted} 直接 {@code updateById}：全局 logic-delete 字段会被排除出 UPDATE，
+     * 否则会出现「状态变停用但仍留在列表」的错觉。</p>
      */
     @Transactional
     public void delete(Long modelId, UserContext ctx) {
-        LlmModelConfig config = configMapper.selectById(modelId);
-        if (config == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
-        }
-        ensureTenantScoped(config);
-        config.setIsDeleted(1);
-        config.setUpdatedAt(LocalDateTime.now());
+        LlmModelConfig config = loadManageableConfig(modelId, ctx);
+        LocalDateTime now = LocalDateTime.now();
+        config.setStatus(0);
+        config.setUpdatedAt(now);
         config.setUpdatedBy(ctx.getEmpNo());
         configMapper.updateById(config);
+        LlmDeployState state = deployStateMapper.selectOne(new LambdaQueryWrapper<LlmDeployState>()
+                .eq(LlmDeployState::getConfigId, modelId));
+        if (state != null) {
+            state.setState(LlmDeployState.INACTIVE);
+            state.setHealthStatus(LlmDeployState.HEALTH_UNKNOWN);
+            state.setUpdatedAt(now);
+            deployStateMapper.updateById(state);
+        }
+        // 走逻辑删除 SQL（UPDATE is_deleted=1），列表按未删除过滤后不再展示
+        configMapper.deleteById(modelId);
+        runtimeFactory.evictAfterCommit(config.getTenantId());
         auditCollector.record(AuditEvent.of(AuditEvents.LLM_CONFIG_CHANGE, ctx.getEmpNo(), "llm_model_config",
                 String.valueOf(modelId), toJson(Map.of("op", "DELETE", "model_code", config.getModelCode())), false));
         log.info("LLM 模型配置删除: id={}, modelCode={}, operator={}", modelId, config.getModelCode(), ctx.getEmpNo());
@@ -227,12 +240,66 @@ public class LlmConfigService {
     /**
      * 配置版本列表（versionNo 倒序）。
      */
-    public List<LlmViews.VersionView> versions(Long modelId) {
+    public List<LlmViews.VersionView> versions(Long modelId, UserContext ctx) {
+        loadAccessibleConfig(modelId, ctx);
         return versionMapper.selectList(new LambdaQueryWrapper<LlmModelVersion>()
                         .eq(LlmModelVersion::getConfigId, modelId)
                         .orderByDesc(LlmModelVersion::getVersionNo))
-                .stream().map(v -> new LlmViews.VersionView(v.getId(), v.getVersionNo(), v.getConfigJson(),
+                .stream().map(v -> new LlmViews.VersionView(v.getId(), v.getVersionNo(),
+                        redactVersionSnapshot(v.getConfigJson()),
                         v.getApplyResult(), v.getAppliedAt(), v.getAppliedBy(), v.getChangeNote())).toList();
+    }
+
+    /**
+     * 加载当前请求可读取的配置。租户只能读取本租户配置与系统默认配置，跨租户访问一律拒绝。
+     *
+     * <p>部署、健康检查等服务应复用此入口，不要直接按 id 查询后自行判断租户。</p>
+     */
+    public LlmModelConfig loadAccessibleConfig(Long modelId, UserContext ctx) {
+        LlmModelConfig config = loadExistingConfig(modelId);
+        ensureTenantAccessible(config, ctx);
+        return config;
+    }
+
+    /**
+     * 加载当前请求可管理的配置。在读取边界之上，系统默认配置仅允许平台 {@code ADMIN} 操作。
+     */
+    public LlmModelConfig loadManageableConfig(Long modelId, UserContext ctx) {
+        LlmModelConfig config = loadAccessibleConfig(modelId, ctx);
+        if (config.getTenantId() == null && !isPlatformAdmin(ctx)) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN, "系统默认模型配置仅允许平台管理员操作");
+        }
+        return config;
+    }
+
+    /**
+     * 加载属于指定配置的可访问版本，供查询流程复用配置归属与版本归属校验。
+     */
+    public LlmModelVersion loadAccessibleVersion(Long modelId, Long versionId, UserContext ctx) {
+        loadAccessibleConfig(modelId, ctx);
+        return loadVersion(modelId, versionId);
+    }
+
+    /**
+     * 加载可管理的回滚版本。系统默认配置仍只允许平台管理员管理。
+     */
+    public LlmModelVersion loadManageableVersion(Long modelId, Long versionId, UserContext ctx) {
+        loadManageableConfig(modelId, ctx);
+        return loadVersion(modelId, versionId);
+    }
+
+    /**
+     * 生成可持久化的版本快照。API Key 只保留在当前配置记录中，不进入历史版本。
+     */
+    public String toVersionSnapshot(LlmModelConfig config) {
+        try {
+            ObjectNode snapshot = objectMapper.valueToTree(config);
+            removeApiKey(snapshot);
+            return objectMapper.writeValueAsString(snapshot);
+        } catch (Exception e) {
+            log.warn("LLM 配置快照序列化失败: configId={}", config == null ? null : config.getId());
+            return "{}";
+        }
     }
 
     private LlmViews.ModelView toModelView(LlmModelConfig config) {
@@ -257,21 +324,106 @@ public class LlmConfigService {
     /**
      * 写入租户：显式 {@code X-Tenant-No} 优先，否则默认演示主租户（t01）。
      */
-    private String resolveWriteTenant() {
-        String tenantNo = TenantContextHolder.get();
+    private String resolveWriteTenant(UserContext ctx) {
+        String tenantNo = currentTenant(ctx);
         return tenantNo != null && !tenantNo.isBlank() ? tenantNo : DEFAULT_TENANT;
     }
 
     /**
-     * 租户归属校验：请求携带显式租户头时，仅允许操作本租户或系统默认（NULL）配置。
+     * 租户归属校验：仅允许读取当前可信租户或系统默认（NULL）配置。
      */
-    private void ensureTenantScoped(LlmModelConfig config) {
-        String tenantNo = TenantContextHolder.get();
-        if (tenantNo == null || tenantNo.isBlank()) {
+    private void ensureTenantAccessible(LlmModelConfig config, UserContext ctx) {
+        if (config.getTenantId() == null) {
             return;
         }
-        if (config.getTenantId() != null && !tenantNo.equals(config.getTenantId())) {
+        String tenantNo = currentTenant(ctx);
+        if (tenantNo == null || !tenantNo.equals(config.getTenantId())) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN, "无权访问其他租户的模型配置");
+        }
+    }
+
+    private LlmModelConfig loadExistingConfig(Long modelId) {
+        if (modelId == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
+        }
+        LlmModelConfig config = configMapper.selectById(modelId);
+        if (config == null || Integer.valueOf(1).equals(config.getIsDeleted())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "modelId");
+        }
+        return config;
+    }
+
+    private LlmModelVersion loadVersion(Long modelId, Long versionId) {
+        if (versionId == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "versionId");
+        }
+        LlmModelVersion version = versionMapper.selectById(versionId);
+        if (version == null || !modelId.equals(version.getConfigId())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "versionId");
+        }
+        return version;
+    }
+
+    private String currentTenant(UserContext ctx) {
+        if (ctx != null && ctx.getTenantId() != null && !ctx.getTenantId().isBlank()) {
+            return ctx.getTenantId();
+        }
+        String tenantNo = TenantContextHolder.get();
+        return tenantNo == null || tenantNo.isBlank() ? null : tenantNo;
+    }
+
+    private boolean isPlatformAdmin(UserContext ctx) {
+        List<String> roles = ctx == null || ctx.getRoles() == null ? Collections.emptyList() : ctx.getRoles();
+        return roles.contains("ADMIN");
+    }
+
+    private String redactVersionSnapshot(String configJson) {
+        if (configJson == null || configJson.isBlank()) {
+            return "{}";
+        }
+        try {
+            JsonNode parsed = objectMapper.readTree(configJson);
+            if (!(parsed instanceof ObjectNode objectNode)) {
+                return "{}";
+            }
+            removeApiKey(objectNode);
+            return objectMapper.writeValueAsString(objectNode);
+        } catch (Exception e) {
+            log.warn("LLM 历史配置快照脱敏失败，已隐藏原始内容");
+            return "{}";
+        }
+    }
+
+    private void removeApiKey(ObjectNode snapshot) {
+        snapshot.remove("apiKey");
+        snapshot.remove("api_key");
+    }
+
+    private String normalizeHttpUrl(String rawUrl, String fieldName) {
+        if (rawUrl == null || rawUrl.isBlank()) {
+            return null;
+        }
+        String value = rawUrl.trim();
+        try {
+            URI uri = new URI(value).normalize();
+            String scheme = uri.getScheme();
+            int port = uri.getPort();
+            if (scheme == null
+                    || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    || uri.getHost() == null || uri.getHost().isBlank()
+                    || uri.getUserInfo() != null
+                    || uri.getQuery() != null
+                    || uri.getFragment() != null
+                    || port == 0 || port > 65535) {
+                throw new BizException(ErrorCode.PARAM_INVALID, fieldName);
+            }
+            String normalized = uri.toString();
+            while (normalized.endsWith("/")) {
+                normalized = normalized.substring(0, normalized.length() - 1);
+            }
+            return normalized;
+        } catch (URISyntaxException e) {
+            throw new BizException(ErrorCode.PARAM_INVALID, fieldName);
         }
     }
 

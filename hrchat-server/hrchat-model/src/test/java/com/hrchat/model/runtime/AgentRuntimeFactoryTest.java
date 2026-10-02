@@ -59,21 +59,41 @@ class AgentRuntimeFactoryTest {
     }
 
     @Test
-    void activeConfig_delegateIsRemoteUsingDbUrl() {
+    void activeConfig_delegateIsRemoteUsingDeployUrl() {
         LlmDeployState state = new LlmDeployState();
         state.setConfigId(1L);
         state.setState("ACTIVE");
+        state.setHealthStatus("UP");
         when(deployStateMapper.selectList(any())).thenReturn(List.of(state));
         LlmModelConfig config = new LlmModelConfig();
         config.setId(1L);
-        config.setBaseUrl("http://db-runtime:8000");
+        config.setBaseUrl("https://model.example/v1");
+        config.setDeployUrl("http://agent-gateway:8000");
         config.setApiKey("sk-1");
         config.setModel("qwen-max");
         config.setIsDeleted(0);
+        config.setStatus(1);
         when(configMapper.selectById(1L)).thenReturn(config);
 
         AgentRuntimeFactory f = factory("local");
         assertTrue(f.getDelegate() instanceof RemoteAgentRuntimeClient);
+    }
+
+    @Test
+    void simulatedConfig_notRoutedToRemote() {
+        LlmDeployState state = new LlmDeployState();
+        state.setConfigId(1L);
+        state.setState("SIMULATED");
+        state.setHealthStatus("UNKNOWN");
+        when(deployStateMapper.selectList(any())).thenReturn(List.of(state));
+        LlmModelConfig config = new LlmModelConfig();
+        config.setId(1L);
+        config.setDeployUrl("http://agent-gateway:8000");
+        config.setIsDeleted(0);
+        config.setStatus(1);
+        when(configMapper.selectById(1L)).thenReturn(config);
+
+        assertSame(local, factory("local").getDelegate());
     }
 
     @Test

@@ -23,7 +23,7 @@ public class LlmModelVersion {
     /** 版本号（每次变更+1） */
     private Integer versionNo;
 
-    /** 全量配置快照（JSON） */
+    /** 脱敏配置快照（JSON，不保存 API Key） */
     private String configJson;
 
     /** PENDING/SUCCESS/FAILED/ROLLBACK */
