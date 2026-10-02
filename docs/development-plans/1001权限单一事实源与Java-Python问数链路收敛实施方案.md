@@ -335,4 +335,11 @@ local 的 `X-User-No` 仅用于浏览器到 Java 的 mock 身份切换。它不�
 - `sub=empNo`；`ContextOverride` 跨栈统一嵌套 snake_case（Java Web 仍可用扁平 camelCase，在 Remote 边界映射）。
 - 阶段 B 暴露 `POST /mcp` 鉴权骨架 + `tools/list`；`tools/call` 鉴权通过后对业务工具返回明确未实现，执行留给阶段 C。
 
+阶段 C 实施决策（2026-10-02）：
+
+- `org_context` 越权直接拒绝 `HRC-2003`（与本地 ask 一致）。
+- `semantic_query` 本期最小闭环：标量指标 + 时间 + 组织；`dimensions`/`filters` 暂不支持并明确报错。
+- `McpController` 留 authz 鉴权分发；业务 handler 与 `SemanticQueryService` 放 `hrchat-ai-client`。
+- 行数默认封顶 200；请求 `limit` 不可超过；结果强制字段策略脱敏；禁止 Python 指定 SQL/数据源。
+
 当前没有需要产品侧补充的业务决策。若进入生产部署阶段，需要再确认企业内部服务认证设施（统一服务 JWT 或 mTLS）以及密钥管理平台；这不阻塞当前 local/demo 编码。
