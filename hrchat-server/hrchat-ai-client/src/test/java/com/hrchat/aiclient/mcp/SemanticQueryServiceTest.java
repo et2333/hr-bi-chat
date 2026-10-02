@@ -64,7 +64,6 @@ class SemanticQueryServiceTest {
         when(queryExecService.executeReadonly(any())).thenReturn(new QueryResult(
                 List.of(new QueryResult.ColumnMeta("headcount", "在职人数", "NUMBER", false)),
                 List.of(Map.of("headcount", 120)), 1));
-        when(authzService.decideFieldPolicy(eq(hr01), eq("headcount"))).thenReturn(4);
 
         Map<String, Object> result = service.execute(hr01,
                 Map.of("metrics", List.of("headcount")),
@@ -110,6 +109,28 @@ class SemanticQueryServiceTest {
         doThrow(new BizException(ErrorCode.FUNC_FORBIDDEN)).when(authzService).checkFunc(any(), anyString());
         assertThrows(BizException.class, () -> service.execute(hr01,
                 Map.of("metrics", List.of("headcount")), Map.of()));
+    }
+
+    @Test
+    void execute_metricColumnStaysPlainEvenIfFieldPolicyMasks() {
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(metric("headcount",
+                "SELECT COUNT(1) FROM fact_employee WHERE 1=1"));
+        when(sqlRewriteService.authorize(anyString(), eq(hr01)))
+                .thenReturn(new AuthorizedQuery("SELECT 1 AS \"headcount\"", List.of(), Set.of("fact_employee"), "fp"));
+        when(queryExecService.executeReadonly(any())).thenReturn(new QueryResult(
+                List.of(new QueryResult.ColumnMeta("headcount", "在职人数", "NUMBER", false)),
+                List.of(Map.of("headcount", 120)), 1));
+
+        Map<String, Object> result = service.execute(hr01,
+                Map.of("metrics", List.of("headcount")),
+                Map.of("tool_call_id", "tc-plain"));
+
+        @SuppressWarnings("unchecked")
+        List<List<Object>> rows = (List<List<Object>>) result.get("rows");
+        assertEquals(120, rows.get(0).get(0));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> columns = (List<Map<String, Object>>) result.get("columns");
+        assertEquals(false, columns.get(0).get("masked"));
     }
 
     private static MetricDetail metric(String code, String formula) {

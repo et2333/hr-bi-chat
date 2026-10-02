@@ -11,7 +11,6 @@ import com.hrchat.api.chat.ContextOverride;
 import com.hrchat.api.chat.TimeRange;
 import com.hrchat.api.sse.SseEvents;
 import com.hrchat.authz.model.UserContext;
-import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,6 +25,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -33,7 +33,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -101,15 +100,6 @@ class RemoteAgentRuntimeClientTest {
         assertEquals(2, q.options().size());
         assertEquals("o1", q.options().get(0).optionId());
         assertFalse(q.multiple());
-    }
-
-    @Test
-    void ask_noPayload_throwsAiDegraded() {
-        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
-                .thenReturn(new ResponseEntity<>(Map.of("foo", "bar"), HttpStatus.OK));
-        BizException ex = assertThrows(BizException.class,
-                () -> client.ask(new AskRequest("问题", "SYNC", null), ctx));
-        assertEquals(ErrorCode.AI_DEGRADED, ex.getErrorCode());
     }
 
     @Test
@@ -182,17 +172,57 @@ class RemoteAgentRuntimeClientTest {
     }
 
     @Test
-    void ask_failedEnvelope_preservesBusinessErrorCode() {
+    void ask_failedEnvelope_emitsErrorEventInsteadOfThrowing() {
         Map<String, Object> error = Map.of(
                 "code", "HRC-2003", "message", "无权查询研发中心数据", "recoverable", false);
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
                 .thenReturn(new ResponseEntity<>(Map.of(
                         "ask_id", "ask_denied", "status", "FAILED", "error", error), HttpStatus.OK));
 
-        BizException ex = assertThrows(BizException.class,
-                () -> client.ask(new AskRequest("问题", "SYNC", null), ctx));
+        AgentResult result = client.ask(new AskRequest("问题", "SYNC", null), ctx);
 
-        assertEquals(ErrorCode.DATA_RANGE_FORBIDDEN, ex.getErrorCode());
+        assertEquals("ask_denied", result.askId());
+        assertNull(result.payload());
+        assertEquals(SseEvents.ERROR, result.events().get(0).event());
+        assertEquals("HRC-2003", result.events().get(0).payload().get("code"));
+    }
+
+    @Test
+    void ask_snakeCasePayload_mapsAskIdForFrontend() {
+        Map<String, Object> answerPayload = new LinkedHashMap<>();
+        answerPayload.put("ask_id", "ask_snake");
+        answerPayload.put("answer_id", "ans_1");
+        answerPayload.put("status", "COMPLETED");
+        answerPayload.put("intent", "QUERY");
+        answerPayload.put("degraded", false);
+        answerPayload.put("conclusion", Map.of("type", "NUMBER_CARD", "value", 18, "unit", "人"));
+        answerPayload.put("table", Map.of("columns", List.of(), "rows", List.of(), "total", 0, "page", 1, "size", 1));
+        answerPayload.put("followups", List.of());
+        answerPayload.put("caliber", Map.of(
+                "metric", "在职人数",
+                "definition", "SELECT COUNT(1) FROM dim_employee",
+                "time_range", "2026-09",
+                "data_updated_at", "2026-09-28T00:00:00+08:00"));
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(new ResponseEntity<>(Map.of(
+                        "ask_id", "ask_snake", "status", "COMPLETED", "answer_payload", answerPayload),
+                        HttpStatus.OK));
+
+        AgentResult result = client.ask(new AskRequest("研发中心在职人数", "SYNC", null), ctx);
+
+        assertEquals("ask_snake", result.askId());
+        assertEquals("ask_snake", result.payload().askId());
+        assertEquals("ask_snake", result.events().get(0).payload().get("askId"));
+        assertEquals("SELECT COUNT(1) FROM dim_employee", result.sql());
+    }
+
+    @Test
+    void ask_noPayload_emitsDegradedErrorEvent() {
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(new ResponseEntity<>(Map.of("foo", "bar"), HttpStatus.OK));
+        AgentResult result = client.ask(new AskRequest("问题", "SYNC", null), ctx);
+        assertEquals(SseEvents.ERROR, result.events().get(0).event());
+        assertEquals(ErrorCode.AI_DEGRADED.getCode(), result.events().get(0).payload().get("code"));
     }
 
     @Test

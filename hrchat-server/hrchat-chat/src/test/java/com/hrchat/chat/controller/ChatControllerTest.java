@@ -14,17 +14,22 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import org.springframework.test.web.servlet.MvcResult;
+
 import java.util.List;
 import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -94,23 +99,29 @@ class ChatControllerTest {
     void ask_syncMode_returnsJson() throws Exception {
         AnswerPayload payload = new AnswerPayload("ask-1", "ans-1", "COMPLETED", "METRIC",
                 false, null, null, null, null, null, null, 100L);
-        when(chatService.ask(any(), any(), any(), any()))
+        when(chatService.ask(any(), any(), any(), nullable(String.class)))
                 .thenReturn(new ChatService.AskOutcome("ask-1", null, payload, false));
-        mockMvc.perform(post(U + "/sessions/1/asks").header("X-User-No", "hr01")
+        MvcResult started = mockMvc.perform(post(U + "/sessions/1/asks").header("X-User-No", "hr01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数？\",\"mode\":\"SYNC\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(started))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON));
     }
 
     @Test
     void ask_streamMode_returnsSse() throws Exception {
-        when(chatService.ask(any(), any(), any(), any()))
+        when(chatService.ask(any(), any(), any(), nullable(String.class)))
                 .thenReturn(new ChatService.AskOutcome("ask-1", "data: {\"x\":1}\n\n", null, false));
-        mockMvc.perform(post(U + "/sessions/1/asks").header("X-User-No", "hr01")
+        MvcResult started = mockMvc.perform(post(U + "/sessions/1/asks").header("X-User-No", "hr01")
                         .header(ChatController.IDEMPOTENCY_HEADER, "idem-1")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数？\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(started))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(new MediaType("text", "event-stream")));
     }
@@ -119,9 +130,12 @@ class ChatControllerTest {
     void clarify_ok() throws Exception {
         when(chatService.clarify(any(), any(), any(), any()))
                 .thenReturn(new ChatService.AskOutcome("ask-1", "data: {}\n\n", null, false));
-        mockMvc.perform(post(U + "/sessions/1/asks/ask-1/clarifications").header("X-User-No", "hr01")
+        MvcResult started = mockMvc.perform(post(U + "/sessions/1/asks/ask-1/clarifications").header("X-User-No", "hr01")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"selectedCode\":\"1001\"}"))
+                        .content("{\"answers\":[{\"question_id\":\"q1\",\"option_ids\":[\"headcount\"]}]}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        mockMvc.perform(asyncDispatch(started))
                 .andExpect(status().isOk());
     }
 

@@ -6,6 +6,7 @@ import com.hrchat.api.chat.AskRequest;
 import com.hrchat.api.chat.ClarifyAnswerRequest;
 import com.hrchat.authz.model.CurrentUser;
 import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.tenant.TenantContextHolder;
 import com.hrchat.chat.dto.FeedbackRequest;
 import com.hrchat.chat.dto.SessionView;
 import com.hrchat.chat.dto.SqlView;
@@ -35,6 +36,7 @@ import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBo
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.Callable;
 
 /**
  * 问数会话接口（接口文档 2.2：会话 CRUD、问句 SSE、澄清、任务状态/SQL/表格、反馈）。
@@ -94,10 +96,31 @@ public class ChatController {
 
     @Operation(summary = "提交问句（SSE 流式 / SYNC 同步）", description = "默认 STREAM；mode=SYNC 返回 ANSWER_DONE.payload JSON")
     @PostMapping(value = "/sessions/{sessionId}/asks", produces = {MediaType.TEXT_EVENT_STREAM_VALUE, MediaType.APPLICATION_JSON_VALUE})
-    public ResponseEntity<StreamingResponseBody> ask(@PathVariable Long sessionId,
-                                                     @RequestBody AskRequest request,
-                                                     @RequestHeader(value = IDEMPOTENCY_HEADER, required = false) String idempotencyKey,
-                                                     @CurrentUser UserContext ctx) {
+    public Callable<ResponseEntity<StreamingResponseBody>> ask(@PathVariable Long sessionId,
+                                                               @RequestBody AskRequest request,
+                                                               @RequestHeader(value = IDEMPOTENCY_HEADER, required = false) String idempotencyKey,
+                                                               @CurrentUser UserContext ctx) {
+        // remote：Python 会回调本进程 /mcp；必须释放 Tomcat 请求线程，否则同进程回环易 502
+        return () -> withTenant(ctx, () -> buildAskResponse(sessionId, request, idempotencyKey, ctx));
+    }
+
+    @Operation(summary = "澄清应答（续跑原问答流）", description = "接口文档 2.2.6")
+    @PostMapping(value = "/sessions/{sessionId}/asks/{askId}/clarifications", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public Callable<ResponseEntity<StreamingResponseBody>> clarify(@PathVariable Long sessionId,
+                                                                   @PathVariable String askId,
+                                                                   @RequestBody ClarifyAnswerRequest request,
+                                                                   @CurrentUser UserContext ctx) {
+        return () -> withTenant(ctx, () -> {
+            ChatService.AskOutcome outcome = chatService.clarify(ctx, sessionId, askId, request);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(new MediaType("text", "event-stream", StandardCharsets.UTF_8));
+            byte[] body = outcome.sseBody().getBytes(StandardCharsets.UTF_8);
+            return ResponseEntity.ok().headers(headers).body(os -> os.write(body));
+        });
+    }
+
+    private ResponseEntity<StreamingResponseBody> buildAskResponse(Long sessionId, AskRequest request,
+                                                                   String idempotencyKey, UserContext ctx) {
         ChatService.AskOutcome outcome = chatService.ask(ctx, sessionId, request, idempotencyKey);
         String mode = request.mode() == null || request.mode().isBlank() ? "STREAM" : request.mode().trim().toUpperCase();
         HttpHeaders headers = new HttpHeaders();
@@ -114,17 +137,20 @@ public class ChatController {
         return ResponseEntity.ok().headers(headers).body(os -> os.write(body));
     }
 
-    @Operation(summary = "澄清应答（续跑原问答流）", description = "接口文档 2.2.6")
-    @PostMapping(value = "/sessions/{sessionId}/asks/{askId}/clarifications", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public ResponseEntity<StreamingResponseBody> clarify(@PathVariable Long sessionId,
-                                                         @PathVariable String askId,
-                                                         @RequestBody ClarifyAnswerRequest request,
-                                                         @CurrentUser UserContext ctx) {
-        ChatService.AskOutcome outcome = chatService.clarify(ctx, sessionId, askId, request);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(new MediaType("text", "event-stream", StandardCharsets.UTF_8));
-        byte[] body = outcome.sseBody().getBytes(StandardCharsets.UTF_8);
-        return ResponseEntity.ok().headers(headers).body(os -> os.write(body));
+    private static <T> T withTenant(UserContext ctx, java.util.concurrent.Callable<T> action) throws Exception {
+        String previous = TenantContextHolder.get();
+        if (ctx != null && ctx.getTenantId() != null && !ctx.getTenantId().isBlank()) {
+            TenantContextHolder.set(ctx.getTenantId());
+        }
+        try {
+            return action.call();
+        } finally {
+            if (previous == null || previous.isBlank()) {
+                TenantContextHolder.clear();
+            } else {
+                TenantContextHolder.set(previous);
+            }
+        }
     }
 
     // ---------------- 任务状态 / SQL / 表格 / 反馈 ----------------
