@@ -14,6 +14,9 @@ public final class AuditEvents {
     /** 问句（BR-02/FR-20：问句摘要、SQL 摘要、行数） */
     public static final String ASK = "ASK";
 
+    /** MCP 工具调用（阶段 C：semantic_query 等，含 tool_call_id） */
+    public static final String MCP_TOOL_CALL = "MCP_TOOL_CALL";
+
     /** 查看 SQL（独立授权，访问记审计） */
     public static final String VIEW_SQL = "VIEW_SQL";
 
