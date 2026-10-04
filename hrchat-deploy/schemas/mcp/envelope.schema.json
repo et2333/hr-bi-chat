@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hrchat.local/schemas/mcp/envelope.schema.json",
   "title": "MCP JSON-RPC 2.0 Envelope",
-  "description": "Java POST /mcp 请求与响应机读契约（阶段 B；1001 方案 §6）",
+  "description": "Java POST /mcp 请求与响应机读契约（阶段 B；1001 方案 §6；context 需 tool_context_token + invocation_id）",
   "oneOf": [
     { "$ref": "#/$defs/request" },
     { "$ref": "#/$defs/response" }

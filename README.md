@@ -92,6 +92,12 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
 
 注意：Java `hrchat.ai.runtime=local`（默认）不进 Python，现有本地演示不受影响。remote 链路与 MCP/`semantic_query` 同源（H2 种子），不再使用 Python 字典假数。ask/clarify 在 MVC 异步线程执行，以便 Python 回调本机 `/mcp`。后台 ACTIVE 模型部署配置优先于 `hrchat.ai.runtime`；测试默认本地链路时不要点击模型“一键部署”。
 
+答案卡上的「查看明细」等追问 chips 为**占位**（点击会作为独立短句发送，易 HRA-4001），多轮上下文不在本期范围，详见验收文档。
+
+## 手动验证 remote + Java MCP 问数
+
+参见 [remote + Java MCP 问数：本地手动验收](docs/remote-java-mcp问数本地验收.md)。推荐顺序：hr01 有数且可查看 SQL → hr02 为 HRC-2003（非 HRS-3001）→ 发送后输入框清空。准备步骤见上文「可选：启动 Python AI 服务」。
+
 ## 常用配置
 
 | 环境变量 | 用途 | 默认值 |
