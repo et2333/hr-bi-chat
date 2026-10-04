@@ -75,11 +75,31 @@ class SemanticQueryServiceTest {
     }
 
     @Test
-    void execute_rejectsDimensions() {
+    void execute_rejectsUnsupportedDimensions() {
         BizException ex = assertThrows(BizException.class, () -> service.execute(hr01,
-                Map.of("metrics", List.of("headcount"), "dimensions", List.of("org")),
+                Map.of("metrics", List.of("headcount"), "dimensions", List.of("gender")),
                 Map.of()));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+    }
+
+    @Test
+    void execute_orgDimension_buildsGroupBy() {
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(metric("headcount",
+                "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
+        when(sqlRewriteService.authorize(anyString(), eq(hr01)))
+                .thenAnswer(inv -> new AuthorizedQuery(inv.getArgument(0), List.of(), Set.of("dim_employee"), "fp"));
+        when(queryExecService.executeReadonly(any())).thenReturn(new QueryResult(
+                List.of(new QueryResult.ColumnMeta("org_name", "组织", "STRING", false),
+                        new QueryResult.ColumnMeta("headcount", "在职人数", "NUMBER", false)),
+                List.of(Map.of("org_name", "2", "headcount", 18)), 1));
+
+        Map<String, Object> result = service.execute(hr01,
+                Map.of("metrics", List.of("headcount"), "dimensions", List.of("org")),
+                Map.of());
+
+        assertEquals("org", result.get("query_mode"));
+        assertEquals(1, result.get("row_count"));
+        verify(sqlRewriteService).authorize(org.mockito.ArgumentMatchers.contains("GROUP BY org_key"), eq(hr01));
     }
 
     @Test

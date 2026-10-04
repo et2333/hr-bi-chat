@@ -40,4 +40,17 @@ describe('components/MetricCard', () => {
     expect(wrapper.text()).toContain('headcount')
     expect(wrapper.text()).toContain('数据更新于')
   })
+
+  it('TEXT 结论文案用句子样式而非大号数字', () => {
+    const text: Conclusion = {
+      type: 'TEXT',
+      value: '研发一部 10人最高，研发二部 8人最低；合计 18人。',
+      unit: '',
+      compare: null,
+    }
+    const wrapper = mount(MetricCard, { props: { conclusion: text, caliber: null }, ...mountOpts })
+    expect(wrapper.find('.metric-sentence').exists()).toBe(true)
+    expect(wrapper.find('.metric-number').exists()).toBe(false)
+    expect(wrapper.text()).toContain('合计 18人')
+  })
 })

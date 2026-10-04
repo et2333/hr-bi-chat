@@ -216,11 +216,23 @@ public class ReportService {
     public void delete(UserContext ctx, Long reportId) {
         authzService.checkFunc(ctx, PERM_MANAGE);
         RptReport report = requireOwner(ctx, reportId);
+        // 状态标记为已删除；真正软删走 TableLogic（deleteById），勿靠 updateById 写 isDeleted（会被忽略）
         report.setStatus(2);
-        report.setIsDeleted(1);
         report.setUpdatedBy(ctx.getEmpNo());
         report.setUpdatedAt(LocalDateTime.now());
         reportMapper.updateById(report);
+        // 同步作废订阅，避免列表「订阅数」与可见性不一致
+        List<RptSubscription> subs = subscriptionMapper.selectList(new LambdaQueryWrapper<RptSubscription>()
+                .eq(RptSubscription::getReportId, reportId)
+                .eq(RptSubscription::getIsDeleted, 0));
+        for (RptSubscription sub : subs) {
+            sub.setStatus(0);
+            sub.setIsDeleted(1);
+            sub.setUpdatedBy(ctx.getEmpNo());
+            sub.setUpdatedAt(LocalDateTime.now());
+            subscriptionMapper.updateById(sub);
+        }
+        reportMapper.deleteById(reportId);
     }
 
     // =================================================================

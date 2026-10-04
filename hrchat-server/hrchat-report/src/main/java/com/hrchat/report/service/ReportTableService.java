@@ -61,13 +61,15 @@ public class ReportTableService {
         RptComponent comp = requireTableComponent(reportId, compId);
         TableDef def = parseDef(comp);
 
-        // 各指标分组聚合执行，按 dim_value 合并
+        // 各指标分组聚合执行，按 dim_value 合并（time 维走按月趋势 SQL）
         Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
         for (MetricDetail metric : def.metrics()) {
             ReportChartService.Aggregation agg = chartService.parseAggregation(metric);
-            String sql = agg.ratio()
-                    ? chartService.buildRatioSql(metric, def.dim(), agg)
-                    : chartService.buildDirectSql(metric, def.dim(), agg);
+            String sql = "time".equals(def.dim())
+                    ? chartService.buildTimeSeriesSql(metric, agg, def.months())
+                    : (agg.ratio()
+                            ? chartService.buildRatioSql(metric, def.dim(), agg)
+                            : chartService.buildDirectSql(metric, def.dim(), agg));
             QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
             merge(result, metric.code(), merged);
         }
@@ -110,9 +112,11 @@ public class ReportTableService {
 
         MetricDetail first = def.metrics().get(0);
         ReportChartService.Aggregation agg = chartService.parseAggregation(first);
-        String sql = agg.ratio()
-                ? chartService.buildRatioSql(first, def.dim(), agg)
-                : chartService.buildDirectSql(first, def.dim(), agg);
+        String sql = "time".equals(def.dim())
+                ? chartService.buildTimeSeriesSql(first, agg, def.months())
+                : (agg.ratio()
+                        ? chartService.buildRatioSql(first, def.dim(), agg)
+                        : chartService.buildDirectSql(first, def.dim(), agg));
         QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
         Set<String> values = new LinkedHashSet<>();
         for (Map<String, Object> row : result.rows()) {
@@ -140,7 +144,7 @@ public class ReportTableService {
         return comp;
     }
 
-    /** 组件定义解析：指标列表（metrics 或单 metric）+ 维度（缺省 org，time 退化 org）。 */
+    /** 组件定义解析：指标列表（metrics 或单 metric）+ 维度（缺省 org；兼容 dims）。 */
     private TableDef parseDef(RptComponent comp) {
         Map<String, Object> def = chartService.parseMap(comp.getDefJson());
         List<String> codes = new ArrayList<>();
@@ -159,16 +163,11 @@ public class ReportTableService {
         if (codes.isEmpty()) {
             throw new BizException(ErrorCode.PARSE_FAILED, "组件缺少 metric");
         }
-        String dim = chartService.asString(def.get("dim"));
-        if (dim == null || dim.isBlank()) {
-            Object dimsObj = def.get("dimensions");
-            if (dimsObj instanceof List<?> list && !list.isEmpty()) {
-                dim = String.valueOf(list.get(0));
-            }
-        }
-        String dimKey = (dim == null || dim.isBlank()) ? "org" : dim.trim().toLowerCase();
-        if ("time".equals(dimKey)) {
-            dimKey = "org";
+        String dimKey = chartService.resolveDimKey(def);
+        int months = 3;
+        Object monthsRaw = def.get("months");
+        if (monthsRaw instanceof Number n) {
+            months = Math.max(1, Math.min(24, n.intValue()));
         }
         List<MetricDetail> metrics = new ArrayList<>();
         for (String code : codes) {
@@ -178,7 +177,7 @@ public class ReportTableService {
             }
             metrics.add(metric);
         }
-        return new TableDef(dimKey, metrics);
+        return new TableDef(dimKey, metrics, months);
     }
 
     /** 排序白名单：dimValue 或任一指标编码；否则拒绝。 */
@@ -244,6 +243,7 @@ public class ReportTableService {
     private String dimName(String dim) {
         return switch (dim) {
             case "org" -> "组织";
+            case "time" -> "月份";
             case "gender" -> "性别";
             case "job_family" -> "职类";
             case "job_level" -> "职级";
@@ -256,6 +256,6 @@ public class ReportTableService {
         return metric.name() == null || metric.name().isBlank() ? metric.code() : metric.name();
     }
 
-    private record TableDef(String dim, List<MetricDetail> metrics) {
+    private record TableDef(String dim, List<MetricDetail> metrics, int months) {
     }
 }

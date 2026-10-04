@@ -1,10 +1,12 @@
 <template>
-  <div class="metric-card">
-    <div class="metric-value">
+  <div class="metric-card" :class="{ 'is-text': isText }">
+    <!-- 分析类结论文案（对比/趋势）用句子呈现，避免与标量查数同一套大号数字 -->
+    <p v-if="isText" class="metric-sentence">{{ displayValue }}</p>
+    <div v-else class="metric-value">
       <span class="metric-number">{{ displayValue }}</span>
       <span v-if="conclusion.unit" class="metric-unit">{{ conclusion.unit }}</span>
     </div>
-    <div v-if="conclusion.compare" class="metric-compare">
+    <div v-if="!isText && conclusion.compare" class="metric-compare">
       <span :class="['direction', directionClass]">
         {{ conclusion.compare.direction === 'UP' ? '↑' : conclusion.compare.direction === 'DOWN' ? '↓' : '→' }}
       </span>
@@ -36,6 +38,7 @@ function formatValue(value: unknown): string {
   return String(value)
 }
 
+const isText = computed(() => props.conclusion.type === 'TEXT')
 const displayValue = computed(() => formatValue(props.conclusion.value))
 const directionClass = computed(() => {
   const d = props.conclusion.compare?.direction
@@ -53,6 +56,14 @@ function formatTime(iso: string): string {
 <style scoped>
 .metric-card {
   padding: 4px 0;
+}
+
+.metric-sentence {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: rgba(0, 0, 0, 0.88);
 }
 
 .metric-value {

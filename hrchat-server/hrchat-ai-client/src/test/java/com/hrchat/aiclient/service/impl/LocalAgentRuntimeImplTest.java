@@ -306,30 +306,38 @@ class LocalAgentRuntimeImplTest {
         assertEquals("line", series.get(0).get("type"));
         List<?> yData = (List<?>) series.get(0).get("data");
         assertEquals(5, ((Number) yData.get(2)).intValue());
-        // 结论取末点（5），对比首点（2）→ UP；月度明细表两列
-        assertEquals(5, ((Number) result.payload().conclusion().value()).intValue());
-        assertEquals("UP", result.payload().conclusion().compare().direction());
-        assertEquals("2026-07", result.payload().conclusion().compare().period());
+        // 趋势第一行用首末点对比句（TEXT），不再用大号末点数字
+        assertEquals("TEXT", result.payload().conclusion().type());
+        String tip = String.valueOf(result.payload().conclusion().value());
+        assertTrue(tip.contains("2026-07") && tip.contains("2026-09") && tip.contains("上升"), tip);
         assertEquals("period", result.payload().table().columns().get(0).key());
         assertEquals(3, result.payload().table().rows().size());
     }
 
     @Test
-    void trendQuestion_snapshotMetric_fallsBackToNumberCard() {
+    void trendQuestion_snapshotHeadcount_buildsLineFromHireLeaveDates() {
         stubSynonyms();
         stubMetrics();
         when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
-        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
-                new QueryResult(List.of(new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
-                        List.of(Map.of("headcount", 18L)), 1));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(new QueryResult(
+                List.of(new QueryResult.ColumnMeta("period", "period", "string", false),
+                        new QueryResult.ColumnMeta("headcount", "headcount", "int", false)),
+                List.of(
+                        Map.of("period", "2026-07", "headcount", 15L),
+                        Map.of("period", "2026-08", "headcount", 17L),
+                        Map.of("period", "2026-09", "headcount", 18L)),
+                3));
 
-        // headcount 基于快照表 dim_employee，无月度历史：趋势不可用，回落单值数字卡
-        AgentResult result = runtime.ask(new AskRequest("在职人数趋势", "STREAM", null), hr01);
+        // headcount：按入职/离职日还原月末时点，产出 LINE
+        AgentResult result = runtime.ask(new AskRequest("在职人数近三月趋势", "STREAM", null), hr01);
 
         assertEquals(SseEvents.INTENT_QUERY, result.intent());
-        assertEquals("NUMBER_CARD", result.payload().chart().type());
-        assertEquals(18, ((Number) result.payload().conclusion().value()).intValue());
-        assertFalse(result.sql().contains("GROUP BY"), "快照指标不应按月分组: " + result.sql());
+        assertEquals("LINE", result.payload().chart().type());
+        assertEquals("TEXT", result.payload().conclusion().type());
+        String tip = String.valueOf(result.payload().conclusion().value());
+        assertTrue(tip.contains("15") && tip.contains("18") && tip.contains("上升"), tip);
+        assertTrue(result.sql().contains("hire_date"), "应使用入职日还原时点: " + result.sql());
+        assertTrue(result.sql().contains("UNION ALL"), "应按月 UNION: " + result.sql());
     }
 
     @Test
@@ -356,9 +364,10 @@ class LocalAgentRuntimeImplTest {
         assertTrue(sql.contains("NULLIF("), "应防除零: " + sql);
 
         assertEquals("LINE", result.payload().chart().type());
-        // 百分比 ×100：末点 0.0588 → 5.88%
-        assertEquals(0, new java.math.BigDecimal("5.88")
-                .compareTo((java.math.BigDecimal) result.payload().conclusion().value()));
+        // 结论文案含首末点百分比；图数据末点 0.0588 → 5.88
+        assertEquals("TEXT", result.payload().conclusion().type());
+        String tip = String.valueOf(result.payload().conclusion().value());
+        assertTrue(tip.contains("5") && tip.contains("5.88") && tip.contains("上升"), tip);
         Map<String, Object> cfg = result.payload().chart().config();
         assertEquals("{value}%",
                 ((Map<String, Object>) ((Map<String, Object>) cfg.get("yAxis")).get("axisLabel")).get("formatter"));
@@ -505,6 +514,17 @@ class LocalAgentRuntimeImplTest {
                 .map(e -> (String) e.payload().get("delta"))
                 .reduce((a, b) -> b)
                 .orElseThrow();
+    }
+
+    @Test
+    void orgCompareSentence_avoidsScientificNotationForTen() {
+        String tip = LocalAgentRuntimeImpl.buildOrgCompareSentence(
+                "在职人数",
+                List.of("研发一部", "研发二部"),
+                List.of(new java.math.BigDecimal("10"), new java.math.BigDecimal("8")),
+                false, 0, "人");
+        assertTrue(tip.contains("10人") && !tip.toUpperCase().contains("E+"), tip);
+        assertTrue(tip.contains("合计 18人"), tip);
     }
 
     /** 内存 LLM 假客户端：固定回复或抛异常。 */

@@ -54,12 +54,14 @@
               :error-title="t.errorTitle"
               :error-message="t.errorMessage"
               :can-view-sql="true"
+              :saving-report="savingAskId === t.payload?.askId"
               @retry="retry(t)"
               @clarify-submit="(answers) => submitClarify(t, answers)"
               @view-sql="showSql(t)"
               @load-more-table="loadMoreTable(t)"
-              @followup="(q) => send(q)"
+              @followup="(q) => sendFollowup(t, q)"
               @feedback="(r) => sendFeedback(t, r)"
+              @save-report="saveAsReport(t)"
               @typing-done="onTypingDone(t.id)"
             />
           </div>
@@ -88,28 +90,61 @@
     <a-modal v-model:open="sqlVisible" title="查询逻辑（SQL 与口径）" :footer="null" width="720px">
       <div v-if="sqlView">
         <a-alert type="info" show-icon :message="`口径：${sqlView.caliber.metric}`" :description="sqlView.caliber.definition" class="sql-caliber" />
+        <a-tag v-if="isCaliberOnlySql(sqlView.sql)" color="orange" class="sql-mode-tag">口径定义</a-tag>
         <pre class="sql-code">{{ sqlView.sql }}</pre>
       </div>
       <a-skeleton v-else active :paragraph="{ rows: 4 }" />
+    </a-modal>
+
+    <!-- 存为报表：建议名可改（原型：弹窗命名） -->
+    <a-modal
+      v-model:open="saveReportOpen"
+      title="存为报表"
+      ok-text="保存"
+      cancel-text="取消"
+      :confirm-loading="!!savingAskId"
+      destroy-on-close
+      @ok="confirmSaveReport"
+    >
+      <a-form layout="vertical">
+        <a-form-item label="报表名称" required>
+          <a-input
+            v-model:value="saveReportName"
+            :maxlength="64"
+            show-count
+            placeholder="请输入报表名称"
+            @pressEnter="confirmSaveReport"
+          />
+        </a-form-item>
+        <p class="save-report-hint">已按指标与分析类型自动命名，可按需修改后再保存。</p>
+      </a-form>
     </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { nextTick, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import AnswerCard from '@/components/AnswerCard.vue'
 import StateEmpty from '@/components/StateEmpty.vue'
-import { chatApi } from '@/api'
+import { chatApi, reportApi } from '@/api'
+import type { ComponentSpec } from '@/api/reports'
 import type { AnswerPayload, ClarifyQuestions, SqlView, TableData } from '@/api/types'
 import { useChatStore, type ChatTurn } from '@/stores/chat'
+import { deriveReportName } from '@/utils/reportName'
 
 const chat = useChatStore()
+const router = useRouter()
 const input = ref('')
 const messageArea = ref<HTMLElement>()
 const sqlVisible = ref(false)
 const sqlView = ref<SqlView | null>(null)
+const savingAskId = ref<string | null>(null)
+const saveReportOpen = ref(false)
+const saveReportName = ref('')
+const saveReportTurn = ref<ChatTurn | null>(null)
 
 onMounted(loadSessions)
 
@@ -123,7 +158,10 @@ async function loadSessions() {
       chat.setSessions([created.data])
       chat.selectSession(created.data.id)
     } else {
-      chat.selectSession(res.data.records[0].id)
+      // 返回对话页时尽量留在原会话，避免总是跳到列表第一条
+      const keepId = chat.currentSessionId
+      const keep = keepId != null && res.data.records.some((s) => s.id === keepId)
+      chat.selectSession(keep ? keepId! : res.data.records[0].id)
     }
     await loadTurns()
   } catch {
@@ -157,14 +195,62 @@ async function loadTurns() {
       question: turn.question,
       state: 'completed',
     })
+    const assistantId = `ha_${turn.turnId}`
+    // 先占位；再按 askId 拉取完整 ANSWER_DONE（内存 askStore），失败则用摘要拼最小完成态
     chat.turns.push({
-      id: `ha_${turn.turnId}`,
+      id: assistantId,
       role: 'assistant',
+      question: turn.question,
       state: 'completed',
-      streamingText: turn.conclusionBrief || '（该轮无结论摘要）',
+      streamingText: '',
+      payload: briefPayload(turn),
     })
+    if (turn.askId) {
+      void hydrateHistoryAnswer(assistantId, turn.askId, turn)
+    }
   }
   scrollToBottom()
+}
+
+/** 历史列表无完整 payload 时的最小完成态，避免只显示「该轮无结论摘要」 */
+function briefPayload(turn: { askId?: string; conclusionBrief?: string; status?: string }): AnswerPayload {
+  const brief = (turn.conclusionBrief ?? '').trim()
+  return {
+    askId: turn.askId ?? '',
+    answerId: '',
+    status: turn.status || 'COMPLETED',
+    intent: 'QUERY',
+    degraded: false,
+    conclusion: {
+      type: 'TEXT',
+      value: brief || '（历史结论摘要未持久化；可重新提问查看完整结果）',
+    },
+    table: null,
+    chart: null,
+    caliber: null,
+    followups: [],
+  }
+}
+
+async function hydrateHistoryAnswer(
+  turnId: string,
+  askId: string,
+  turn: { conclusionBrief?: string; status?: string; askId?: string },
+) {
+  try {
+    const res = await chatApi.getAsk(askId)
+    if (res.data) {
+      chat.updateTurn(turnId, {
+        state: 'completed',
+        payload: normalizeAnswerPayload(res.data as unknown as Record<string, unknown>),
+        streamingText: '',
+      })
+      return
+    }
+  } catch {
+    // askStore 重启后会丢：保留 briefPayload
+  }
+  chat.updateTurn(turnId, { payload: briefPayload({ ...turn, askId }) })
 }
 
 // ---------------- 问句发送与 SSE 消费 ----------------
@@ -178,7 +264,8 @@ async function send(question?: string) {
   // 先清输入框，避免 v-model 与按钮传参竞态导致问句残留
   input.value = ''
   chat.pushUserTurn(q)
-  const turnId = chat.pushAssistantTurn()
+  // 助手轮次带上问句，存报表时用问句区分「对比 / 趋势 / 标量」
+  const turnId = chat.pushAssistantTurn(q)
   chat.asking = true
 
   const handleFrame = (data: Record<string, unknown>) => {
@@ -271,6 +358,155 @@ function retry(t: ChatTurn) {
   if (t.question) void send(t.question)
 }
 
+/** 打开命名弹窗：默认名由指标+分析类型推导，不用口语问句原文 */
+function saveAsReport(t: ChatTurn) {
+  const payload = t.payload
+  if (!payload?.askId) {
+    message.warning('当前回答缺少 askId，无法存为报表')
+    return
+  }
+  if (savingAskId.value) return
+  saveReportTurn.value = t
+  saveReportName.value = deriveReportName(payload, resolveTurnQuestion(t))
+  saveReportOpen.value = true
+}
+
+function resolveTurnQuestion(t: ChatTurn): string {
+  let q = (t.question ?? '').trim()
+  if (q) return q
+  const idx = chat.turns.findIndex((x) => x.id === t.id)
+  for (let i = idx - 1; i >= 0; i--) {
+    if (chat.turns[i].role === 'user' && chat.turns[i].question) {
+      return chat.turns[i].question!.trim()
+    }
+  }
+  return ''
+}
+
+/** 确认命名后创建报表并跳转详情 */
+async function confirmSaveReport() {
+  const t = saveReportTurn.value
+  const payload = t?.payload
+  const askId = payload?.askId
+  const name = saveReportName.value.trim()
+  if (!t || !payload || !askId) {
+    message.warning('无法保存：缺少答案上下文')
+    return
+  }
+  if (!name) {
+    message.warning('请填写报表名称')
+    return Promise.reject(new Error('empty name'))
+  }
+  if (savingAskId.value) return
+  savingAskId.value = askId
+  try {
+    const components = buildReportComponents(payload)
+    const res = await reportApi.createReport({
+      sourceType: 'ASK',
+      sourceId: askId,
+      name: name.slice(0, 64),
+      components,
+    })
+    saveReportOpen.value = false
+    saveReportTurn.value = null
+    message.success('已存为报表')
+    await router.push(`/reports/${res.data}`)
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '存为报表失败')
+  } finally {
+    savingAskId.value = null
+  }
+}
+
+/** 存报表 def.metric 必须用语义 code；展示名进 title */
+function resolveMetricCode(payload: AnswerPayload): string {
+  const code = payload.caliber?.metricCode?.trim()
+  if (code) return code
+  const skip = new Set(['org_name', 'period', 'dim_value', 'org', 'emp_no', 'emp_name', 'job_level'])
+  const col = payload.table?.columns?.find((c) => c.key && !skip.has(c.key))
+  return col?.key?.trim() || ''
+}
+
+/** 答案无 chart 或类型丢失时，按表结构推断 BAR/LINE，避免存报表只剩表格 */
+function inferChartType(payload: AnswerPayload): 'BAR' | 'LINE' | 'PIE' | null {
+  const t = payload.chart?.type?.toUpperCase()
+  if (t === 'BAR' || t === 'LINE' || t === 'PIE') return t
+  const keys = new Set((payload.table?.columns ?? []).map((c) => c.key))
+  if (keys.has('period')) return 'LINE'
+  if (keys.has('org_name') || keys.has('org')) return 'BAR'
+  return null
+}
+
+function buildReportComponents(payload: AnswerPayload): ComponentSpec[] {
+  const comps: ComponentSpec[] = []
+  const title = payload.caliber?.metric ?? '指标'
+  const metricCode = resolveMetricCode(payload)
+  const definition = payload.caliber?.definition ?? ''
+  if (!metricCode) {
+    throw new Error('缺少指标编码，无法存为报表（请重试问数后再存）')
+  }
+  if (payload.conclusion) {
+    comps.push({
+      compType: 'METRIC_CARD',
+      def: {
+        metric: metricCode,
+        title,
+        unit: payload.conclusion.unit ?? '',
+        definition,
+      },
+    })
+  }
+  // 有可视化图型则落 CHART；纯标量也默认落 BAR（按组织），保证报表中心可切换柱/线/饼
+  const chartType = inferChartType(payload) ?? 'BAR'
+  const isTrend = chartType === 'LINE'
+  const dimensions = isTrend ? ['time'] : ['org']
+  const chartTitle = isTrend ? `${title}近三月趋势` : title
+  comps.push({
+    compType: 'CHART',
+    chartType,
+    def: {
+      metric: metricCode,
+      title: chartTitle,
+      // dimensions：后端正式字段；dims：种子/历史兼容
+      dimensions,
+      dims: dimensions,
+      ...(isTrend ? { months: 3 } : {}),
+    },
+  })
+  // 有无明细都落 TABLE 定义，详情页按 dimensions 实时查数
+  comps.push({
+    compType: 'TABLE',
+    def: {
+      metric: metricCode,
+      title: isTrend ? '月度明细' : '数据明细',
+      dimensions,
+      dims: dimensions,
+      ...(isTrend ? { months: 3 } : {}),
+    },
+  })
+  return comps
+}
+
+/** 短句追问 chips 拼上口径指标名，避免「查看明细」无法解析 */
+function sendFollowup(t: ChatTurn, question: string) {
+  const q = (question ?? '').trim()
+  if (!q) return
+  const metric = t.payload?.caliber?.metric?.trim()
+  if (!metric) {
+    void send(q)
+    return
+  }
+  const short = ['查看明细', '按组织对比', '查看近三月趋势', '查看近一年趋势']
+  if (short.includes(q)) {
+    if (q === '查看明细') void send(`查看${metric}明细`)
+    else if (q === '按组织对比') void send(`按组织对比${metric}`)
+    else if (q.includes('近一年')) void send(`查看${metric}近一年趋势`)
+    else void send(`查看${metric}近三月趋势`)
+    return
+  }
+  void send(q)
+}
+
 /** 兼容 Python snake_case 与 Java camelCase 的 askId */
 function resolveAskId(payload: Record<string, unknown> | AnswerPayload | null | undefined): string {
   if (!payload) return ''
@@ -281,12 +517,55 @@ function resolveAskId(payload: Record<string, unknown> | AnswerPayload | null | 
 
 function normalizeAnswerPayload(payload: Record<string, unknown>): AnswerPayload {
   const askId = resolveAskId(payload)
-  return { ...(payload as unknown as AnswerPayload), askId }
+  const base = { ...(payload as unknown as AnswerPayload), askId }
+  const rawCaliber = payload.caliber
+  if (!rawCaliber || typeof rawCaliber !== 'object') return base
+  const c = rawCaliber as Record<string, unknown>
+  return {
+    ...base,
+    caliber: {
+      metric: String(c.metric ?? ''),
+      metricCode:
+        c.metricCode != null
+          ? String(c.metricCode)
+          : c.metric_code != null
+            ? String(c.metric_code)
+            : undefined,
+      definition: String(c.definition ?? ''),
+      timeRange:
+        c.timeRange != null
+          ? String(c.timeRange)
+          : c.time_range != null
+            ? String(c.time_range)
+            : undefined,
+      dataUpdatedAt: String(c.dataUpdatedAt ?? c.data_updated_at ?? ''),
+    },
+  }
 }
 
+/** SSE 澄清载荷可能是 snake_case（Local INTERRUPT），统一为前端 camelCase */
 function normalizeClarify(payload: Record<string, unknown>): ClarifyQuestions {
   const askId = resolveAskId(payload)
-  return { ...(payload as unknown as ClarifyQuestions), askId }
+  const interruptType = String(payload.interruptType ?? payload.interrupt_type ?? 'CLARIFY')
+  const rawQuestions = Array.isArray(payload.questions) ? payload.questions : []
+  const questions = rawQuestions.map((q) => {
+    const qm = (q ?? {}) as Record<string, unknown>
+    const rawOpts = Array.isArray(qm.options) ? qm.options : []
+    const options = rawOpts.map((o) => {
+      const om = (o ?? {}) as Record<string, unknown>
+      return {
+        optionId: String(om.optionId ?? om.option_id ?? ''),
+        label: String(om.label ?? ''),
+      }
+    })
+    return {
+      questionId: String(qm.questionId ?? qm.question_id ?? ''),
+      question: String(qm.question ?? ''),
+      multiple: Boolean(qm.multiple),
+      options,
+    }
+  })
+  return { interruptType, askId, questions }
 }
 
 async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; optionIds: string[] }>) {
@@ -313,6 +592,14 @@ async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; o
 }
 
 // ---------------- 辅助操作 ----------------
+
+/** remote 场景可能只返回口径公式，UI 标明「口径定义」 */
+function isCaliberOnlySql(sql: string | undefined): boolean {
+  const s = (sql ?? '').trim()
+  if (!s) return true
+  const upper = s.toUpperCase()
+  return !upper.includes('SELECT') && !upper.includes('WITH ')
+}
 
 async function showSql(t: ChatTurn) {
   sqlView.value = null
@@ -472,8 +759,19 @@ async function scrollToBottom() {
   color: rgba(0, 0, 0, 0.45);
 }
 
+.save-report-hint {
+  margin: 0;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  line-height: 1.5;
+}
+
 .sql-caliber {
   margin-bottom: 12px;
+}
+
+.sql-mode-tag {
+  margin-bottom: 8px;
 }
 
 .sql-code {

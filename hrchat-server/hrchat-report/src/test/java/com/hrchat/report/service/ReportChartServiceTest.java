@@ -13,6 +13,7 @@ import com.hrchat.queryexec.model.QueryResult;
 import com.hrchat.queryexec.service.QueryExecService;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
 import com.hrchat.report.chart.ChartViews.InsightView;
+import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.entity.RptComponent;
 import com.hrchat.report.entity.RptReport;
 import com.hrchat.report.mapper.RptComponentMapper;
@@ -256,13 +257,17 @@ class ReportChartServiceTest {
                 metric("leave_count", "离职人数", "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
-                result("研发一部", 0.05d));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenAnswer(inv -> {
+            AuthorizedQuery aq = inv.getArgument(0);
+            assertThat(aq.sql()).contains("CAST(n.metric_value AS DECIMAL");
+            return result("研发一部", 0.05d);
+        });
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
 
         assertThat(view.series().get(0).name()).isEqualTo("离职率");
-        assertThat(view.series().get(0).data()).containsExactly(0.05d);
+        // 展示层 ×100：0.05 → 5.00
+        assertThat(view.series().get(0).data()).containsExactly(new java.math.BigDecimal("5.00"));
     }
 
     @Test
@@ -310,19 +315,47 @@ class ReportChartServiceTest {
     }
 
     @Test
-    void timeDim_fallsBackToOrg() {
-        // 模板组件 def 维度为 time（时间趋势），语义层暂无时间分组，退化为组织维度
+    void timeDim_buildsMonthlyHeadcountTrend() {
         when(componentMapper.selectOne(any())).thenReturn(
-                comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"time\"}"));
+                comp("LINE", "{\"metric\":\"headcount\",\"dimensions\":[\"time\"],\"months\":3}"));
         when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
                 metric("headcount", "在职人数", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
-        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("研发一部", 10));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenAnswer(inv -> {
+            AuthorizedQuery aq = inv.getArgument(0);
+            assertThat(aq.sql()).contains("hire_date");
+            assertThat(aq.sql()).contains("UNION ALL");
+            return new QueryResult(
+                    List.of(new QueryResult.ColumnMeta("dim_value", "dim_value", "string", false),
+                            new QueryResult.ColumnMeta("metric_value", "metric_value", "number", false)),
+                    List.of(
+                            Map.of("dim_value", "2026-07", "metric_value", 15),
+                            Map.of("dim_value", "2026-08", "metric_value", 17),
+                            Map.of("dim_value", "2026-09", "metric_value", 18)),
+                    3);
+        });
 
         ChartDataView view = service.chartData(1L, 10L, ctx);
 
-        assertThat(view.categories()).containsExactly("研发一部");
-        assertThat(view.series().get(0).name()).isEqualTo("在职人数");
-        assertThat(view.series().get(0).data()).containsExactly(10);
+        assertThat(view.chartType()).isEqualTo("LINE");
+        assertThat(view.categories()).containsExactly("2026-07", "2026-08", "2026-09");
+        assertThat(view.series().get(0).data()).containsExactly(15, 17, 18);
+    }
+
+    @Test
+    void dimsArray_time_isResolved() {
+        when(componentMapper.selectOne(any())).thenReturn(
+                comp("LINE", "{\"metric\":\"hire_count\",\"dims\":[\"time\"]}"));
+        when(semanticMetaService.getMetricByCode("hire_count")).thenReturn(
+                metric("hire_count", "入职人数",
+                        "SELECT COUNT(*) FROM fact_emp_change WHERE change_type = 1"));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenAnswer(inv -> {
+            AuthorizedQuery aq = inv.getArgument(0);
+            assertThat(aq.sql()).contains("FORMATDATETIME");
+            return result("2026-09", 5);
+        });
+
+        ChartDataView view = service.chartData(1L, 10L, ctx);
+        assertThat(view.categories()).containsExactly("2026-09");
     }
 
     @Test
@@ -466,5 +499,31 @@ class ReportChartServiceTest {
                 .isInstanceOf(BizException.class)
                 .extracting(e -> ((BizException) e).getErrorCode())
                 .isEqualTo(ErrorCode.PARAM_INVALID);
+    }
+
+    @Test
+    void metricCardData_scalarQuery_returnsLiveValue() {
+        RptComponent card = new RptComponent();
+        card.setId(11L);
+        card.setReportId(1L);
+        card.setCompType(3);
+        card.setDefJson("{\"metric\":\"headcount\",\"title\":\"在职人数\",\"unit\":\"人\"}");
+        when(componentMapper.selectOne(any())).thenReturn(card);
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
+                metric("headcount", "在职人数",
+                        "SELECT COUNT(DISTINCT emp_key) FROM dim_employee WHERE emp_status = 1"));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
+                new QueryResult(List.of(), List.of(Map.of("metric_value", 18)), 1L));
+
+        MetricCardView view = service.metricCardData(1L, 11L, ctx);
+
+        assertThat(view.metricCode()).isEqualTo("headcount");
+        assertThat(view.value()).isEqualTo(18);
+        assertThat(view.unit()).isEqualTo("人");
+        org.mockito.ArgumentCaptor<AuthorizedQuery> captor =
+                org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService).executeReadonly(captor.capture());
+        assertThat(captor.getValue().sql()).doesNotContain("GROUP BY");
+        assertThat(captor.getValue().sql()).contains("COUNT(DISTINCT");
     }
 }

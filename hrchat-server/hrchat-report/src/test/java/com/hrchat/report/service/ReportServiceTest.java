@@ -37,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -147,7 +148,28 @@ class ReportServiceTest {
 
         BizException e = assertThrows(BizException.class, () -> service.delete(hr01, 9L));
         assertEquals(ErrorCode.FUNC_FORBIDDEN, e.getErrorCode());
-        verify(reportMapper, never()).updateById(any());
+        verify(reportMapper, never()).deleteById(anyLong());
+    }
+
+    @Test
+    void delete_owner_softDeletesViaTableLogicAndCancelsSubs() {
+        when(reportMapper.selectById(5L)).thenReturn(report(5L, 1L, "人力月报"));
+        RptSubscription sub = new RptSubscription();
+        sub.setId(20L);
+        sub.setReportId(5L);
+        sub.setStatus(1);
+        sub.setIsDeleted(0);
+        when(subscriptionMapper.selectList(any())).thenReturn(List.of(sub));
+        when(reportMapper.updateById(any())).thenReturn(1);
+        when(subscriptionMapper.updateById(any())).thenReturn(1);
+        when(reportMapper.deleteById(5L)).thenReturn(1);
+
+        service.delete(hr01, 5L);
+
+        verify(reportMapper).updateById(argThat(r -> r.getStatus() != null && r.getStatus() == 2));
+        verify(subscriptionMapper).updateById(argThat(s ->
+                Integer.valueOf(0).equals(s.getStatus()) && Integer.valueOf(1).equals(s.getIsDeleted())));
+        verify(reportMapper).deleteById(5L);
     }
 
     @Test
