@@ -1,9 +1,14 @@
-"""本地演示数据目录与执行器（MockLLM 模式下的确定性数据源）。
+"""本地演示数据目录与执行器（非正式问数）。
+
+边界（阶段 E / 2A）：
+- ``QUERY_BACKEND=java_mcp``（remote/prod）不得依赖本模块 ``GRANTED_ORGS`` 做授权。
+- ``QUERY_BACKEND=demo`` 单测与独立演示可使用 ``DemoQueryExecutor`` / ``GRANTED_ORGS``。
+- 归因团队暂仍引用本模块字典，非正式取数链路。
 
 - 指标语义目录：同义词最长匹配 → 指标 code（与 Java LocalAgentRuntimeImpl 对齐）。
 - 时间窗口解析：问句关键词/context_override → [start, end) 左闭右开。
 - DemoQueryExecutor：按指标返回确定性的当期/上期数值，供执行节点与归因团队复用。
-- 组织权限（BR-02 演示）：按 X-User-No 授予组织子树；提及未授权组织抛 HRC-2003。
+- 组织权限（仅 demo）：按 X-User-No 授予组织子树；提及未授权组织抛 PermissionError。
 """
 from __future__ import annotations
 

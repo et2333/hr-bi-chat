@@ -428,7 +428,9 @@ kubectl get hpa -A | grep hrchat     # 🔍HPA就绪（chat副本按CPU 60%伸�
 | REDIS_HOST / REDIS_PASSWORD | 是 | redis-sentinel… / Secret | 哨兵模式含MASTER_NAME |
 | KAFKA_BOOTSTRAP | 是 | kafka:9092 | 订阅/审计事件 |
 | OIDC_ISSUER / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET | 是 | https://sso.example.com / … / Secret | 认证（ARCH V-07） |
-| AI_GATEWAY_URL | 是 | http://agent-gateway.hrchat-ai:8080 | AI运行时地址 |
+| AI_GATEWAY_URL / `hrchat.ai.remote-base-url` | 是（remote） | http://agent-gateway.hrchat-ai:8080 | Python agent-gateway 地址（非模型 API） |
+| `HRCHAT_MCP_SERVICE_TOKEN` | 是（MCP） | Secret | 校验 Python 调用 `/mcp` 的 `X-Service-Token`；禁止入库明文 |
+| `HRCHAT_TOOL_TOKEN_SECRET` | 是（MCP） | Secret（≥32 字节） | Java 签发/校验短期 `tool_context_token`（HS256）；与浏览器 SSO JWT 密钥隔离 |
 | AUTHZ_CACHE_TTL_SECONDS | 否 | 300 | 权限指纹TTL（BR-12） |
 | EXPORT_MAX_ROWS | 否 | 5000 | 导出行数上限（BR-06） |
 | AUDIT_FLUSH_BATCH | 否 | 500 | 审计批量写入阈值 |
@@ -444,7 +446,9 @@ kubectl get hpa -A | grep hrchat     # 🔍HPA就绪（chat副本按CPU 60%伸�
 | MODEL_FALLBACK_URL | 否 | https://api.internal-llm…/v1 | 云端兜底（仅Schema场景） |
 | PG_CHECKPOINT_URL | 是 | postgresql://…/hrchat_state | LangGraph检查点 |
 | VECTOR_DSN | 是 | pg同库 | pgvector |
-| MCP_JAVA_URL | 是 | http://mcp-server.hrchat-app:9090 | 取数唯一入口（红线） |
+| `JAVA_MCP_BASE_URL` / MCP_JAVA_URL | 是 | http://hrchat-app:8080/mcp | Java `POST /mcp` 取数入口（红线；与应用同进程或内网地址） |
+| `HRCHAT_MCP_SERVICE_TOKEN` | 是 | 与 Java 配对的 Secret | 请求头 `X-Service-Token` |
+| `QUERY_BACKEND` | 是 | `java_mcp` | 正式/remote **只允许** `java_mcp`；`demo` 仅本地单测或独立演示，生产禁止 |
 | AGENT_MAX_CONCURRENT | 否 | 20 | 归因任务并发上限 |
 | AGENT_BUDGET_DEFAULT_LLM / TOOLS | 否 | 20 / 30 | 预算默认值（BR-16） |
 | SANDBOX_IMAGE | 否 | hrchat/sandbox:1.0 | Docker沙箱镜像 |

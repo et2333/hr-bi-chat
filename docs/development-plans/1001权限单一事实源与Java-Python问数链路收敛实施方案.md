@@ -351,4 +351,12 @@ local 的 `X-User-No` 仅用于浏览器到 Java 的 mock 身份切换。它不�
 - 归因（AttributionTeam）本期不动。
 - remote 问数：`ChatController` ask/clarify 以 MVC `Callable` 异步执行，释放 Tomcat 请求线程，避免 Python 回调 `/mcp` 同进程回环 502。
 
+阶段 E 实施决策（2026-10-04）：
+
+- 范围取 **1A**：文档对齐 + 既有关键单测确认 + 手验清单；不做全量 §9 跨进程 CI。
+- 演示边界取 **2A**：`java_mcp` 正式链路不依赖 `GRANTED_ORGS`；`demo_data` 仅 `QUERY_BACKEND=demo` 单测/演示与归因暂用；生产/`remote` 禁止 demo 后端。
+- 接口文档取 **3B**：`docs/3-4` §2.9/3.1 改为服务令牌 + 工具令牌；原「浏览器 JWT / UserContext 透传」精简为历史决策备注。
+- 追问 chips 取 **4A**：本期不做多轮上下文；手验文档标明占位（HRA-4001 不判失败）。
+- 手验入口：`docs/remote-java-mcp问数本地验收.md`；部署手册环境变量与 README 交叉引用。
+
 当前没有需要产品侧补充的业务决策。若进入生产部署阶段，需要再确认企业内部服务认证设施（统一服务 JWT 或 mTLS）以及密钥管理平台；这不阻塞当前 local/demo 编码。

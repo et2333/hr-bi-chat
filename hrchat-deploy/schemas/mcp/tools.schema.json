@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hrchat.local/schemas/mcp/tools.schema.json",
   "title": "MCP Tools Arguments and Results",
-  "description": "本期三个问数 MCP 工具 arguments/result（阶段 B 契约；阶段 C 实现执行）",
+  "description": "本期三个问数 MCP 工具 arguments/result（阶段 B/C 契约；阶段 E 与接口文档 2.9 对齐；report_save 未纳入）",
   "$defs": {
     "get_semantic_meta.args": {
       "type": "object",

@@ -115,3 +115,17 @@ async def test_build_semantic_tool_client_java_requires_config():
 
     demo = build_semantic_tool_client("demo")
     assert demo.backend == "demo"
+
+
+def test_java_mcp_check_org_is_noop_not_granted_orgs():
+    """java_mcp 路径不在 Python 侧用 GRANTED_ORGS 预拒；组织权限由 Java semantic_query 裁决。"""
+    from adapters.mcp_client import McpClient
+    from adapters.semantic_tool_client import JavaMcpSemanticToolClient
+    from langgraph_flows.demo_data import check_org_permission
+
+    # 对照：demo 权限表会拒绝 hr02 查研发
+    with pytest.raises(PermissionError):
+        check_org_permission("hr02", ["研发"])
+
+    client = JavaMcpSemanticToolClient(McpClient("http://127.0.0.1:9/mcp", "svc"))
+    client.check_org("hr02", ["研发"])  # 不得抛
