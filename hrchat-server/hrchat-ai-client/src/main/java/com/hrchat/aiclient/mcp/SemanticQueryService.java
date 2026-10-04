@@ -75,11 +75,17 @@ public class SemanticQueryService {
         if (metrics == null || metrics.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "metrics");
         }
-        if (dimensions != null && !dimensions.isEmpty()) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "dimensions 本期暂不支持");
-        }
         if (filters != null && !filters.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_INVALID, "filters 本期暂不支持");
+        }
+        String queryMode = arguments.get("query_mode") == null ? null
+                : String.valueOf(arguments.get("query_mode")).trim().toLowerCase();
+        if (dimensions != null && !dimensions.isEmpty()) {
+            if (dimensions.size() == 1 && "org".equalsIgnoreCase(dimensions.get(0))) {
+                queryMode = queryMode == null || queryMode.isBlank() ? "org" : queryMode;
+            } else {
+                throw new BizException(ErrorCode.PARAM_INVALID, "dimensions 仅支持单一 org");
+            }
         }
 
         Integer requestedLimit = arguments.get("limit") instanceof Number n ? n.intValue() : null;
@@ -93,6 +99,9 @@ public class SemanticQueryService {
                 ? (Map<String, Object>) m : null;
 
         MetricSqlComposer.TimeWindow window = MetricSqlComposer.resolveTimeRange(timeRange, demoNow);
+        if (queryMode == null && timeRange != null && "MONTH".equalsIgnoreCase(stringVal(timeRange.get("grain")))) {
+            queryMode = "trend";
+        }
         // SQL 始终保留 {authz_org_filter}；org_context 越权在窄化上下文时拒绝（1A）
         UserContext effectiveUser = narrowForOrgContext(user, orgContext);
 
@@ -100,11 +109,31 @@ public class SemanticQueryService {
         for (String code : metrics) {
             details.add(semanticMetaService.getMetricByCode(code));
         }
+        MetricDetail primary = details.get(0);
 
-        String sql = sqlComposer.buildScalarQuery(details, window, null);
+        String sql;
+        if ("org".equals(queryMode)) {
+            sql = sqlComposer.buildOrgCompareQuery(primary, window, null);
+        } else if ("detail".equals(queryMode)) {
+            sql = sqlComposer.buildDetailQuery(primary, window, null);
+        } else if ("trend".equals(queryMode)) {
+            if (window == null) {
+                window = new MetricSqlComposer.TimeWindow(demoNow.minusMonths(3), demoNow.plusDays(1));
+            }
+            sql = sqlComposer.buildMonthlyTrendQuery(primary, window, null);
+            if (sql == null) {
+                // 快照指标无月度事实：回落标量，避免硬失败
+                sql = sqlComposer.buildScalarQuery(details, window, null);
+                queryMode = "scalar";
+            }
+        } else {
+            sql = sqlComposer.buildScalarQuery(details, window, null);
+            queryMode = "scalar";
+        }
         AuthorizedQuery authorized = sqlRewriteService.authorize(sql, effectiveUser);
         QueryResult raw = queryExecService.executeReadonly(authorized);
         Map<String, Object> result = toMaskedResult(user, details, raw, limit);
+        result.put("query_mode", queryMode);
 
         audit(user, context, authorized, (Integer) result.get("row_count"));
         return result;

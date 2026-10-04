@@ -74,7 +74,8 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     /** 问候词（意图 CHITCHAT）。 */
     private static final Set<String> GREETINGS = Set.of(
             "你好", "您好", "hello", "hi", "嗨", "谢谢", "感谢", "再见", "拜拜",
-            "你是谁", "介绍一下", "你能做什么");
+            "你是谁", "介绍一下", "你能做什么",
+            "还能问什么", "可以问什么", "能问什么", "支持哪些", "有哪些指标", "你会什么");
 
     /** 每个指标的单位。 */
     private static final Map<String, String> METRIC_UNIT = Map.of(
@@ -225,6 +226,22 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         // 时间范围（问句关键词 > 显式覆盖）
         TimeWindow window = resolveWindow(question, contextOverride);
 
+        // 明细 / 按组织对比 / 趋势（演示追问 chips）
+        if (isDetailQuestion(question)) {
+            AgentResult detailResult = runDetail(askId, question, metric, metricCode,
+                    window, ctx, resolved, events, start);
+            if (detailResult != null) {
+                return detailResult;
+            }
+        }
+        if (isOrgCompareQuestion(question)) {
+            AgentResult orgResult = runOrgCompare(askId, question, metric, metricCode,
+                    window, ctx, resolved, events, start);
+            if (orgResult != null) {
+                return orgResult;
+            }
+        }
+
         // 趋势分析（折线图）：含趋势词且指标可按月聚合时走时序路径；快照类指标自动回落单值数字卡
         if (isTrendQuestion(question)) {
             AgentResult trendResult = runTrend(askId, question, metric, metricCode,
@@ -331,6 +348,15 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     private boolean isTrendQuestion(String question) {
         return question != null && (question.contains("趋势") || question.contains("走势")
                 || question.contains("按月") || question.contains("每月") || question.contains("月度"));
+    }
+
+    private boolean isDetailQuestion(String question) {
+        return question != null && question.contains("明细");
+    }
+
+    private boolean isOrgCompareQuestion(String question) {
+        return question != null && (question.contains("按组织对比") || question.contains("按部门对比")
+                || (question.contains("组织") && question.contains("对比")));
     }
 
     /**
@@ -649,10 +675,17 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         String expr = metric.formulaExpr().trim();
         if (expr.toUpperCase().startsWith("SELECT")) {
             BaseParts p = parseBase(expr);
-            if (p == null || !p.isFact()) {
+            if (p == null) {
                 return null;
             }
-            return wrapTrend(metric, monthlyFactSub(p, window, orgFragment));
+            if (p.isFact()) {
+                return wrapTrend(metric, monthlyFactSub(p, window, orgFragment));
+            }
+            // 快照在职：按入职/离职日还原各月末时点人数，支撑「近三月趋势」折线
+            if ("dim_employee".equalsIgnoreCase(p.table()) && "headcount".equals(metric.code())) {
+                return buildHeadcountSnapshotTrendSql(metric, window, orgFragment);
+            }
+            return null;
         }
         // 派生比率 a / b
         List<String> tokens = java.util.Arrays.stream(expr.split("\\s+"))
@@ -685,6 +718,29 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     private String wrapTrend(MetricDetail metric, String inner) {
         return "SELECT period, v AS \"" + metric.code() + "\" FROM (" + inner
                 + ") t ORDER BY period";
+    }
+
+    /**
+     * 在职人数月末时点趋势：用 hire_date / leave_date 还原历史，不依赖 emp_status 快照。
+     */
+    private String buildHeadcountSnapshotTrendSql(MetricDetail metric, TimeWindow window, String orgFragment) {
+        List<String> unions = new ArrayList<>();
+        LocalDate cursor = window.start().withDayOfMonth(1);
+        LocalDate last = window.end().minusDays(1);
+        while (!cursor.isAfter(last)) {
+            LocalDate monthEnd = cursor.withDayOfMonth(cursor.lengthOfMonth());
+            String period = monthEnd.format(DateTimeFormatter.ofPattern("yyyy-MM"));
+            String asOf = monthEnd.format(SQL_DATE);
+            unions.add("SELECT '" + period + "' AS period, COUNT(DISTINCT emp_key) AS v FROM dim_employee WHERE "
+                    + "hire_date <= DATE '" + asOf + "' "
+                    + "AND (leave_date IS NULL OR leave_date > DATE '" + asOf + "') "
+                    + "AND " + authzPredicate(orgFragment));
+            cursor = cursor.plusMonths(1);
+        }
+        if (unions.isEmpty()) {
+            return null;
+        }
+        return wrapTrend(metric, String.join(" UNION ALL ", unions));
     }
 
     private static Number extractValue(QueryResult result, String code) {
@@ -905,8 +961,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                         ? new AnswerPayload.Compare(prevPeriod, display(toDecimal(compare), percent, scale), direction)
                         : null);
 
+        // 明细与结论同量纲：比率指标用百分数，避免表里出现 0.0555… 而卡上是 5.56%
         List<Map<String, Object>> rows = current == null ? List.of()
-                : List.of(Map.of(metric.code(), current));
+                : List.of(Map.of(metric.code(), display(toDecimal(current), percent, scale)));
         AnswerPayload.TableData table = new AnswerPayload.TableData(
                 List.of(new AnswerPayload.Column(metric.code(), metric.name(), "number", false)),
                 rows, rows.size(), 1, 1);
@@ -922,9 +979,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         AnswerPayload.Chart chart = current == null ? null
                 : new AnswerPayload.Chart("NUMBER_CARD", true, chartConfig);
 
-        AnswerPayload.Caliber caliber = new AnswerPayload.Caliber(
-                metric.name(), metric.calcScope(),
-                window == null ? null : window.label(), DATA_UPDATED_AT);
+        AnswerPayload.Caliber caliber = toCaliber(metric, window == null ? null : window.label());
 
         return new AnswerPayload(askId, "ans_" + UUID.randomUUID().toString().substring(0, 8),
                 SseEvents.ASK_COMPLETED, SseEvents.INTENT_QUERY, false, null,
@@ -932,6 +987,200 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                 List.of("查看" + metric.name() + "明细",
                         "按组织对比" + metric.name(),
                         "查看" + metric.name() + "近三月趋势"), elapsedMs);
+    }
+
+    /** 口径：展示名 + 语义 code（存报表 def.metric 必须用 code）。 */
+    private AnswerPayload.Caliber toCaliber(MetricDetail metric, String timeRange) {
+        return new AnswerPayload.Caliber(metric.name(), metric.calcScope(), timeRange, DATA_UPDATED_AT, metric.code());
+    }
+
+    /**
+     * 明细：人员花名册或事实表近期行（演示用，上限 50）。
+     */
+    private AgentResult runDetail(String askId, String question, MetricDetail metric, String metricCode,
+                                  TimeWindow window, UserContext ctx, Resolved resolved,
+                                  List<SseEvent> events, long start) {
+        String orgFragment = orgFilterFragment(ctx, resolved.orgKeys(), resolved.orgTerm());
+        String detailSql = buildDetailSql(metric, window, orgFragment);
+        if (detailSql == null) {
+            return null;
+        }
+        events.add(toolStart("sql_exec", "正在查询「" + metric.name() + "」明细…"));
+        String sql = null;
+        try {
+            long sqlStart = System.currentTimeMillis();
+            AuthorizedQuery authorized = sqlRewriteService.authorize(detailSql, ctx);
+            sql = authorized.sql();
+            QueryResult result = queryExecService.executeReadonly(authorized);
+            events.add(toolEnd("sql_exec", System.currentTimeMillis() - sqlStart, result.rows().size()));
+
+            List<AnswerPayload.Column> columns = new ArrayList<>();
+            for (QueryResult.ColumnMeta c : result.columns()) {
+                columns.add(new AnswerPayload.Column(c.key(), c.name() == null ? c.key() : c.name(),
+                        c.type() == null ? "string" : c.type(), false));
+            }
+            List<Map<String, Object>> rows = new ArrayList<>(result.rows());
+            String tip = rows.isEmpty()
+                    ? "「" + metric.name() + "」暂无明细行。"
+                    : "「" + metric.name() + "」明细共 " + rows.size() + " 行（最多展示 50 行）。";
+            events.add(delta(SseEvents.MESSAGE_DELTA, Map.of("delta", tip, "phase", "SUMMARIZING")));
+
+            AnswerPayload payload = new AnswerPayload(
+                    askId, "ans_" + UUID.randomUUID().toString().substring(0, 8),
+                    SseEvents.ASK_COMPLETED, SseEvents.INTENT_QUERY, false, null,
+                    new AnswerPayload.Conclusion("TEXT", tip, "", null),
+                    new AnswerPayload.TableData(columns, rows, rows.size(), 1, 50), null,
+                    toCaliber(metric, window == null ? null : window.label()),
+                    List.of("按组织对比" + metric.name(), "查看" + metric.name() + "近三月趋势",
+                            "查看" + metric.name() + "明细"), elapsed(start));
+            events.add(new SseEvent(SseEvents.ANSWER_DONE, objectMapper.convertValue(payload, Map.class)));
+            return new AgentResult(askId, events, payload, List.of(), sql,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        } catch (BizException e) {
+            boolean recoverable = e.getErrorCode().getHttpStatus() == 200;
+            events.add(errorEvent(e.getErrorCode().getCode(), e.getMessageText(), recoverable));
+            return new AgentResult(askId, events, null, List.of(), sql,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
+    }
+
+    /** 按组织对比：GROUP BY org → BAR + 表格。 */
+    private AgentResult runOrgCompare(String askId, String question, MetricDetail metric, String metricCode,
+                                      TimeWindow window, UserContext ctx, Resolved resolved,
+                                      List<SseEvent> events, long start) {
+        String orgFragment = orgFilterFragment(ctx, resolved.orgKeys(), resolved.orgTerm());
+        String orgSql = buildOrgCompareSql(metric, window, orgFragment);
+        if (orgSql == null) {
+            return null;
+        }
+        events.add(toolStart("sql_exec", "正在按组织对比「" + metric.name() + "」…"));
+        String sql = null;
+        try {
+            long sqlStart = System.currentTimeMillis();
+            AuthorizedQuery authorized = sqlRewriteService.authorize(orgSql, ctx);
+            sql = authorized.sql();
+            QueryResult result = queryExecService.executeReadonly(authorized);
+            events.add(toolEnd("sql_exec", System.currentTimeMillis() - sqlStart, result.rows().size()));
+
+            boolean percent = PERCENT_METRICS.containsKey(metricCode);
+            int scale = percent ? 2 : 0;
+            String unit = unit(metricCode);
+            List<String> categories = new ArrayList<>();
+            List<BigDecimal> values = new ArrayList<>();
+            List<Map<String, Object>> rows = new ArrayList<>();
+            for (Map<String, Object> row : result.rows()) {
+                Object name = row.get("org_name");
+                Object v = row.get(metricCode);
+                if (name == null || !(v instanceof Number n)) {
+                    continue;
+                }
+                BigDecimal raw = toDecimal(n);
+                BigDecimal shown = percent
+                        ? raw.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP)
+                        : raw.setScale(0, RoundingMode.HALF_UP);
+                categories.add(String.valueOf(name));
+                values.add(shown);
+                Map<String, Object> r = new LinkedHashMap<>();
+                r.put("org_name", name);
+                r.put(metricCode, shown);
+                rows.add(r);
+            }
+            // 对比问句用「谁高/谁低 + 合计」句子作第一行，避免与标量查数同一套大号数字
+            String tip = buildOrgCompareSentence(metric.name(), categories, values, percent, scale, unit);
+            events.add(delta(SseEvents.MESSAGE_DELTA, Map.of("delta", tip, "phase", "SUMMARIZING")));
+
+            Map<String, Object> barSeries = new LinkedHashMap<>();
+            barSeries.put("name", metric.name());
+            barSeries.put("type", "bar");
+            barSeries.put("data", values);
+            barSeries.put("itemStyle", Map.of("color", "#1677ff"));
+            Map<String, Object> config = new LinkedHashMap<>();
+            config.put("tooltip", Map.of("trigger", "axis"));
+            config.put("grid", Map.of("left", 48, "right", 24, "top", 28, "bottom", 48));
+            config.put("xAxis", Map.of("type", "category", "data", categories,
+                    "axisLabel", Map.of("interval", 0, "rotate", categories.size() > 5 ? 30 : 0)));
+            config.put("yAxis", percent
+                    ? Map.of("type", "value", "axisLabel", Map.of("formatter", "{value}%"))
+                    : Map.of("type", "value"));
+            config.put("series", List.of(barSeries));
+
+            AnswerPayload payload = new AnswerPayload(
+                    askId, "ans_" + UUID.randomUUID().toString().substring(0, 8),
+                    SseEvents.ASK_COMPLETED, SseEvents.INTENT_QUERY, false, null,
+                    new AnswerPayload.Conclusion("TEXT", tip, "", null),
+                    new AnswerPayload.TableData(
+                            List.of(new AnswerPayload.Column("org_name", "组织", "string", false),
+                                    new AnswerPayload.Column(metricCode, metric.name(), "number", false)),
+                            rows, rows.size(), 1, 50),
+                    rows.isEmpty() ? null : new AnswerPayload.Chart("BAR", true, config),
+                    toCaliber(metric, window == null ? null : window.label()),
+                    List.of("查看" + metric.name() + "明细", "查看" + metric.name() + "近三月趋势",
+                            "按组织对比" + metric.name()), elapsed(start));
+            events.add(new SseEvent(SseEvents.ANSWER_DONE, objectMapper.convertValue(payload, Map.class)));
+            return new AgentResult(askId, events, payload, List.of(), sql,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        } catch (BizException e) {
+            boolean recoverable = e.getErrorCode().getHttpStatus() == 200;
+            events.add(errorEvent(e.getErrorCode().getCode(), e.getMessageText(), recoverable));
+            return new AgentResult(askId, events, null, List.of(), sql,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
+    }
+
+    private String buildDetailSql(MetricDetail metric, TimeWindow window, String orgFragment) {
+        BaseParts p = basePartsOf(metric);
+        if (p == null) {
+            return null;
+        }
+        String authz = authzPredicate(orgFragment);
+        if ("dim_employee".equalsIgnoreCase(p.table())) {
+            List<String> cond = new ArrayList<>();
+            if (p.where() != null && !p.where().isBlank()) {
+                cond.add("(" + p.where() + ")");
+            }
+            cond.add(authz);
+            return "SELECT emp_no, emp_name, org_key, job_level FROM dim_employee WHERE "
+                    + String.join(" AND ", cond) + " ORDER BY emp_no LIMIT 50";
+        }
+        if (p.isFact()) {
+            List<String> cond = new ArrayList<>();
+            if (p.where() != null && !p.where().isBlank()) {
+                cond.add("(" + p.where() + ")");
+            }
+            cond.add(authz);
+            if (window != null) {
+                cond.add(window.sqlPredicate());
+            }
+            return "SELECT dt, emp_key, org_key FROM " + p.table()
+                    + " WHERE " + String.join(" AND ", cond)
+                    + " ORDER BY dt DESC LIMIT 50";
+        }
+        return null;
+    }
+
+    private String buildOrgCompareSql(MetricDetail metric, TimeWindow window, String orgFragment) {
+        BaseParts p = basePartsOf(metric);
+        if (p == null) {
+            return null;
+        }
+        String authz = authzPredicate(orgFragment);
+        List<String> cond = new ArrayList<>();
+        if (p.where() != null && !p.where().isBlank()) {
+            cond.add("(" + p.where() + ")");
+        }
+        cond.add(authz);
+        if (window != null && p.isFact()) {
+            cond.add(window.sqlPredicate());
+        }
+        // 内层按 org_key 聚合（占位符无表别名）；外层 JOIN dim_org 取可读组织名
+        String inner = "SELECT org_key, " + p.aggExpr() + " AS metric_value "
+                + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
+                + " GROUP BY org_key";
+        return "SELECT COALESCE(o.org_name, CAST(g.org_key AS VARCHAR)) AS org_name, "
+                + "g.metric_value AS \"" + metric.code() + "\" "
+                + "FROM (" + inner + ") g "
+                + "LEFT JOIN dim_org o ON o.org_key = g.org_key AND o.is_current = 1 "
+                + "ORDER BY g.metric_value DESC";
     }
 
     /**
@@ -984,7 +1233,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                         SseEvents.ASK_COMPLETED, SseEvents.INTENT_QUERY, false, null,
                         new AnswerPayload.Conclusion("TEXT", tip, "", null),
                         new AnswerPayload.TableData(List.of(), List.of(), 0, 1, 20), null,
-                        new AnswerPayload.Caliber(metric.name(), metric.calcScope(), w.label(), DATA_UPDATED_AT),
+                        toCaliber(metric, w.label()),
                         List.of("查看" + metric.name() + "明细", "按组织对比" + metric.name(),
                                 "查看" + metric.name() + "近一年趋势"), elapsed(start));
                 events.add(new SseEvent(SseEvents.ANSWER_DONE, objectMapper.convertValue(empty, Map.class)));
@@ -1017,7 +1266,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             events.add(delta(SseEvents.MESSAGE_DELTA, Map.of("delta", sentence, "phase", "SUMMARIZING")));
 
             AnswerPayload payload = buildTrendPayload(askId, metric, periods, chartValues,
-                    current, compare, firstPeriod, w, elapsed(start));
+                    sentence, w, elapsed(start));
             events.add(new SseEvent(SseEvents.ANSWER_DONE, objectMapper.convertValue(payload, Map.class)));
             return new AgentResult(askId, events, payload, List.of(), sql,
                     SseEvents.INTENT_QUERY, false, elapsed(start));
@@ -1030,21 +1279,14 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         }
     }
 
-    /** 趋势三段式 payload：结论（首末点对比）+ 月度明细表 + LINE 折线图（ECharts option）。 */
+    /** 趋势三段式 payload：结论文案（首末点对比句）+ 月度明细表 + LINE 折线图。 */
     private AnswerPayload buildTrendPayload(String askId, MetricDetail metric, List<String> periods,
-                                            List<BigDecimal> values, Number current, Number compare,
-                                            String firstPeriod, TimeWindow window, long elapsedMs) {
+                                            List<BigDecimal> values, String sentence,
+                                            TimeWindow window, long elapsedMs) {
         boolean percent = PERCENT_METRICS.containsKey(metric.code());
-        int scale = percent ? 2 : 0;
-        String unit = unit(metric.code());
-
-        int cmp = toDecimal(current).compareTo(toDecimal(compare));
-        String direction = cmp > 0 ? "UP" : cmp < 0 ? "DOWN" : "FLAT";
 
         AnswerPayload.Conclusion conclusion = new AnswerPayload.Conclusion(
-                "NUMBER_CARD", display(toDecimal(current), percent, scale), percent ? "%" : unit,
-                new AnswerPayload.Compare(firstPeriod, display(toDecimal(compare), percent, scale), direction));
-
+                "TEXT", sentence, "", null);
         List<Map<String, Object>> rows = new ArrayList<>();
         for (int i = 0; i < periods.size(); i++) {
             Map<String, Object> r = new LinkedHashMap<>();
@@ -1088,8 +1330,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         config.put("series", List.of(lineSeries));
         AnswerPayload.Chart chart = new AnswerPayload.Chart("LINE", true, config);
 
-        AnswerPayload.Caliber caliber = new AnswerPayload.Caliber(
-                metric.name(), metric.calcScope(), window.label(), DATA_UPDATED_AT);
+        AnswerPayload.Caliber caliber = toCaliber(metric, window.label());
 
         return new AnswerPayload(askId, "ans_" + UUID.randomUUID().toString().substring(0, 8),
                 SseEvents.ASK_COMPLETED, SseEvents.INTENT_QUERY, false, null,
@@ -1097,6 +1338,40 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                 List.of("查看" + metric.name() + "明细",
                         "按组织对比" + metric.name(),
                         "查看" + metric.name() + "近一年趋势"), elapsedMs);
+    }
+
+    /** 组织对比第一行：点名高低 +（可加总时）合计，避免只回一个总数。 */
+    static String buildOrgCompareSentence(String metricName, List<String> categories,
+                                          List<BigDecimal> values, boolean percent, int scale, String unit) {
+        if (categories == null || categories.isEmpty() || values == null || values.isEmpty()) {
+            return "「" + metricName + "」暂无组织分布数据。";
+        }
+        String suffix = percent ? "%" : (unit == null || unit.isBlank() ? "" : unit);
+        int maxIdx = 0;
+        int minIdx = 0;
+        for (int i = 1; i < values.size(); i++) {
+            if (values.get(i).compareTo(values.get(maxIdx)) > 0) {
+                maxIdx = i;
+            }
+            if (values.get(i).compareTo(values.get(minIdx)) < 0) {
+                minIdx = i;
+            }
+        }
+        StringBuilder sb = new StringBuilder();
+        sb.append(categories.get(maxIdx)).append(' ')
+                .append(display(values.get(maxIdx), false, scale)).append(suffix).append("最高");
+        if (categories.size() > 1 && maxIdx != minIdx) {
+            sb.append('，').append(categories.get(minIdx)).append(' ')
+                    .append(display(values.get(minIdx), false, scale)).append(suffix).append("最低");
+        }
+        if (!percent) {
+            BigDecimal sum = values.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+            sb.append('；').append("合计 ").append(display(sum, false, scale)).append(suffix);
+        } else {
+            sb.append('；').append("共 ").append(categories.size()).append(" 个组织");
+        }
+        sb.append('。');
+        return sb.toString();
     }
 
     private static String unit(String metricCode) {
@@ -1107,9 +1382,17 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         return n instanceof BigDecimal bd ? bd : BigDecimal.valueOf(n.doubleValue());
     }
 
+    /**
+     * 展示值：整数走 long（避免 BigDecimal.stripTrailingZeros 把 10 变成 1E+1）；
+     * 小数用 toPlainString 再解析，保证 JSON/文案都是常规十进制。
+     */
     private static Object display(BigDecimal v, boolean percent, int scale) {
         BigDecimal r = percent ? v.multiply(BigDecimal.valueOf(100)) : v;
-        return r.setScale(scale, RoundingMode.HALF_UP).stripTrailingZeros();
+        BigDecimal scaled = r.setScale(scale, RoundingMode.HALF_UP);
+        if (scale <= 0) {
+            return scaled.longValue();
+        }
+        return new BigDecimal(scaled.stripTrailingZeros().toPlainString());
     }
 
     // =================================================================

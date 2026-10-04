@@ -42,8 +42,28 @@ except ImportError:  # pragma: no cover
 
 LANGGRAPH_AVAILABLE = StateGraph is not None
 
-FOLLOWUPS = ["查看明细", "按组织对比", "查看近三月趋势"]
 MAX_CLARIFY_OPTIONS = 5
+
+
+def _followups_for(metric_name: str | None) -> list[str]:
+    """与 Java LocalAgentRuntimeImpl 对齐：chips 带指标名，便于二次解析。"""
+    name = (metric_name or "").strip() or "指标"
+    return [
+        f"查看{name}明细",
+        f"按组织对比{name}",
+        f"查看{name}近三月趋势",
+    ]
+
+
+def _detect_query_mode(question: str) -> str:
+    q = question or ""
+    if "明细" in q:
+        return "detail"
+    if "按组织对比" in q or "按部门对比" in q or ("组织" in q and "对比" in q):
+        return "org"
+    if any(k in q for k in ("趋势", "走势", "按月", "每月", "月度")):
+        return "trend"
+    return "scalar"
 
 
 def _delta(phase: str, text: str) -> dict[str, Any]:
@@ -93,6 +113,41 @@ def _display_suffix(meta: MetricView) -> str:
     return "%" if meta.percent else (meta.unit or "")
 
 
+def _org_compare_sentence(meta: MetricView, table: Any, unit: str) -> str:
+    """组织对比第一行：点名高低 +（可加总时）合计。"""
+    rows = table.get("rows") if isinstance(table, dict) else None
+    if not rows:
+        return f"「{meta.name}」暂无组织分布数据。"
+    code = meta.code
+    parsed: list[tuple[str, float]] = []
+    for r in rows:
+        name = r.get("org_name") or r.get("org")
+        raw = r.get(code) if code else None
+        if name is None or raw is None:
+            continue
+        try:
+            parsed.append((str(name), float(raw)))
+        except (TypeError, ValueError):
+            continue
+    if not parsed:
+        return f"「{meta.name}」暂无组织分布数据。"
+    max_name, max_v = max(parsed, key=lambda x: x[1])
+    min_name, min_v = min(parsed, key=lambda x: x[1])
+    suffix = unit or ""
+
+    def fmt(v: float) -> Any:
+        return int(v) if float(v).is_integer() else v
+
+    parts = [f"{max_name} {fmt(max_v)}{suffix}最高"]
+    if len(parsed) > 1 and max_name != min_name:
+        parts.append(f"{min_name} {fmt(min_v)}{suffix}最低")
+    head = "，".join(parts)
+    if meta.percent:
+        return f"{head}；共 {len(parsed)} 个组织。"
+    total = sum(v for _, v in parsed)
+    return f"{head}；合计 {fmt(total)}{suffix}。"
+
+
 def _window_to_dict(w) -> Optional[dict[str, Any]]:
     if w is None:
         return None
@@ -107,42 +162,88 @@ def _window_to_dict(w) -> Optional[dict[str, Any]]:
 def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
     meta = _metric_view(state)
     code = meta.code
-    current = state["current"]
-    compare = state["compare"]
-    prev_period = state["prev_period"]
+    current = state.get("current")
+    compare = state.get("compare")
+    prev_period = state.get("prev_period")
     unit = _display_suffix(meta)
     cur_display = _display_value(meta, current)
     cmp_display = _display_value(meta, compare)
+    mode = state.get("query_mode") or "scalar"
 
     direction = "FLAT"
     if compare is not None and current is not None:
         direction = "UP" if current > compare else ("DOWN" if current < compare else "FLAT")
 
-    conclusion = {
-        "type": "NUMBER_CARD" if current is not None else "TEXT",
-        "value": cur_display if current is not None else "暂无相关数据",
-        "unit": unit,
-        "compare": {"period": prev_period, "value": cmp_display, "direction": direction}
-        if (compare is not None and prev_period)
-        else None,
-    }
-    table = {
-        "columns": [{"key": code, "name": meta.name, "type": "number", "masked": False}],
-        "rows": [{"code": code, "value": cur_display}] if current is not None else [],
-        "total": 1 if current is not None else 0,
-        "page": 1,
-        "size": 1,
-    }
-    chart = None
-    if current is not None:
+    if mode == "detail":
+        conclusion = {
+            "type": "TEXT",
+            "value": f"「{meta.name}」明细共 {state.get('row_count') or 0} 行。",
+            "unit": None,
+            "compare": None,
+        }
+    elif mode == "org":
+        conclusion = {
+            "type": "TEXT",
+            "value": _org_compare_sentence(meta, state.get("table"), unit),
+            "unit": None,
+            "compare": None,
+        }
+    elif mode == "trend" and current is not None:
+        # 趋势第一行用首末点对比句，避免与标量查数同一套大号数字
+        periods = []
+        if isinstance(state.get("table"), dict):
+            periods = [str(r.get("period")) for r in (state["table"].get("rows") or []) if r.get("period")]
+        first = periods[0] if periods else (prev_period or "")
+        last = periods[-1] if periods else ""
+        word = "上升" if direction == "UP" else ("下降" if direction == "DOWN" else "持平")
+        if first and last and compare is not None:
+            sentence = (
+                f"{meta.name}：{first} 为 {cmp_display}{unit}，"
+                f"{last} 为 {cur_display}{unit}，期间整体{word}。"
+            )
+        else:
+            sentence = f"{meta.name}近期末为 {cur_display}{unit}。"
+        conclusion = {
+            "type": "TEXT",
+            "value": sentence,
+            "unit": None,
+            "compare": None,
+        }
+    else:
+        conclusion = {
+            "type": "NUMBER_CARD" if current is not None else "TEXT",
+            "value": cur_display if current is not None else "暂无相关数据",
+            "unit": unit,
+            "compare": {"period": prev_period, "value": cmp_display, "direction": direction}
+            if (compare is not None and prev_period)
+            else None,
+        }
+
+    if isinstance(state.get("table"), dict) and state["table"].get("columns"):
+        table = state["table"]
+    else:
+        table = {
+            "columns": [{"key": code, "name": meta.name, "type": "number", "masked": False}],
+            "rows": [{"code": code, "value": cur_display}] if current is not None else [],
+            "total": 1 if current is not None else 0,
+            "page": 1,
+            "size": 1,
+        }
+
+    if isinstance(state.get("chart"), dict):
+        chart = state["chart"]
+    elif current is not None and mode == "scalar":
         chart_cfg = {"value": cur_display, "unit": unit}
         if compare is not None:
             chart_cfg["delta"] = direction
         chart = {"type": "NUMBER_CARD", "recommended": True, "config": chart_cfg}
+    else:
+        chart = None
 
     window = state.get("time_window")
     caliber = {
         "metric": meta.name,
+        "metric_code": code or meta.code,
         "definition": meta.definition,
         "time_range": window.get("label") if window else None,
         "data_updated_at": DATA_UPDATED_AT,
@@ -158,7 +259,7 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
         "table": table,
         "chart": chart,
         "caliber": caliber,
-        "followups": FOLLOWUPS,
+        "followups": _followups_for(meta.name),
         "elapsed_ms": state.get("elapsed_ms", 0),
     }
 
@@ -265,17 +366,26 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
     async def nl2sql(state: dict[str, Any]) -> dict[str, Any]:
         code = state["metric_code"]
         meta = _metric_view(state)
-        window = resolve_window(state["question"], state.get("context_override"))
-        events = [_tool_start("sql_exec", f"正在查询「{meta.name or code}」…")]
+        question = state["question"]
+        query_mode = _detect_query_mode(question)
+        window = resolve_window(question, state.get("context_override"))
+        if query_mode == "trend" and window is None:
+            from langgraph_flows.demo_data import last_n_months
+
+            window = last_n_months(3)
+        label = {"detail": "明细", "org": "组织对比", "trend": "趋势"}.get(query_mode, "查询")
+        events = [_tool_start("sql_exec", f"正在{label}「{meta.name or code}」…")]
         return {
             "time_window": _window_to_dict(window),
             "sql": None,
             "events": events,
             "metric_name": meta.name or code,
+            "query_mode": query_mode,
         }
 
     async def execute(state: dict[str, Any]) -> dict[str, Any]:
         code = state["metric_code"]
+        query_mode = state.get("query_mode") or "scalar"
         window_obj = None
         if state.get("time_window"):
             from datetime import date as _date
@@ -293,6 +403,7 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
                 window=window_obj,
                 org_keys=list(state.get("org_keys") or []),
                 context=_mcp_context(state),
+                query_mode=query_mode,
             )
         except McpBusinessError as exc:
             return {
@@ -317,7 +428,13 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
             "compare": result.get("compare"),
             "prev_period": result.get("prev_period"),
             "events": events,
+            "query_mode": result.get("query_mode") or query_mode,
+            "row_count": result.get("rows") or 0,
         }
+        if isinstance(result.get("table"), dict):
+            out["table"] = result["table"]
+        if isinstance(result.get("chart"), dict):
+            out["chart"] = result["chart"]
         if isinstance(metric, MetricView):
             out["metric_view"] = metric
             out["metric_name"] = metric.name

@@ -164,7 +164,19 @@ def resolve_window(question: str, context_override: dict | None) -> Window | Non
         return _preset_window("LAST_7D")
     if "近30天" in question or "最近30天" in question:
         return _preset_window("LAST_30D")
+    if "近三月" in question or "近3月" in question or "最近三个月" in question or "近三个月" in question:
+        return last_n_months(3)
+    if "近一年" in question or "近1年" in question or "最近一年" in question:
+        return last_n_months(12)
     return None
+
+
+def last_n_months(n: int) -> Window:
+    """相对 DEMO_NOW 的近 n 个自然月（含当月起算的左闭右开窗口）。"""
+    first_this = DEMO_NOW.replace(day=1)
+    start = _add_months(first_this, -(n - 1))
+    end = DEMO_NOW + timedelta(days=1)
+    return Window(start, end)
 
 
 # =====================================================================

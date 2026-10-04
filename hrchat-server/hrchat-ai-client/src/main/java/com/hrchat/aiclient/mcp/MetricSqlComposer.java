@@ -39,6 +39,132 @@ public final class MetricSqlComposer {
         return "SELECT " + String.join(", ", projections);
     }
 
+    /** 按组织分组（单指标、基础 SELECT 公式）。 */
+    public String buildOrgCompareQuery(MetricDetail metric, TimeWindow window, String orgFragment) {
+        BaseParts p = basePartsOf(metric);
+        if (p == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "该指标不支持按组织对比");
+        }
+        List<String> cond = new ArrayList<>();
+        if (p.where() != null && !p.where().isBlank()) {
+            cond.add("(" + p.where() + ")");
+        }
+        cond.add(authzPredicate(orgFragment));
+        if (window != null && p.isFact()) {
+            cond.add(window.sqlPredicate());
+        }
+        String inner = "SELECT org_key, " + p.aggExpr() + " AS metric_value "
+                + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
+                + " GROUP BY org_key";
+        return "SELECT COALESCE(o.org_name, CAST(g.org_key AS VARCHAR)) AS org_name, "
+                + "g.metric_value AS \"" + metric.code() + "\" "
+                + "FROM (" + inner + ") g "
+                + "LEFT JOIN dim_org o ON o.org_key = g.org_key AND o.is_current = 1 "
+                + "ORDER BY g.metric_value DESC";
+    }
+
+    /** 明细行（dim_employee 花名册或事实表近况）。 */
+    public String buildDetailQuery(MetricDetail metric, TimeWindow window, String orgFragment) {
+        BaseParts p = basePartsOf(metric);
+        if (p == null) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "该指标不支持明细");
+        }
+        List<String> cond = new ArrayList<>();
+        if (p.where() != null && !p.where().isBlank()) {
+            cond.add("(" + p.where() + ")");
+        }
+        cond.add(authzPredicate(orgFragment));
+        if ("dim_employee".equalsIgnoreCase(p.table())) {
+            return "SELECT emp_no, emp_name, org_key, job_level FROM dim_employee WHERE "
+                    + String.join(" AND ", cond) + " ORDER BY emp_no LIMIT 50";
+        }
+        if (p.isFact()) {
+            if (window != null) {
+                cond.add(window.sqlPredicate());
+            }
+            return "SELECT dt, emp_key, org_key FROM " + p.table()
+                    + " WHERE " + String.join(" AND ", cond) + " ORDER BY dt DESC LIMIT 50";
+        }
+        throw new BizException(ErrorCode.PARAM_INVALID, "该指标不支持明细");
+    }
+
+    /**
+     * 按月趋势：事实表按 dt 分组；在职人数用入职/离职日还原月末时点。
+     */
+    public String buildMonthlyTrendQuery(MetricDetail metric, TimeWindow window, String orgFragment) {
+        if (window == null) {
+            throw new BizException(ErrorCode.PARAM_MISSING, "time_range");
+        }
+        BaseParts p = basePartsOf(metric);
+        if (p == null) {
+            return null;
+        }
+        if (!p.isFact()) {
+            if ("dim_employee".equalsIgnoreCase(p.table()) && "headcount".equals(metric.code())) {
+                return buildHeadcountSnapshotTrendQuery(metric, window, orgFragment);
+            }
+            return null;
+        }
+        List<String> cond = new ArrayList<>();
+        if (p.where() != null && !p.where().isBlank()) {
+            cond.add("(" + p.where() + ")");
+        }
+        cond.add(authzPredicate(orgFragment));
+        cond.add(window.sqlPredicate());
+        String periodExpr = "FORMATDATETIME(dt, 'yyyy-MM')";
+        return "SELECT " + periodExpr + " AS period, " + p.aggExpr() + " AS \"" + metric.code() + "\" "
+                + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
+                + " GROUP BY " + periodExpr + " ORDER BY period";
+    }
+
+    private String buildHeadcountSnapshotTrendQuery(MetricDetail metric, TimeWindow window, String orgFragment) {
+        List<String> unions = new ArrayList<>();
+        java.time.LocalDate cursor = window.start().withDayOfMonth(1);
+        java.time.LocalDate last = window.end().minusDays(1);
+        java.time.format.DateTimeFormatter monthFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM");
+        java.time.format.DateTimeFormatter dayFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        while (!cursor.isAfter(last)) {
+            java.time.LocalDate monthEnd = cursor.withDayOfMonth(cursor.lengthOfMonth());
+            String period = monthEnd.format(monthFmt);
+            String asOf = monthEnd.format(dayFmt);
+            unions.add("SELECT '" + period + "' AS period, COUNT(DISTINCT emp_key) AS \"" + metric.code()
+                    + "\" FROM dim_employee WHERE hire_date <= DATE '" + asOf + "' "
+                    + "AND (leave_date IS NULL OR leave_date > DATE '" + asOf + "') "
+                    + "AND " + authzPredicate(orgFragment));
+            cursor = cursor.plusMonths(1);
+        }
+        if (unions.isEmpty()) {
+            return null;
+        }
+        return String.join(" UNION ALL ", unions) + " ORDER BY period";
+    }
+
+    private record BaseParts(String aggExpr, String table, String where) {
+        boolean isFact() {
+            return table.toLowerCase(java.util.Locale.ROOT).startsWith("fact_");
+        }
+    }
+
+    private static final java.util.regex.Pattern BASE_SELECT_PATTERN = java.util.regex.Pattern.compile(
+            "^\\s*SELECT\\s+(.+?)\\s+FROM\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?:WHERE\\s+(.+?))?\\s*;?\\s*$",
+            java.util.regex.Pattern.CASE_INSENSITIVE | java.util.regex.Pattern.DOTALL);
+
+    private BaseParts basePartsOf(MetricDetail metric) {
+        if (metric == null || metric.formulaExpr() == null) {
+            return null;
+        }
+        String f = metric.formulaExpr().trim();
+        if (!f.toUpperCase().startsWith("SELECT")) {
+            return null;
+        }
+        java.util.regex.Matcher m = BASE_SELECT_PATTERN.matcher(f);
+        if (!m.matches()) {
+            return null;
+        }
+        return new BaseParts(m.group(1).trim(), m.group(2).trim(),
+                m.group(3) == null ? null : m.group(3).trim());
+    }
+
     String buildQuerySql(MetricDetail metric, TimeWindow window, String orgFragment) {
         String expr = metric.formulaExpr().trim();
         Set<String> visited = new HashSet<>();
