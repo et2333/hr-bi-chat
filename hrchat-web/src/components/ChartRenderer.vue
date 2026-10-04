@@ -82,9 +82,23 @@ const barChartEvents = computed<Record<string, (params: unknown) => void> | unde
   }
 })
 
+/**
+ * 饼图数据：优先用后端 pieData；
+ * 前端一键切换到 PIE 时（不重拉）从 categories+series 派生，避免「暂无数据」。
+ */
+const effectivePieData = computed<ChartPieDatum[]>(() => {
+  if (props.pieData.length > 0) return props.pieData
+  const s = props.series[0]
+  if (!s || props.categories.length === 0) return []
+  return props.categories.map((name, i) => ({
+    name,
+    value: Number(s.data[i] ?? 0),
+  }))
+})
+
 /** BAR/LINE/PIE 是否有可渲染数据 */
 const hasData = computed(() => {
-  if (props.chartType === 'PIE') return props.pieData.length > 0
+  if (props.chartType === 'PIE') return effectivePieData.value.length > 0
   if (props.chartType === 'BAR' || props.chartType === 'LINE') {
     return props.series.length > 0 && props.categories.length > 0
   }
@@ -164,7 +178,7 @@ function pieOption(): Record<string, unknown> {
         radius: '60%',
         center: ['50%', props.title ? '46%' : '52%'],
         label: { show: true, formatter: '{b}: {c}' },
-        data: props.pieData.map((d) => ({ name: d.name, value: d.value })),
+        data: effectivePieData.value.map((d) => ({ name: d.name, value: d.value })),
       },
     ],
   }

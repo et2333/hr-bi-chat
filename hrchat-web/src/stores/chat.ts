@@ -45,9 +45,15 @@ export const useChatStore = defineStore('chat', () => {
     return id
   }
 
-  function pushAssistantTurn(): string {
+  function pushAssistantTurn(question?: string): string {
     const id = `a_${Date.now()}`
-    turns.value.push({ id, role: 'assistant', state: 'loading', streamingText: '' })
+    turns.value.push({
+      id,
+      role: 'assistant',
+      question: question?.trim() || undefined,
+      state: 'loading',
+      streamingText: '',
+    })
     return id
   }
 

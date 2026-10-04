@@ -30,8 +30,9 @@
         <a-col v-for="c in report?.components" :key="c.componentId" :xs="24" :md="12">
           <div class="comp-box">
             <a-space>
+              <!-- CHART 的具体图型由下方切换条表达，不再重复打「柱状图」标签 -->
               <a-tag color="geekblue">{{ compTypeName(c.compType) }}</a-tag>
-              <a-tag v-if="c.chartType">{{ chartTypeName(c.chartType) }}</a-tag>
+              <a-tag v-if="c.compType !== 'CHART' && c.chartType">{{ chartTypeName(c.chartType) }}</a-tag>
             </a-space>
 
             <!-- CHART 组件：图表类型一键切换 + 组织下钻 + AI 洞察 -->
@@ -120,8 +121,34 @@
                 :scroll="{ x: 600 }"
                 size="small"
                 row-key="dimValue"
-                @change="onTableChange(c.componentId, $event)"
+                @change="(pag: TablePag, _f: unknown, sorter: TableSorter) => onTableChange(c.componentId, pag, sorter)"
               />
+            </template>
+
+            <!-- METRIC_CARD：实时标量（同源授权查库），禁止裸 JSON / 静态假数 -->
+            <template v-else-if="c.compType === 'METRIC_CARD'">
+              <div class="metric-card-comp">
+                <a-skeleton v-if="metricCardStateOf(c.componentId)?.loading" active :paragraph="{ rows: 2 }" />
+                <template v-else>
+                  <div class="metric-card-title">
+                    {{ metricCardStateOf(c.componentId)?.data?.title ?? metricCardTitle(c.def) }}
+                  </div>
+                  <MetricCard
+                    :conclusion="{
+                      type: 'NUMBER_CARD',
+                      value: metricCardDisplayValue(c.componentId, c.def),
+                      unit: metricCardStateOf(c.componentId)?.data?.unit ?? String(c.def?.unit ?? ''),
+                    }"
+                    :caliber="{
+                      metric: metricCardStateOf(c.componentId)?.data?.metricName
+                        ?? String(c.def?.metric ?? ''),
+                      definition: metricCardStateOf(c.componentId)?.data?.definition
+                        ?? String(c.def?.definition ?? c.def?.title ?? ''),
+                      dataUpdatedAt: '',
+                    }"
+                  />
+                </template>
+              </div>
             </template>
 
             <!-- 其他组件：展示定义 JSON -->
@@ -232,8 +259,9 @@ import { message } from 'ant-design-vue'
 import { ArrowLeftOutlined, BulbOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { reportApi } from '@/api'
 import type { ComponentView, ReportDetail, SnapshotView, SubscriptionView } from '@/api/types'
-import type { ChartDataView, InsightView, TableView } from '@/api/reports'
+import type { ChartDataView, InsightView, MetricCardView, TableView } from '@/api/reports'
 import ChartRenderer, { type ChartType } from '@/components/ChartRenderer.vue'
+import MetricCard from '@/components/MetricCard.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,6 +294,34 @@ async function loadChartData(componentId: number, dimValue?: string) {
   }
 }
 
+interface MetricCardState {
+  loading: boolean
+  data: MetricCardView | null
+}
+const metricCardStates = ref<Record<number, MetricCardState>>({})
+
+function metricCardStateOf(componentId: number): MetricCardState | undefined {
+  return metricCardStates.value[componentId]
+}
+
+async function loadMetricCardData(componentId: number) {
+  metricCardStates.value[componentId] = { loading: true, data: null }
+  try {
+    const res = await reportApi.getMetricCardData(reportId, componentId)
+    metricCardStates.value[componentId] = { loading: false, data: res.data }
+  } catch (e) {
+    metricCardStates.value[componentId] = { loading: false, data: null }
+    message.error(e instanceof Error ? e.message : '指标卡数据加载失败')
+  }
+}
+
+function metricCardDisplayValue(componentId: number, def?: Record<string, unknown> | null): unknown {
+  const live = metricCardStateOf(componentId)?.data?.value
+  if (live !== undefined && live !== null) return live
+  if (def?.value !== undefined && def?.value !== null) return def.value
+  return '—'
+}
+
 /** 图表类型一键切换（用户选择优先后端返回，其次组件声明） */
 const chartTypeOverrides = ref<Record<number, ChartType>>({})
 
@@ -294,6 +350,7 @@ function drillPathOf(componentId: number): string[] {
 function isOrgDim(c: ComponentView): boolean {
   const dim = (c.def?.dim as string | undefined)
     ?? (Array.isArray(c.def?.dimensions) ? String((c.def.dimensions as unknown[])[0]) : undefined)
+    ?? (Array.isArray(c.def?.dims) ? String((c.def.dims as unknown[])[0]) : undefined)
   return (dim || 'org').toLowerCase() === 'org'
 }
 
@@ -351,12 +408,17 @@ function tableStateOf(componentId: number): TableState | undefined {
 }
 
 function tableColumnsOf(componentId: number) {
-  return (tableStateOf(componentId)?.data?.columns ?? []).map((col) => ({
+  const st = tableStateOf(componentId)
+  return (st?.data?.columns ?? []).map((col) => ({
     title: col.title,
     key: col.key,
     dataIndex: col.key,
     sorter: true,
     sortDirections: ['ascend', 'descend'] as const,
+    // 受控排序态，避免点了图标 UI 不回显
+    sortOrder: st?.sortField === col.key
+      ? (st.sortOrder === 'desc' ? 'descend' as const : 'ascend' as const)
+      : null,
     width: col.dataType === 'number' ? 150 : 200,
   }))
 }
@@ -418,14 +480,24 @@ function initTable(componentId: number) {
   })
 }
 
-function onTableChange(componentId: number, e: { pagination?: { current?: number; pageSize?: number }; sorter?: { order?: string; columnKey?: string } }) {
+/** ant-design-vue Table change：(pagination, filters, sorter)，不是单对象 */
+type TablePag = { current?: number; pageSize?: number }
+type TableSorterItem = {
+  order?: 'ascend' | 'descend' | null
+  columnKey?: string | number
+  field?: string | number
+}
+
+function onTableChange(componentId: number, pagination: TablePag, sorter: TableSorterItem | TableSorterItem[]) {
   const st = tableStateOf(componentId)
   if (!st) return
-  st.page = e.pagination?.current ?? 1
-  st.size = e.pagination?.pageSize ?? st.size
-  if (e.sorter?.order) {
-    st.sortField = e.sorter.columnKey
-    st.sortOrder = e.sorter.order === 'descend' ? 'desc' : 'asc'
+  st.page = pagination?.current ?? st.page
+  st.size = pagination?.pageSize ?? st.size
+  const s = Array.isArray(sorter) ? sorter[0] : sorter
+  if (s?.order) {
+    const field = s.columnKey ?? s.field
+    st.sortField = field != null && String(field) ? String(field) : undefined
+    st.sortOrder = s.order === 'descend' ? 'desc' : 'asc'
   } else {
     st.sortField = undefined
     st.sortOrder = undefined
@@ -450,6 +522,7 @@ async function loadCharts(components: ComponentView[]) {
     ...charts.map((c) => loadChartData(c.componentId)),
     ...charts.filter((c) => (c.chartType ?? '').toUpperCase() !== 'PIE').map((c) => loadInsight(c.componentId)),
     ...components.filter((c) => c.compType === 'TABLE').map((c) => initTable(c.componentId)),
+    ...components.filter((c) => c.compType === 'METRIC_CARD').map((c) => loadMetricCardData(c.componentId)),
   ])
 }
 
@@ -580,6 +653,10 @@ function prettyJson(def: Record<string, unknown>): string {
   }
 }
 
+function metricCardTitle(def?: Record<string, unknown> | null): string {
+  return String(def?.title ?? def?.metric ?? '指标')
+}
+
 function formatTime(iso: string): string {
   const d = new Date(iso)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -704,6 +781,17 @@ function formatDateTime(iso: string): string {
   font-size: 12px;
   color: rgba(0, 0, 0, 0.65);
   white-space: pre-wrap;
+}
+
+.metric-card-comp {
+  margin-top: 8px;
+}
+
+.metric-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+  margin-bottom: 4px;
 }
 
 .section-actions {
