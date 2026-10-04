@@ -11,6 +11,9 @@
     <artifactId>hrchat-ai-client</artifactId>
     <name>hrchat-ai-client</name>
     <description>AgentRuntimeClient 接口 + LocalAgentRuntimeImpl（确定性问数编排：意图→检索→SQL→改写→执行→呈现）</description>
+    <properties>
+        <jacoco.line.minimum>0.65</jacoco.line.minimum>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>com.hrchat</groupId>

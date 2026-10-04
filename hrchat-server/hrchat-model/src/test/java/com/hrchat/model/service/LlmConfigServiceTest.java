@@ -465,7 +465,9 @@ class LlmConfigServiceTest {
         service.delete(1L, tenantCtx("t01", "ADMIN"));
 
         verify(configMapper).updateById(org.mockito.ArgumentMatchers.argThat(
-                x -> Integer.valueOf(1).equals(x.getIsDeleted())));
+                x -> Integer.valueOf(0).equals(x.getStatus())
+                        && Integer.valueOf(0).equals(x.getIsDeleted())));
+        verify(configMapper).deleteById(1L);
     }
 
     @Test

@@ -8,6 +8,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.test.web.servlet.ResultActions;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -59,7 +60,7 @@ class HrchatIntegrationTest {
                         .content("{\"question\":\"研发中心在职人数\",\"mode\":\"SYNC\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        MvcResult sync = mockMvc.perform(asyncDispatch(syncStarted))
+        MvcResult sync = completeAsync(syncStarted)
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.status").value("COMPLETED"))
@@ -77,7 +78,7 @@ class HrchatIntegrationTest {
                         .content("{\"question\":\"研发中心在职人数\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        mockMvc.perform(asyncDispatch(streamStarted))
+        completeAsync(streamStarted)
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.parseMediaType("text/event-stream")))
                 .andExpect(content().string(containsString("event: HEARTBEAT")))
@@ -116,7 +117,7 @@ class HrchatIntegrationTest {
                         .content("{\"question\":\"研发中心在职人数\"}"))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        mockMvc.perform(asyncDispatch(deniedStarted))
+        completeAsync(deniedStarted)
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.parseMediaType("text/event-stream")))
                 .andExpect(content().string(containsString("event: ERROR")))
@@ -192,16 +193,21 @@ class HrchatIntegrationTest {
         long hr01Session = objectMapper.readTree(s1.getResponse().getContentAsString())
                 .at("/data/id").asLong();
 
-        mockMvc.perform(post("/api/v1/chat/sessions/" + hr01Session + "/asks")
+        MvcResult askStarted = mockMvc.perform(post("/api/v1/chat/sessions/" + hr01Session + "/asks")
                         .header("X-User-No", "hr01")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"研发中心在职人数\",\"mode\":\"SYNC\"}"))
-                .andExpect(status().isOk());
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        completeAsync(askStarted).andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/chat/sessions/" + hr01Session + "/asks")
+        MvcResult deniedStarted = mockMvc.perform(post("/api/v1/chat/sessions/" + hr01Session + "/asks")
                         .header("X-User-No", "hr02")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"question\":\"在职人数\"}"))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+        completeAsync(deniedStarted)
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("HRC-2002"));
 
@@ -221,5 +227,18 @@ class HrchatIntegrationTest {
                         .header("X-User-No", "hr01"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("HRC-2002"));
+    }
+
+    /** Callable 返回 StreamingResponseBody 时 MockMvc 会经历两层异步调度。 */
+    private ResultActions completeAsync(MvcResult started) throws Exception {
+        MvcResult current = started;
+        while (true) {
+            ResultActions dispatched = mockMvc.perform(asyncDispatch(current));
+            MvcResult result = dispatched.andReturn();
+            if (!result.getRequest().isAsyncStarted()) {
+                return dispatched;
+            }
+            current = result;
+        }
     }
 }

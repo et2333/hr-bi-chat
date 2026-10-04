@@ -487,8 +487,9 @@ type TableSorterItem = {
   columnKey?: string | number
   field?: string | number
 }
+type TableSorter = TableSorterItem | TableSorterItem[]
 
-function onTableChange(componentId: number, pagination: TablePag, sorter: TableSorterItem | TableSorterItem[]) {
+function onTableChange(componentId: number, pagination: TablePag, sorter: TableSorter) {
   const st = tableStateOf(componentId)
   if (!st) return
   st.page = pagination?.current ?? st.page

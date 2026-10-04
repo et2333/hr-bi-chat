@@ -9,7 +9,8 @@
     "build": "vite build",
     "test": "vitest run",
     "type-check": "vue-tsc --noEmit",
-    "lint": "eslint . --fix"
+    "lint": "eslint . --fix",
+    "lint:check": "eslint ."
   },
   "dependencies": {
     "@ant-design/icons-vue": "^7.0.1",

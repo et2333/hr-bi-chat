@@ -47,7 +47,7 @@
         <jacoco.version>0.8.12</jacoco.version>
         <jsqlparser.version>4.9</jsqlparser.version>
         <jjwt.version>0.12.6</jjwt.version>
-        <!-- S8a 质量门禁：默认 LINE ≥70%，核心模块（authz/semantic/chat/query-exec）覆盖为 ≥80%；无测试模块 skip -->
+        <!-- 覆盖率采用“当前可重复基线 + 只升不降”：默认 LINE ≥70%，模块可按实测基线单独覆盖；无测试模块 skip。 -->
         <jacoco.line.minimum>0.70</jacoco.line.minimum>
         <jacoco.check.skip>false</jacoco.check.skip>
     </properties>
