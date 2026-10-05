@@ -1,0 +1,1966 @@
+[
+  {
+    "case_id": "hr-v1-001",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 17,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-002",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发一部在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-003",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 3,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-004",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发一部入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-005",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-006",
+    "group_id": "explicit_last_month",
+    "template_id": "explicit_last_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发一部离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-007",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-008",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发一部在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-009",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-010",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发一部入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-011",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-012",
+    "group_id": "explicit_this_month",
+    "template_id": "explicit_this_month",
+    "scene": "single",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发一部离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-013",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发中心在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-014",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发一部在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-015",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发中心入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-016",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发一部入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-017",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发中心离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-018",
+    "group_id": "recent_month_window",
+    "template_id": "recent_month_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "近30天研发一部离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-30/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-019",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发中心在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-020",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发一部在职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-021",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发中心入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-022",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发一部入职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-023",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发中心离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-024",
+    "group_id": "recent_week_window",
+    "template_id": "recent_week_window",
+    "scene": "single",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "最近7天研发一部离职人数是多少？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-22/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-025",
+    "group_id": "missing_period",
+    "template_id": "missing_period",
+    "scene": "clarify",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "FAILED"
+          ],
+          "error_code": "HRX-1001",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-026",
+    "group_id": "missing_period",
+    "template_id": "missing_period",
+    "scene": "clarify",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发一部入职人数",
+        "expected": {
+          "statuses": [
+            "FAILED"
+          ],
+          "error_code": "HRX-1001",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-027",
+    "group_id": "missing_period",
+    "template_id": "missing_period",
+    "scene": "clarify",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心离职人数",
+        "expected": {
+          "statuses": [
+            "FAILED"
+          ],
+          "error_code": "HRX-1001",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-028",
+    "group_id": "missing_period",
+    "template_id": "missing_period",
+    "scene": "clarify",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发一部离职人数",
+        "expected": {
+          "statuses": [
+            "FAILED"
+          ],
+          "error_code": "HRX-1001",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-029",
+    "group_id": "missing_metric",
+    "template_id": "missing_metric",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "帮我看看",
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-030",
+    "group_id": "missing_metric",
+    "template_id": "missing_metric",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心情况怎么样",
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-031",
+    "group_id": "missing_metric",
+    "template_id": "missing_metric",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "查一下数据",
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-032",
+    "group_id": "missing_metric",
+    "template_id": "missing_metric",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "给我一个统计",
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-033",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 17,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-034",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 10,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-035",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 3,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-036",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-037",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心离职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 0,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-038",
+    "group_id": "followup_org",
+    "template_id": "followup_org",
+    "scene": "multi_turn",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月研发中心离职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "研发一部呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              3
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-039",
+    "group_id": "followup_period",
+    "template_id": "followup_period",
+    "scene": "multi_turn",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 17,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "那本月呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-040",
+    "group_id": "followup_period",
+    "template_id": "followup_period",
+    "scene": "multi_turn",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 3,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "那本月呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-041",
+    "group_id": "followup_period",
+    "template_id": "followup_period",
+    "scene": "multi_turn",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "上月研发中心离职人数",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-31"
+          },
+          "value": 1,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      },
+      {
+        "question": "那本月呢？",
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-09-01/2026-09-28"
+          },
+          "value": 2,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-042",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月销售部在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-043",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "本月销售部入职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-044",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr02",
+    "session_owner": "hr02",
+    "turns": [
+      {
+        "question": "本月研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-045",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr02",
+    "session_owner": "hr02",
+    "turns": [
+      {
+        "question": "本月研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-046",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr03",
+    "session_owner": "hr03",
+    "turns": [
+      {
+        "question": "本月研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-047",
+    "group_id": "denied_org",
+    "template_id": "denied_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr03",
+    "session_owner": "hr03",
+    "turns": [
+      {
+        "question": "本月研发中心入职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2003",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-048",
+    "group_id": "session_owner",
+    "template_id": "session_owner",
+    "scene": "isolation",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr02",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2002",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-049",
+    "group_id": "session_owner",
+    "template_id": "session_owner",
+    "scene": "isolation",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr03",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2002",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-050",
+    "group_id": "session_owner",
+    "template_id": "session_owner",
+    "scene": "isolation",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr04",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "error_code": "HRC-2002",
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-051",
+    "group_id": "asof_day_boundary",
+    "template_id": "asof_day_boundary",
+    "scene": "boundary",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "context_override": {
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-08-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-19"
+          },
+          "value": 17,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-052",
+    "group_id": "asof_day_boundary",
+    "template_id": "asof_day_boundary",
+    "scene": "boundary",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "context_override": {
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-08-21"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-08-20"
+          },
+          "value": 16,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-053",
+    "group_id": "asof_day_boundary",
+    "template_id": "asof_day_boundary",
+    "scene": "boundary",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "context_override": {
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-15"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-09-14"
+          },
+          "value": 17,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-054",
+    "group_id": "asof_day_boundary",
+    "template_id": "asof_day_boundary",
+    "scene": "boundary",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数",
+        "context_override": {
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-16"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "query_mode": "scalar",
+            "time_label": "2026-08-01/2026-09-15"
+          },
+          "value": 18,
+          "tolerance": 0,
+          "oracle": "literal_seed_rows_python_reference_v1"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-055",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "产品部在职人数",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-056",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "市场部在职人数",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-057",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心按性别统计在职人数",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-058",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心预测下月离职人数",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-059",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心为什么离职人数增加了",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-v1-060",
+    "group_id": "unsupported_scope",
+    "template_id": "unsupported_scope",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心主动离职人数",
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED",
+            "CLARIFYING"
+          ],
+          "no_data": true
+        }
+      }
+    ]
+  }
+]

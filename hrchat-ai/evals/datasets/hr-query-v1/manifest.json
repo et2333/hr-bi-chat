@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "dataset_version": "hr-query-v1",
+  "data_version": "h2-v6",
+  "as_of_date": "2026-09-28",
+  "timezone": "Asia/Shanghai",
+  "cases_sha256": "c51eaaeeae8fb2c3f7a19e2e4b66a49450e39293002039156247eb92aea35eac",
+  "migration_sha256": {
+    "V1__baseline.sql": "afb68bd770ebc1aaf27599ae3704a075f9831eab0d80b6c9b24b824446128510",
+    "V2__demo_seed.sql": "8b3f84f857ed815c58f96f1ed9164c685d1494646195e0850fb7f8c77dfc3b39",
+    "V3__role_function_permissions.sql": "812f5c3f864804e7ef2243613bcfcbfe8d8daf8db987cd9d5018bf7a39503d50",
+    "V4__demo_reports.sql": "2dff36075ae87c3add4cb005b5b2f8fae05067607bd613a92d25d93c8f97736b",
+    "V5__metric_card_drop_static_value.sql": "0e2f8a99409556d387affedfeb82e6a539a0a15f5fdd92e169e912e96146d907",
+    "V6__headcount_as_of_version.sql": "31266e4a498befc4b2266b6c8c02c89cd9a8dc5081b3947ec05084710926b2f3"
+  },
+  "expected_source": "literal seed rows + independent Python counting; no production SQL imports",
+  "freeze_policy": "group/template/sequence disjoint; first scored run is baseline, later runs regression",
+  "scope": "Java user API; scalar counts, multi-turn, permission and scope boundaries",
+  "limitations": [
+    "No trend/detail scorer in v1",
+    "No tenant-switch mutation fixtures",
+    "Fault injection is runner tests, separately reported; not model task evidence",
+    "SQL scope inspection is temporary local-runtime evidence, not QueryPlan accuracy"
+  ],
+  "case_count": 60,
+  "turn_count": 69
+}
