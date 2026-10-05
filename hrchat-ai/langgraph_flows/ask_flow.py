@@ -8,6 +8,8 @@
 from __future__ import annotations
 
 import time
+import os
+from datetime import date
 from typing import Any, Optional
 
 from agent_gateway.schemas import (
@@ -28,6 +30,7 @@ from adapters.mcp_client import McpBusinessError
 from adapters.semantic_tool_client import MetricView, SemanticToolClient
 from langgraph_flows.demo_data import (
     DATA_UPDATED_AT,
+    DEMO_NOW,
     Window,
     resolve_metrics,
     resolve_orgs,
@@ -245,8 +248,9 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
         "metric": meta.name,
         "metric_code": code or meta.code,
         "definition": meta.definition,
-        "time_range": window.get("label") if window else None,
-        "data_updated_at": DATA_UPDATED_AT,
+        "time_range": window.get("label") if window else (
+            f"截至 {state['as_of_date']}" if code == "headcount" and state.get("as_of_date") else None),
+        "data_updated_at": state.get("data_updated_at") or DATA_UPDATED_AT,
     }
     return {
         "ask_id": state["ask_id"],
@@ -368,11 +372,14 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
         meta = _metric_view(state)
         question = state["question"]
         query_mode = _detect_query_mode(question)
-        window = resolve_window(question, state.get("context_override"))
+        # Remote path must share Java's frozen demo clock; local Demo keeps its own fixture date.
+        as_of = (date.fromisoformat(os.getenv("HRCHAT_DEMO_NOW", "2026-09-28"))
+                 if tools.backend == "java_mcp" else DEMO_NOW)
+        window = resolve_window(question, state.get("context_override"), as_of)
         if query_mode == "trend" and window is None:
             from langgraph_flows.demo_data import last_n_months
 
-            window = last_n_months(3)
+            window = last_n_months(3, as_of)
         label = {"detail": "明细", "org": "组织对比", "trend": "趋势"}.get(query_mode, "查询")
         events = [_tool_start("sql_exec", f"正在{label}「{meta.name or code}」…")]
         return {
@@ -381,6 +388,9 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
             "events": events,
             "metric_name": meta.name or code,
             "query_mode": query_mode,
+            "data_updated_at": (
+                f"{as_of.isoformat()}T06:00:00+08:00" if tools.backend == "java_mcp"
+                else DATA_UPDATED_AT),
         }
 
     async def execute(state: dict[str, Any]) -> dict[str, Any]:
@@ -430,6 +440,7 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
             "events": events,
             "query_mode": result.get("query_mode") or query_mode,
             "row_count": result.get("rows") or 0,
+            "as_of_date": result.get("as_of_date"),
         }
         if isinstance(result.get("table"), dict):
             out["table"] = result["table"]

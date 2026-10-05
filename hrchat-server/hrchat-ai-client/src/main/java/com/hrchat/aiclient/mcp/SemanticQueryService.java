@@ -56,7 +56,7 @@ public class SemanticQueryService {
         this.sqlRewriteService = sqlRewriteService;
         this.queryExecService = queryExecService;
         this.authzService = authzService;
-        this.sqlComposer = new MetricSqlComposer(semanticMetaService);
+        this.sqlComposer = new MetricSqlComposer(semanticMetaService, demoNow);
         this.objectMapper = objectMapper;
         this.demoNow = demoNow;
         this.auditCollector = auditCollector;
@@ -75,14 +75,27 @@ public class SemanticQueryService {
         if (metrics == null || metrics.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "metrics");
         }
+        if (metrics.size() != 1) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "当前仅支持单指标查询");
+        }
         if (filters != null && !filters.isEmpty()) {
             throw new BizException(ErrorCode.PARAM_INVALID, "filters 本期暂不支持");
         }
         String queryMode = arguments.get("query_mode") == null ? null
                 : String.valueOf(arguments.get("query_mode")).trim().toLowerCase();
+        if (queryMode != null && queryMode.isBlank()) {
+            queryMode = null;
+        }
+        if (queryMode != null && !queryMode.isBlank()
+                && !Set.of("scalar", "org", "detail", "trend").contains(queryMode)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "不支持的 query_mode: " + queryMode);
+        }
         if (dimensions != null && !dimensions.isEmpty()) {
             if (dimensions.size() == 1 && "org".equalsIgnoreCase(dimensions.get(0))) {
-                queryMode = queryMode == null || queryMode.isBlank() ? "org" : queryMode;
+                if (queryMode != null && !queryMode.isBlank() && !"org".equals(queryMode)) {
+                    throw new BizException(ErrorCode.PARAM_INVALID, "dimensions=org 与 query_mode 不匹配");
+                }
+                queryMode = "org";
             } else {
                 throw new BizException(ErrorCode.PARAM_INVALID, "dimensions 仅支持单一 org");
             }
@@ -99,8 +112,14 @@ public class SemanticQueryService {
                 ? (Map<String, Object>) m : null;
 
         MetricSqlComposer.TimeWindow window = MetricSqlComposer.resolveTimeRange(timeRange, demoNow);
+        if (window != null && window.start().isAfter(demoNow)) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "查询期间晚于演示时点");
+        }
         if (queryMode == null && timeRange != null && "MONTH".equalsIgnoreCase(stringVal(timeRange.get("grain")))) {
             queryMode = "trend";
+        }
+        if (queryMode == null || queryMode.isBlank()) {
+            queryMode = "scalar";
         }
         // SQL 始终保留 {authz_org_filter}；org_context 越权在窄化上下文时拒绝（1A）
         UserContext effectiveUser = narrowForOrgContext(user, orgContext);
@@ -110,6 +129,10 @@ public class SemanticQueryService {
             details.add(semanticMetaService.getMetricByCode(code));
         }
         MetricDetail primary = details.get(0);
+        if (window == null && ("hire_count".equals(primary.code())
+                || "leave_count".equals(primary.code()))) {
+            throw new BizException(ErrorCode.PARAM_MISSING, "人事变动人数需要明确统计期间");
+        }
 
         String sql;
         if ("org".equals(queryMode)) {
@@ -118,13 +141,12 @@ public class SemanticQueryService {
             sql = sqlComposer.buildDetailQuery(primary, window, null);
         } else if ("trend".equals(queryMode)) {
             if (window == null) {
-                window = new MetricSqlComposer.TimeWindow(demoNow.minusMonths(3), demoNow.plusDays(1));
+                window = new MetricSqlComposer.TimeWindow(
+                        demoNow.withDayOfMonth(1).minusMonths(2), demoNow.plusDays(1));
             }
             sql = sqlComposer.buildMonthlyTrendQuery(primary, window, null);
             if (sql == null) {
-                // 快照指标无月度事实：回落标量，避免硬失败
-                sql = sqlComposer.buildScalarQuery(details, window, null);
-                queryMode = "scalar";
+                throw new BizException(ErrorCode.PARAM_INVALID, "该指标不支持月趋势");
             }
         } else {
             sql = sqlComposer.buildScalarQuery(details, window, null);
@@ -134,6 +156,9 @@ public class SemanticQueryService {
         QueryResult raw = queryExecService.executeReadonly(authorized);
         Map<String, Object> result = toMaskedResult(user, details, raw, limit);
         result.put("query_mode", queryMode);
+        if ("headcount".equals(primary.code())) {
+            result.put("as_of_date", HeadcountAsOf.date(window == null ? null : window.end(), demoNow).toString());
+        }
 
         audit(user, context, authorized, (Integer) result.get("row_count"));
         return result;
@@ -208,7 +233,7 @@ public class SemanticQueryService {
         MetricDetail primary = metrics.get(0);
         Map<String, Object> caliber = new LinkedHashMap<>();
         caliber.put("metric", primary.code());
-        caliber.put("definition", primary.formulaExpr());
+        caliber.put("definition", primary.calcScope());
         caliber.put("version", primary.effectiveVersion());
 
         Map<String, Object> out = new LinkedHashMap<>();

@@ -107,7 +107,7 @@ public class GetSemanticMetaToolHandler implements McpToolHandler {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("code", detail.code());
         row.put("name", detail.name());
-        row.put("definition", detail.formulaExpr());
+        row.put("definition", detail.calcScope());
         row.put("domain", detail.domain());
         row.put("available_dimensions", detail.availableDimensions());
         row.put("version", detail.effectiveVersion());

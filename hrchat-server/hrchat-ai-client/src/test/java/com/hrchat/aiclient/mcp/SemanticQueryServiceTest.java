@@ -30,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -71,6 +72,7 @@ class SemanticQueryServiceTest {
 
         assertEquals(true, result.get("permission_rewrite_applied"));
         assertEquals(1, result.get("row_count"));
+        assertEquals("2026-09-28", result.get("as_of_date"));
         verify(authzService).checkFunc(hr01, "chat:ask");
     }
 
@@ -80,6 +82,95 @@ class SemanticQueryServiceTest {
                 Map.of("metrics", List.of("headcount"), "dimensions", List.of("gender")),
                 Map.of()));
         assertEquals(ErrorCode.PARAM_INVALID, ex.getErrorCode());
+    }
+
+    @Test
+    void execute_rejectsUnknownModeAndMultipleMetricsBeforeSql() {
+        assertThrows(BizException.class, () -> service.execute(hr01,
+                Map.of("metrics", List.of("headcount"), "query_mode", "prediction"), Map.of()));
+        assertThrows(BizException.class, () -> service.execute(hr01,
+                Map.of("metrics", List.of("headcount", "leave_count")), Map.of()));
+        verifyNoInteractions(queryExecService);
+    }
+
+    @Test
+    void execute_rejectsOrgDimensionModeConflict() {
+        assertThrows(BizException.class, () -> service.execute(hr01,
+                Map.of("metrics", List.of("headcount"), "dimensions", List.of("org"),
+                        "query_mode", "trend"), Map.of()));
+        verifyNoInteractions(queryExecService);
+    }
+
+    @Test
+    void execute_ratioTrendDoesNotFallBackToScalar() {
+        when(semanticMetaService.getMetricByCode("turnover_rate"))
+                .thenReturn(metric("turnover_rate", "leave_count / headcount"));
+        BizException error = assertThrows(BizException.class, () -> service.execute(hr01,
+                Map.of("metrics", List.of("turnover_rate"), "query_mode", "trend"), Map.of()));
+        assertEquals(ErrorCode.PARAM_INVALID, error.getErrorCode());
+        verifyNoInteractions(queryExecService);
+    }
+
+    @Test
+    void customWindowUsesExclusiveEndAndRejectsInvalidPreset() {
+        MetricSqlComposer.TimeWindow window = MetricSqlComposer.resolveTimeRange(
+                Map.of("preset", "CUSTOM", "start", "2026-08-01", "end", "2026-09-01"),
+                LocalDate.of(2026, 9, 28));
+        assertEquals(LocalDate.of(2026, 9, 1), window.end());
+        assertTrue(window.sqlPredicate().contains("dt < '2026-09-01'"));
+        assertThrows(BizException.class, () -> MetricSqlComposer.resolveTimeRange(
+                Map.of("preset", "UNKNOWN"), LocalDate.of(2026, 9, 28)));
+        assertEquals(LocalDate.of(2026, 9, 29), MetricSqlComposer.resolveTimeRange(
+                Map.of("preset", "THIS_MONTH"), LocalDate.of(2026, 9, 28)).end());
+        assertThrows(BizException.class, () -> MetricSqlComposer.resolveTimeRange(
+                Map.of("preset", "CUSTOM", "start", "2026-09-01", "end", "2026-10-01"),
+                LocalDate.of(2026, 9, 28)));
+    }
+
+    @Test
+    void employeeChangesUseEventDateForPartialMonthAndMonthlyTrend() {
+        MetricSqlComposer composer = new MetricSqlComposer(semanticMetaService, LocalDate.of(2026, 9, 28));
+        MetricDetail leave = metric("leave_count",
+                "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)");
+        MetricSqlComposer.TimeWindow window = new MetricSqlComposer.TimeWindow(
+                LocalDate.of(2026, 9, 10), LocalDate.of(2026, 9, 20));
+        String scalar = composer.buildScalarQuery(List.of(leave), window, null);
+        String trend = composer.buildMonthlyTrendQuery(leave, window, null);
+        assertTrue(scalar.contains("change_date >= '2026-09-10'"));
+        assertTrue(scalar.contains("change_date < '2026-09-20'"));
+        assertTrue(trend.contains("FORMATDATETIME(change_date, 'yyyy-MM')"));
+        assertTrue(trend.contains("change_date < '2026-09-20'"));
+    }
+
+    @Test
+    void eventCountWithoutPeriodIsRejectedInsteadOfCountingAllHistory() {
+        when(semanticMetaService.getMetricByCode("leave_count")).thenReturn(metric("leave_count",
+                "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)"));
+        BizException error = assertThrows(BizException.class, () -> service.execute(hr01,
+                Map.of("metrics", List.of("leave_count")), Map.of()));
+        assertEquals(ErrorCode.PARAM_MISSING, error.getErrorCode());
+        verifyNoInteractions(queryExecService);
+    }
+
+    @Test
+    void headcountUsesTheSameAsOfDateAcrossScalarOrgAndDetail() {
+        MetricDetail headcount = metric("headcount", "SELECT COUNT(DISTINCT emp_key) FROM dim_employee");
+        MetricSqlComposer composer = new MetricSqlComposer(semanticMetaService, LocalDate.of(2026, 9, 28));
+        MetricSqlComposer.TimeWindow august = new MetricSqlComposer.TimeWindow(
+                LocalDate.of(2026, 8, 1), LocalDate.of(2026, 9, 1));
+        for (String sql : List.of(
+                composer.buildScalarQuery(List.of(headcount), august, null),
+                composer.buildOrgCompareQuery(headcount, august, null),
+                composer.buildDetailQuery(headcount, august, null))) {
+            assertTrue(sql.contains("hire_date <= DATE '2026-08-31'"), sql);
+            assertTrue(sql.contains("leave_date > DATE '2026-08-31'"), sql);
+            assertTrue(sql.contains("{authz_org_filter}"), sql);
+        }
+        String current = composer.buildScalarQuery(List.of(headcount), null, null);
+        assertTrue(current.contains("hire_date <= DATE '2026-09-28'"));
+        assertThrows(BizException.class, () -> composer.buildScalarQuery(List.of(headcount),
+                new MetricSqlComposer.TimeWindow(LocalDate.of(2025, 12, 1),
+                        LocalDate.of(2026, 1, 1)), null));
     }
 
     @Test

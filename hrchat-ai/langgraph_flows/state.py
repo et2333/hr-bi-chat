@@ -32,6 +32,8 @@ class AskState(TypedDict, total=False):
     current: Optional[float]
     compare: Optional[float]
     prev_period: Optional[str]
+    as_of_date: Optional[str]
+    data_updated_at: Optional[str]
 
     # 产出
     # 语义事件（event+payload，无 seq/ts，Java SseEvent 对齐）；节点返回需累积，故用 add 归并
@@ -61,6 +63,8 @@ def new_state(**kwargs: Any) -> dict[str, Any]:
         "current": None,
         "compare": None,
         "prev_period": None,
+        "as_of_date": None,
+        "data_updated_at": None,
         "events": [],
         "clarify_questions": [],
         "error": None,

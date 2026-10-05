@@ -115,67 +115,67 @@ def _add_months(d: date, months: int) -> date:
     return date(d.year + idx // 12, idx % 12 + 1, 1)
 
 
-def _preset_window(preset: str) -> Window | None:
-    now = DEMO_NOW
+def _preset_window(preset: str, as_of: date = DEMO_NOW) -> Window | None:
+    now = as_of
     if preset == "LAST_7D":
         return Window(now - timedelta(days=6), now + timedelta(days=1))
     if preset == "LAST_30D":
         return Window(now - timedelta(days=29), now + timedelta(days=1))
     if preset == "THIS_MONTH":
         first_this = now.replace(day=1)
-        return Window(first_this, _add_months(first_this, 1))
+        return Window(first_this, now + timedelta(days=1))
     if preset == "LAST_MONTH":
         first_this = now.replace(day=1)
         return Window(_add_months(first_this, -1), first_this)
     if preset == "THIS_QUARTER":
         q_start = date(now.year, ((now.month - 1) // 3) * 3 + 1, 1)
-        return Window(q_start, _add_months(q_start, 3))
+        return Window(q_start, now + timedelta(days=1))
     if preset == "LAST_QUARTER":
         q_start = date(now.year, ((now.month - 1) // 3) * 3 + 1, 1)
         return Window(_add_months(q_start, -3), q_start)
     if preset == "THIS_YEAR":
-        return Window(date(now.year, 1, 1), date(now.year + 1, 1, 1))
+        return Window(date(now.year, 1, 1), now + timedelta(days=1))
     if preset == "LAST_YEAR":
         return Window(date(now.year - 1, 1, 1), date(now.year, 1, 1))
     return None
 
 
-def resolve_window(question: str, context_override: dict | None) -> Window | None:
+def resolve_window(question: str, context_override: dict | None, as_of: date = DEMO_NOW) -> Window | None:
     """时间范围：context_override 显式覆盖 > 问句关键词（与 Java resolveWindow 一致）。"""
     co = context_override or {}
     time_range = co.get("time_range") or {}
     if time_range.get("preset"):
         if time_range["preset"] == "CUSTOM" and time_range.get("start") and time_range.get("end"):
             start = date.fromisoformat(time_range["start"][:10])
-            end = date.fromisoformat(time_range["end"][:10]) + timedelta(days=1)
+            end = date.fromisoformat(time_range["end"][:10])
             return Window(start, end)
-        return _preset_window(time_range["preset"])
+        return _preset_window(time_range["preset"], as_of)
     if "上月" in question:
-        return _preset_window("LAST_MONTH")
+        return _preset_window("LAST_MONTH", as_of)
     if "本月" in question or "这个月" in question:
-        return _preset_window("THIS_MONTH")
+        return _preset_window("THIS_MONTH", as_of)
     if "上季度" in question or "上个季度" in question:
-        return _preset_window("LAST_QUARTER")
+        return _preset_window("LAST_QUARTER", as_of)
     if "今年" in question:
-        return _preset_window("THIS_YEAR")
+        return _preset_window("THIS_YEAR", as_of)
     if "去年" in question:
-        return _preset_window("LAST_YEAR")
+        return _preset_window("LAST_YEAR", as_of)
     if "近7天" in question or "最近7天" in question:
-        return _preset_window("LAST_7D")
+        return _preset_window("LAST_7D", as_of)
     if "近30天" in question or "最近30天" in question:
-        return _preset_window("LAST_30D")
+        return _preset_window("LAST_30D", as_of)
     if "近三月" in question or "近3月" in question or "最近三个月" in question or "近三个月" in question:
-        return last_n_months(3)
+        return last_n_months(3, as_of)
     if "近一年" in question or "近1年" in question or "最近一年" in question:
-        return last_n_months(12)
+        return last_n_months(12, as_of)
     return None
 
 
-def last_n_months(n: int) -> Window:
-    """相对 DEMO_NOW 的近 n 个自然月（含当月起算的左闭右开窗口）。"""
-    first_this = DEMO_NOW.replace(day=1)
+def last_n_months(n: int, as_of: date = DEMO_NOW) -> Window:
+    """相对 as_of 的近 n 个自然月（含当月起算的左闭右开窗口）。"""
+    first_this = as_of.replace(day=1)
     start = _add_months(first_this, -(n - 1))
-    end = DEMO_NOW + timedelta(days=1)
+    end = as_of + timedelta(days=1)
     return Window(start, end)
 
 
