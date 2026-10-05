@@ -22,9 +22,11 @@ public final class MetricSqlComposer {
     private static final DateTimeFormatter SQL_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final SemanticMetaService semanticMetaService;
+    private final LocalDate demoNow;
 
-    public MetricSqlComposer(SemanticMetaService semanticMetaService) {
+    public MetricSqlComposer(SemanticMetaService semanticMetaService, LocalDate demoNow) {
         this.semanticMetaService = semanticMetaService;
+        this.demoNow = demoNow;
     }
 
     public String buildScalarQuery(List<MetricDetail> metrics, TimeWindow window, String orgFragment) {
@@ -49,9 +51,13 @@ public final class MetricSqlComposer {
         if (p.where() != null && !p.where().isBlank()) {
             cond.add("(" + p.where() + ")");
         }
+        if ("headcount".equals(metric.code())) {
+            cond.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                    window == null ? null : window.end(), demoNow)));
+        }
         cond.add(authzPredicate(orgFragment));
         if (window != null && p.isFact()) {
-            cond.add(window.sqlPredicate());
+            cond.add(window.sqlPredicate(dateColumn(p.table())));
         }
         String inner = "SELECT org_key, " + p.aggExpr() + " AS metric_value "
                 + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
@@ -73,6 +79,10 @@ public final class MetricSqlComposer {
         if (p.where() != null && !p.where().isBlank()) {
             cond.add("(" + p.where() + ")");
         }
+        if ("headcount".equals(metric.code())) {
+            cond.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                    window == null ? null : window.end(), demoNow)));
+        }
         cond.add(authzPredicate(orgFragment));
         if ("dim_employee".equalsIgnoreCase(p.table())) {
             return "SELECT emp_no, emp_name, org_key, job_level FROM dim_employee WHERE "
@@ -80,7 +90,7 @@ public final class MetricSqlComposer {
         }
         if (p.isFact()) {
             if (window != null) {
-                cond.add(window.sqlPredicate());
+                cond.add(window.sqlPredicate(dateColumn(p.table())));
             }
             return "SELECT dt, emp_key, org_key FROM " + p.table()
                     + " WHERE " + String.join(" AND ", cond) + " ORDER BY dt DESC LIMIT 50";
@@ -110,8 +120,9 @@ public final class MetricSqlComposer {
             cond.add("(" + p.where() + ")");
         }
         cond.add(authzPredicate(orgFragment));
-        cond.add(window.sqlPredicate());
-        String periodExpr = "FORMATDATETIME(dt, 'yyyy-MM')";
+        String dateColumn = dateColumn(p.table());
+        cond.add(window.sqlPredicate(dateColumn));
+        String periodExpr = "FORMATDATETIME(" + dateColumn + ", 'yyyy-MM')";
         return "SELECT " + periodExpr + " AS period, " + p.aggExpr() + " AS \"" + metric.code() + "\" "
                 + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
                 + " GROUP BY " + periodExpr + " ORDER BY period";
@@ -120,13 +131,15 @@ public final class MetricSqlComposer {
     private String buildHeadcountSnapshotTrendQuery(MetricDetail metric, TimeWindow window, String orgFragment) {
         List<String> unions = new ArrayList<>();
         java.time.LocalDate cursor = window.start().withDayOfMonth(1);
-        java.time.LocalDate last = window.end().minusDays(1);
+        java.time.LocalDate last = HeadcountAsOf.date(window.end(), demoNow);
         java.time.format.DateTimeFormatter monthFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM");
         java.time.format.DateTimeFormatter dayFmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd");
         while (!cursor.isAfter(last)) {
             java.time.LocalDate monthEnd = cursor.withDayOfMonth(cursor.lengthOfMonth());
             String period = monthEnd.format(monthFmt);
-            String asOf = monthEnd.format(dayFmt);
+            String asOf = HeadcountAsOf.date(
+                    monthEnd.isBefore(window.end()) ? monthEnd.plusDays(1) : window.end(), demoNow)
+                    .format(dayFmt);
             unions.add("SELECT '" + period + "' AS period, COUNT(DISTINCT emp_key) AS \"" + metric.code()
                     + "\" FROM dim_employee WHERE hire_date <= DATE '" + asOf + "' "
                     + "AND (leave_date IS NULL OR leave_date > DATE '" + asOf + "') "
@@ -170,7 +183,7 @@ public final class MetricSqlComposer {
         Set<String> visited = new HashSet<>();
         visited.add(metric.code());
         String expression = expr.toUpperCase().startsWith("SELECT")
-                ? injectFilters(expr, window, orgFragment)
+                ? injectFilters(expr, window, orgFragment, metric.code())
                 : buildExpression(expr, window, visited, orgFragment);
         return "SELECT (" + expression + ") AS \"" + metric.code() + "\"";
     }
@@ -205,15 +218,20 @@ public final class MetricSqlComposer {
         }
         String sub = dep.formulaExpr().trim();
         return sub.toUpperCase().startsWith("SELECT")
-                ? injectFilters(sub, window, orgFragment)
+                ? injectFilters(sub, window, orgFragment, token)
                 : buildExpression(sub, window, visited, orgFragment);
     }
 
-    private String injectFilters(String baseSql, TimeWindow window, String orgFragment) {
+    private String injectFilters(String baseSql, TimeWindow window, String orgFragment, String metricCode) {
         List<String> predicates = new ArrayList<>();
         predicates.add(authzPredicate(orgFragment));
+        if ("headcount".equals(metricCode)) {
+            predicates.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                    window == null ? null : window.end(), demoNow)));
+        }
         if (window != null && baseSql.toUpperCase().contains("FACT_")) {
-            predicates.add(window.sqlPredicate());
+            predicates.add(window.sqlPredicate(baseSql.toLowerCase(java.util.Locale.ROOT)
+                    .contains("fact_emp_change") ? "change_date" : "dt"));
         }
         String suffix = String.join(" AND ", predicates);
         int whereIdx = baseSql.toUpperCase().indexOf("WHERE");
@@ -227,6 +245,10 @@ public final class MetricSqlComposer {
         return orgFragment;
     }
 
+    private static String dateColumn(String table) {
+        return "fact_emp_change".equalsIgnoreCase(table) ? "change_date" : "dt";
+    }
+
     private static boolean isOperator(String token) {
         return "/".equals(token) || "*".equals(token) || "+".equals(token) || "-".equals(token);
     }
@@ -234,7 +256,11 @@ public final class MetricSqlComposer {
     /** 时间窗口：左闭右开 [start, end)。 */
     public record TimeWindow(LocalDate start, LocalDate end) {
         String sqlPredicate() {
-            return "dt >= '" + start.format(SQL_DATE) + "' AND dt < '" + end.format(SQL_DATE) + "'";
+            return sqlPredicate("dt");
+        }
+
+        String sqlPredicate(String column) {
+            return column + " >= '" + start.format(SQL_DATE) + "' AND " + column + " < '" + end.format(SQL_DATE) + "'";
         }
     }
 
@@ -244,32 +270,43 @@ public final class MetricSqlComposer {
         }
         String preset = stringVal(timeRange.get("preset"));
         if (preset == null || preset.isBlank()) {
-            return null;
+            throw new BizException(ErrorCode.PARAM_INVALID, "time_range.preset 必填");
         }
         LocalDate now = demoNow == null ? LocalDate.now() : demoNow;
         return switch (preset) {
             case "LAST_7D" -> new TimeWindow(now.minusDays(6), now.plusDays(1));
             case "LAST_30D" -> new TimeWindow(now.minusDays(29), now.plusDays(1));
-            case "THIS_MONTH" -> new TimeWindow(now.withDayOfMonth(1), now.withDayOfMonth(1).plusMonths(1));
+            case "THIS_MONTH" -> new TimeWindow(now.withDayOfMonth(1), now.plusDays(1));
             case "LAST_MONTH" -> new TimeWindow(now.withDayOfMonth(1).minusMonths(1), now.withDayOfMonth(1));
             case "THIS_QUARTER" -> new TimeWindow(
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1),
-                    now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1).plusMonths(3));
+                    now.plusDays(1));
             case "LAST_QUARTER" -> new TimeWindow(
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1).minusMonths(3),
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1));
-            case "THIS_YEAR" -> new TimeWindow(now.withDayOfYear(1), now.withDayOfYear(1).plusYears(1));
+            case "THIS_YEAR" -> new TimeWindow(now.withDayOfYear(1), now.plusDays(1));
             case "LAST_YEAR" -> new TimeWindow(now.withDayOfYear(1).minusYears(1), now.withDayOfYear(1));
             case "CUSTOM" -> {
                 String start = stringVal(timeRange.get("start"));
                 String end = stringVal(timeRange.get("end"));
                 if (start == null || end == null) {
-                    yield null;
+                    throw new BizException(ErrorCode.PARAM_INVALID, "CUSTOM 时间范围需要 start 和 end");
                 }
-                yield new TimeWindow(LocalDate.parse(start.substring(0, 10)),
-                        LocalDate.parse(end.substring(0, 10)).plusDays(1));
+                try {
+                    LocalDate from = LocalDate.parse(start);
+                    LocalDate until = LocalDate.parse(end);
+                    if (!from.isBefore(until)) {
+                        throw new BizException(ErrorCode.PARAM_INVALID, "CUSTOM 时间范围须满足 start < end");
+                    }
+                    if (until.isAfter(now.plusDays(1))) {
+                        throw new BizException(ErrorCode.PARAM_INVALID, "CUSTOM 时间范围不能超过演示时点");
+                    }
+                    yield new TimeWindow(from, until);
+                } catch (java.time.format.DateTimeParseException e) {
+                    throw new BizException(ErrorCode.PARAM_INVALID, "CUSTOM 日期必须为 yyyy-MM-dd");
+                }
             }
-            default -> null;
+            default -> throw new BizException(ErrorCode.PARAM_INVALID, "不支持的 time_range.preset: " + preset);
         };
     }
 

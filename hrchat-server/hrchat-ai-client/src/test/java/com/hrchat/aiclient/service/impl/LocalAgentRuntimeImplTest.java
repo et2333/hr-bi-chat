@@ -179,9 +179,8 @@ class LocalAgentRuntimeImplTest {
         when(queryExecService.executeReadonly(any(AuthorizedQuery.class)))
                 .thenAnswer(inv -> {
                     String sql = ((AuthorizedQuery) inv.getArgument(0)).sql();
-                    // 主查询（2026-08）与环比上期（2026-07）区分：环比 SQL 含 "dt < '2026-08-01'"，
-                    // 故用 "dt >= '2026-08-01'" 精确定位主查询
-                    long value = sql.contains("dt >= '2026-08-01'") ? 3L : 0L;
+                    // 入职按事件日期计算；用本期起点区分 2026-08 与环比 2026-07。
+                    long value = sql.contains("change_date >= '2026-08-01'") ? 3L : 0L;
                     return new QueryResult(List.of(new QueryResult.ColumnMeta("hire_count", "hire_count", "int", false)),
                             List.of(Map.of("hire_count", value)), 1);
                 });
@@ -191,7 +190,7 @@ class LocalAgentRuntimeImplTest {
         ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.atLeast(1)).executeReadonly(sqlCaptor.capture());
         List<String> sqls = sqlCaptor.getAllValues().stream().map(AuthorizedQuery::sql).toList();
-        assertTrue(sqls.stream().anyMatch(s -> s.contains("dt >= '2026-08-01' AND dt < '2026-09-01'")),
+        assertTrue(sqls.stream().anyMatch(s -> s.contains("change_date >= '2026-08-01' AND change_date < '2026-09-01'")),
                 "上月窗口应映射 2026-08: " + sqls);
         assertTrue(sqls.stream().anyMatch(s -> s.contains("change_type = 1")));
         // 环比：当期 3 vs 上期 0 → UP
@@ -268,11 +267,11 @@ class LocalAgentRuntimeImplTest {
 
         assertFalse(second.isClarifying());
         assertEquals(SseEvents.ASK_COMPLETED, second.payload().status());
-        // demoNow=2026-09-28 → 近三月窗口 [2026-06-28, 2026-09-29)，仅事实表注入时间谓词
-        assertTrue(second.sql().contains("dt >= '2026-06-28' AND dt < '2026-09-29'"),
+        // demoNow=2026-09-28 → 近三个自然月窗口 [2026-07-01, 2026-09-29)。
+        assertTrue(second.sql().contains("change_date >= '2026-07-01' AND change_date < '2026-09-29'"),
                 "澄清续跑应带上原问句的近三月时间窗: " + second.sql());
         // 趋势问句澄清后续跑应按月聚合产出折线图
-        assertTrue(second.sql().contains("GROUP BY FORMATDATETIME(dt, 'yyyy-MM')"),
+        assertTrue(second.sql().contains("GROUP BY FORMATDATETIME(change_date, 'yyyy-MM')"),
                 "趋势应按月分组: " + second.sql());
         assertEquals("LINE", second.payload().chart().type());
         // 推荐气泡带当前指标，保证可点可答
@@ -294,8 +293,8 @@ class LocalAgentRuntimeImplTest {
         ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
         org.mockito.Mockito.verify(queryExecService).executeReadonly(sqlCaptor.capture());
         String sql = sqlCaptor.getValue().sql();
-        assertTrue(sql.contains("GROUP BY FORMATDATETIME(dt, 'yyyy-MM')"), "应按月分组: " + sql);
-        assertTrue(sql.contains("dt >= '2026-06-28' AND dt < '2026-09-29'"), "应注入近三月窗口: " + sql);
+        assertTrue(sql.contains("GROUP BY FORMATDATETIME(change_date, 'yyyy-MM')"), "应按月分组: " + sql);
+        assertTrue(sql.contains("change_date >= '2026-07-01' AND change_date < '2026-09-29'"), "应注入近三月窗口: " + sql);
         assertTrue(sql.contains("change_type = 1"), "应保留指标自身口径: " + sql);
 
         assertEquals("LINE", result.payload().chart().type());
@@ -360,7 +359,7 @@ class LocalAgentRuntimeImplTest {
         String sql = result.sql();
         assertTrue(sql.contains("fact_emp_change"), "分子应取离职事实表: " + sql);
         assertTrue(sql.contains("dim_employee"), "分母为在职快照标量: " + sql);
-        assertTrue(sql.contains("GROUP BY FORMATDATETIME(dt, 'yyyy-MM')"), "分子应按月分组: " + sql);
+        assertTrue(sql.contains("GROUP BY FORMATDATETIME(change_date, 'yyyy-MM')"), "分子应按月分组: " + sql);
         assertTrue(sql.contains("NULLIF("), "应防除零: " + sql);
 
         assertEquals("LINE", result.payload().chart().type());

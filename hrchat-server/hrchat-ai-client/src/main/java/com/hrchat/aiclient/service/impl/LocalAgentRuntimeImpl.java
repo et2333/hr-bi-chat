@@ -1,6 +1,7 @@
 package com.hrchat.aiclient.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.aiclient.mcp.HeadcountAsOf;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
@@ -67,7 +68,7 @@ import java.util.stream.Collectors;
 public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
 
     /** 演示数据最新同步时间（BR-09 数据时效标注，对齐 itg_sync_task 种子）。 */
-    private static final String DATA_UPDATED_AT = "2026-09-12T06:00:00+08:00";
+    private static final String DATA_UPDATED_AT = "2026-09-28T06:00:00+08:00";
 
     private static final DateTimeFormatter SQL_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
@@ -225,6 +226,29 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
 
         // 时间范围（问句关键词 > 显式覆盖）
         TimeWindow window = resolveWindow(question, contextOverride);
+        if (window != null && (window.start().isAfter(demoNow)
+                || window.end().isAfter(demoNow.plusDays(1))
+                || !window.start().isBefore(window.end()))) {
+            events.add(errorEvent(ErrorCode.PARAM_INVALID.getCode(),
+                    "查询期间必须在演示时点内且起始日早于结束日", false));
+            return new AgentResult(askId, events, null, List.of(), null,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
+        if (("headcount".equals(metricCode) || "turnover_rate".equals(metricCode)
+                || "avg_salary".equals(metricCode)) && window != null
+                && (window.end().minusDays(1).isBefore(HeadcountAsOf.MIN_DEMO_DATE)
+                || (isTrendQuestion(question) && window.start().isBefore(HeadcountAsOf.MIN_DEMO_DATE)))) {
+            events.add(errorEvent(ErrorCode.PARAM_INVALID.getCode(),
+                    "演示在职历史仅覆盖 2026-01-01 起", false));
+            return new AgentResult(askId, events, null, List.of(), null,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
+        if (window == null && ("hire_count".equals(metricCode) || "leave_count".equals(metricCode))) {
+            events.add(errorEvent(ErrorCode.PARAM_MISSING.getCode(),
+                    "请明确入职或离职人数的统计期间", false));
+            return new AgentResult(askId, events, null, List.of(), null,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
 
         // 明细 / 按组织对比 / 趋势（演示追问 chips）
         if (isDetailQuestion(question)) {
@@ -242,13 +266,17 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             }
         }
 
-        // 趋势分析（折线图）：含趋势词且指标可按月聚合时走时序路径；快照类指标自动回落单值数字卡
+        // 趋势查询不能静默回退单值，否则回答的不是用户提出的问题。
         if (isTrendQuestion(question)) {
             AgentResult trendResult = runTrend(askId, question, metric, metricCode,
                     window, ctx, resolved, events, start);
             if (trendResult != null) {
                 return trendResult;
             }
+            events.add(errorEvent(ErrorCode.PARAM_INVALID.getCode(),
+                    "该指标当前不支持月趋势，请改问单期数值", false));
+            return new AgentResult(askId, events, null, List.of(), null,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
         }
 
         events.add(toolStart("sql_exec", "正在查询「" + metric.name() + "」…"));
@@ -541,7 +569,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         Set<String> visited = new HashSet<>();
         visited.add(metric.code());
         String expression = expr.toUpperCase().startsWith("SELECT")
-                ? injectFilters(expr, window, orgFragment)
+                ? injectFilters(expr, window, orgFragment, metric.code())
                 : buildExpression(expr, window, visited, orgFragment);
         return "SELECT (" + expression + ") AS \"" + metric.code() + "\"";
     }
@@ -579,16 +607,21 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         }
         String sub = dep.formulaExpr().trim();
         return sub.toUpperCase().startsWith("SELECT")
-                ? injectFilters(sub, window, orgFragment)
+                ? injectFilters(sub, window, orgFragment, token)
                 : buildExpression(sub, window, visited, orgFragment);
     }
 
     /** 向基础 SQL 注入组织/时间谓词（追加于 WHERE 之后；无 WHERE 时新起 WHERE）。 */
-    private String injectFilters(String baseSql, TimeWindow window, String orgFragment) {
+    private String injectFilters(String baseSql, TimeWindow window, String orgFragment, String metricCode) {
         List<String> predicates = new ArrayList<>();
         predicates.add(authzPredicate(orgFragment));
+        if ("headcount".equals(metricCode)) {
+            predicates.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                    window == null ? null : window.end(), demoNow)));
+        }
         if (window != null && baseSql.toUpperCase().contains("FACT_")) {
-            predicates.add(window.sqlPredicate());
+            predicates.add(window.sqlPredicate(baseSql.toLowerCase(java.util.Locale.ROOT)
+                    .contains("fact_emp_change") ? "change_date" : "dt"));
         }
         String suffix = String.join(" AND ", predicates);
         int whereIdx = baseSql.toUpperCase().indexOf("WHERE");
@@ -648,8 +681,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             cond.add("(" + p.where() + ")");
         }
         cond.add(authzPredicate(orgFragment));
-        cond.add(window.sqlPredicate());
-        String periodExpr = "FORMATDATETIME(dt, 'yyyy-MM')";
+        String dateColumn = "fact_emp_change".equalsIgnoreCase(p.table()) ? "change_date" : "dt";
+        cond.add(window.sqlPredicate(dateColumn));
+        String periodExpr = "FORMATDATETIME(" + dateColumn + ", 'yyyy-MM')";
         return "SELECT " + periodExpr + " AS period, " + p.aggExpr() + " AS v "
                 + "FROM " + p.table() + " WHERE " + String.join(" AND ", cond)
                 + " GROUP BY " + periodExpr;
@@ -672,6 +706,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
      * 为快照表则取恒定分母标量）。返回值为原始量纲——百分比为小数，由展示层统一 ×100。
      */
     String buildTrendSql(MetricDetail metric, TimeWindow window, String orgFragment) {
+        if (window.start().isAfter(demoNow)) {
+            return null;
+        }
         String expr = metric.formulaExpr().trim();
         if (expr.toUpperCase().startsWith("SELECT")) {
             BaseParts p = parseBase(expr);
@@ -704,6 +741,9 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         if (denParts != null && denParts.isFact()) {
             denomExpr = "(SELECT d.v FROM (" + monthlyFactSub(denParts, window, orgFragment)
                     + ") d WHERE d.period = n.period)";
+        } else if (denParts != null && "headcount".equals(tokens.get(2))) {
+            denomExpr = "(SELECT d.v FROM (" + headcountMonthlySub(window, orgFragment)
+                    + ") d WHERE d.period = n.period)";
         } else if (denParts != null) {
             denomExpr = scalarSub(denParts, orgFragment);
         } else {
@@ -724,23 +764,26 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
      * 在职人数月末时点趋势：用 hire_date / leave_date 还原历史，不依赖 emp_status 快照。
      */
     private String buildHeadcountSnapshotTrendSql(MetricDetail metric, TimeWindow window, String orgFragment) {
+        return wrapTrend(metric, headcountMonthlySub(window, orgFragment));
+    }
+
+    private String headcountMonthlySub(TimeWindow window, String orgFragment) {
         List<String> unions = new ArrayList<>();
         LocalDate cursor = window.start().withDayOfMonth(1);
-        LocalDate last = window.end().minusDays(1);
+        LocalDate last = HeadcountAsOf.date(window.end(), demoNow);
         while (!cursor.isAfter(last)) {
             LocalDate monthEnd = cursor.withDayOfMonth(cursor.lengthOfMonth());
             String period = monthEnd.format(DateTimeFormatter.ofPattern("yyyy-MM"));
-            String asOf = monthEnd.format(SQL_DATE);
+            String asOf = HeadcountAsOf.date(
+                    monthEnd.isBefore(window.end()) ? monthEnd.plusDays(1) : window.end(), demoNow)
+                    .format(SQL_DATE);
             unions.add("SELECT '" + period + "' AS period, COUNT(DISTINCT emp_key) AS v FROM dim_employee WHERE "
                     + "hire_date <= DATE '" + asOf + "' "
                     + "AND (leave_date IS NULL OR leave_date > DATE '" + asOf + "') "
                     + "AND " + authzPredicate(orgFragment));
             cursor = cursor.plusMonths(1);
         }
-        if (unions.isEmpty()) {
-            return null;
-        }
-        return wrapTrend(metric, String.join(" UNION ALL ", unions));
+        return String.join(" UNION ALL ", unions);
     }
 
     private static Number extractValue(QueryResult result, String code) {
@@ -759,7 +802,11 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     private record TimeWindow(LocalDate start, LocalDate end) {
 
         String sqlPredicate() {
-            return "dt >= '" + start.format(SQL_DATE) + "' AND dt < '" + end.format(SQL_DATE) + "'";
+            return sqlPredicate("dt");
+        }
+
+        String sqlPredicate(String column) {
+            return column + " >= '" + start.format(SQL_DATE) + "' AND " + column + " < '" + end.format(SQL_DATE) + "'";
         }
 
         String label() {
@@ -800,15 +847,15 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         LocalDate now = demoNow;
         if (question.contains("近三月") || question.contains("近3个月") || question.contains("近三个月")
                 || question.contains("最近三月") || question.contains("最近3个月") || question.contains("最近三个月")) {
-            return new TimeWindow(now.minusMonths(3), now.plusDays(1));
+            return new TimeWindow(now.withDayOfMonth(1).minusMonths(2), now.plusDays(1));
         }
         if (question.contains("近半年") || question.contains("近6个月") || question.contains("近六个月")
                 || question.contains("最近半年") || question.contains("最近6个月")) {
-            return new TimeWindow(now.minusMonths(6), now.plusDays(1));
+            return new TimeWindow(now.withDayOfMonth(1).minusMonths(5), now.plusDays(1));
         }
         if (question.contains("近一年") || question.contains("近12个月")
                 || question.contains("最近一年") || question.contains("最近12个月")) {
-            return new TimeWindow(now.minusYears(1), now.plusDays(1));
+            return new TimeWindow(now.withDayOfMonth(1).minusMonths(11), now.plusDays(1));
         }
         return null;
     }
@@ -818,19 +865,19 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         return switch (preset) {
             case "LAST_7D" -> new TimeWindow(now.minusDays(6), now.plusDays(1));
             case "LAST_30D" -> new TimeWindow(now.minusDays(29), now.plusDays(1));
-            case "THIS_MONTH" -> new TimeWindow(now.withDayOfMonth(1), now.withDayOfMonth(1).plusMonths(1));
+            case "THIS_MONTH" -> new TimeWindow(now.withDayOfMonth(1), now.plusDays(1));
             case "LAST_MONTH" -> new TimeWindow(now.withDayOfMonth(1).minusMonths(1), now.withDayOfMonth(1));
             case "THIS_QUARTER" -> new TimeWindow(
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1),
-                    now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1).plusMonths(3));
+                    now.plusDays(1));
             case "LAST_QUARTER" -> new TimeWindow(
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1).minusMonths(3),
                     now.withMonth(now.getMonth().firstMonthOfQuarter().getValue()).withDayOfMonth(1));
-            case "THIS_YEAR" -> new TimeWindow(now.withDayOfYear(1), now.withDayOfYear(1).plusYears(1));
+            case "THIS_YEAR" -> new TimeWindow(now.withDayOfYear(1), now.plusDays(1));
             case "LAST_YEAR" -> new TimeWindow(now.withDayOfYear(1).minusYears(1), now.withDayOfYear(1));
             case "CUSTOM" -> custom != null && custom.start() != null && custom.end() != null
                     ? new TimeWindow(LocalDate.parse(custom.start().substring(0, 10)),
-                    LocalDate.parse(custom.end().substring(0, 10)).plusDays(1))
+                    LocalDate.parse(custom.end().substring(0, 10)))
                     : null;
             default -> null;
         };
@@ -991,7 +1038,10 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
 
     /** 口径：展示名 + 语义 code（存报表 def.metric 必须用 code）。 */
     private AnswerPayload.Caliber toCaliber(MetricDetail metric, String timeRange) {
-        return new AnswerPayload.Caliber(metric.name(), metric.calcScope(), timeRange, DATA_UPDATED_AT, metric.code());
+        String effectiveRange = timeRange == null && "headcount".equals(metric.code())
+                ? "截至 " + demoNow : timeRange;
+        return new AnswerPayload.Caliber(metric.name(), metric.calcScope(), effectiveRange,
+                DATA_UPDATED_AT, metric.code());
     }
 
     /**
@@ -1138,6 +1188,10 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             if (p.where() != null && !p.where().isBlank()) {
                 cond.add("(" + p.where() + ")");
             }
+            if ("headcount".equals(metric.code())) {
+                cond.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                        window == null ? null : window.end(), demoNow)));
+            }
             cond.add(authz);
             return "SELECT emp_no, emp_name, org_key, job_level FROM dim_employee WHERE "
                     + String.join(" AND ", cond) + " ORDER BY emp_no LIMIT 50";
@@ -1149,7 +1203,8 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             }
             cond.add(authz);
             if (window != null) {
-                cond.add(window.sqlPredicate());
+                cond.add(window.sqlPredicate("fact_emp_change".equalsIgnoreCase(p.table())
+                        ? "change_date" : "dt"));
             }
             return "SELECT dt, emp_key, org_key FROM " + p.table()
                     + " WHERE " + String.join(" AND ", cond)
@@ -1168,9 +1223,14 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         if (p.where() != null && !p.where().isBlank()) {
             cond.add("(" + p.where() + ")");
         }
+        if ("headcount".equals(metric.code())) {
+            cond.add(HeadcountAsOf.predicate(HeadcountAsOf.date(
+                    window == null ? null : window.end(), demoNow)));
+        }
         cond.add(authz);
         if (window != null && p.isFact()) {
-            cond.add(window.sqlPredicate());
+            cond.add(window.sqlPredicate("fact_emp_change".equalsIgnoreCase(p.table())
+                    ? "change_date" : "dt"));
         }
         // 内层按 org_key 聚合（占位符无表别名）；外层 JOIN dim_org 取可读组织名
         String inner = "SELECT org_key, " + p.aggExpr() + " AS metric_value "
@@ -1186,14 +1246,14 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     /**
      * 趋势分析主流程：按月聚合时序 SQL，产出折线图（LINE）。
      *
-     * @return 时序结果；指标无法按月聚合（如纯快照表 headcount）时返回 null，由调用方回落单值数字卡
+     * @return 时序结果；指标无法按月聚合时返回 null，由调用方明确告知不支持。
      */
     private AgentResult runTrend(String askId, String question, MetricDetail metric, String metricCode,
                                  TimeWindow window, UserContext ctx, Resolved resolved,
                                  List<SseEvent> events, long start) {
         // 无显式时间范围时趋势默认近三月
         TimeWindow w = window != null ? window
-                : new TimeWindow(demoNow.minusMonths(3), demoNow.plusDays(1));
+                : new TimeWindow(demoNow.withDayOfMonth(1).minusMonths(2), demoNow.plusDays(1));
         String orgFragment = orgFilterFragment(ctx, resolved.orgKeys(), resolved.orgTerm());
         String trendSql = buildTrendSql(metric, w, orgFragment);
         if (trendSql == null) {

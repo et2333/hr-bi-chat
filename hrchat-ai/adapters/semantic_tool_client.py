@@ -16,12 +16,11 @@ from langgraph_flows.demo_data import (
 
 logger = logging.getLogger(__name__)
 
-# 演示组织键 → Java org_node_id（对齐 H2 种子）
+# H2 演示组织键 → Java sec_org_node ID；正式组织目录尚未接入 Python。
+# 未知组织必须拒绝，不能将 org_context 留空扩大查询范围。
 ORG_KEY_TO_ID: dict[str, str] = {
     "研发": "2",
     "销售": "5",
-    "市场": "6",
-    "产品": "2",  # 演示同义词落入研发中心子树近似；正式以 meta/org 为准
 }
 
 
@@ -173,11 +172,13 @@ class JavaMcpSemanticToolClient:
         view = catalog.get(code) or MetricView(code=code, name=code, definition="")
 
         org_context = None
-        for key in org_keys:
-            oid = ORG_KEY_TO_ID.get(key)
-            if oid:
-                org_context = {"org_id": oid, "include_children": True}
-                break
+        if org_keys:
+            if len(set(org_keys)) != 1:
+                raise McpBusinessError("HRC-1003", "暂不支持同时指定多个组织，请选择一个组织")
+            oid = ORG_KEY_TO_ID.get(org_keys[0])
+            if oid is None:
+                raise McpBusinessError("HRC-1003", f"组织“{org_keys[0]}”尚未映射到权威目录，请明确组织")
+            org_context = {"org_id": oid, "include_children": True}
 
         time_range = None
         if window is not None:
@@ -193,8 +194,10 @@ class JavaMcpSemanticToolClient:
         if mode in ("org", "detail", "trend"):
             raw = await self._query_raw(code, time_range, org_context, context, mode)
             return _present_from_mcp(code, view, raw, mode)
+        if mode != "scalar":
+            raise McpBusinessError("HRC-1003", f"不支持的查询模式：{mode}")
 
-        current = await self._query_scalar(code, time_range, org_context, context)
+        current, as_of_date = await self._query_scalar(code, time_range, org_context, context)
         compare, prev_period = None, None
         if window is not None:
             prev = window.prev()
@@ -204,7 +207,7 @@ class JavaMcpSemanticToolClient:
                 "end": prev.end.isoformat(),
             }
             try:
-                compare = await self._query_scalar(code, prev_range, org_context, context)
+                compare, _ = await self._query_scalar(code, prev_range, org_context, context)
                 prev_period = prev.label
             except McpBusinessError:
                 compare, prev_period = None, None
@@ -216,6 +219,7 @@ class JavaMcpSemanticToolClient:
             "rows": 1 if current is not None else 0,
             "query_mode": "scalar",
             "metric": view,
+            "as_of_date": as_of_date,
         }
 
     async def _query_raw(
@@ -241,20 +245,27 @@ class JavaMcpSemanticToolClient:
         time_range: Optional[dict[str, Any]],
         org_context: Optional[dict[str, Any]],
         context: dict[str, Any],
-    ) -> Optional[float]:
+    ) -> tuple[Optional[float], Optional[str]]:
         raw = await self._query_raw(code, time_range, org_context, context, "scalar")
+        if raw.get("query_mode") != "scalar":
+            raise McpBusinessError("HRC-1003", "标量查询未按请求执行")
+        as_of = raw.get("as_of_date")
+        as_of_date = str(as_of) if as_of else None
         rows = raw.get("rows") or []
         if not rows:
-            return None
+            return None, as_of_date
         first = rows[0]
         if isinstance(first, list) and first:
-            return _to_float(first[0])
+            return _to_float(first[0]), as_of_date
         if isinstance(first, dict):
-            return _to_float(first.get(code) or next(iter(first.values()), None))
-        return None
+            return _to_float(first[code] if code in first else next(iter(first.values()), None)), as_of_date
+        return None, as_of_date
 
 
 def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: str) -> dict[str, Any]:
+    actual_mode = raw.get("query_mode")
+    if actual_mode != mode:
+        raise McpBusinessError("HRC-1003", f"查询模式未按请求执行：请求 {mode}，实际 {actual_mode or '未知'}")
     columns_raw = raw.get("columns") or []
     rows_raw = raw.get("rows") or []
     col_keys: list[str] = []
@@ -325,6 +336,7 @@ def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: st
         },
         "chart": chart,
         "metric": view,
+        "as_of_date": str(raw["as_of_date"]) if raw.get("as_of_date") else None,
     }
 
 

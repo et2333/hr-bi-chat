@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from datetime import date
 
 import pytest
 
@@ -59,6 +60,7 @@ class FakeJavaTools:
             "rows": 1,
             "query_mode": query_mode or "scalar",
             "metric": MetricView(code=code, name="在职人数", definition="", unit="人"),
+            "as_of_date": "2026-09-28" if code == "headcount" else None,
         }
 
 
@@ -85,6 +87,18 @@ async def test_java_mcp_execute_uses_client_not_demo_value():
     assert tools.query_calls[0]["context"]["tool_context_token"] == "jwt.ctx"
     assert tools.query_calls[0]["context"]["invocation_id"] == "inv-9"
     assert tools.catalog_contexts[0]["tool_context_token"] == "jwt.ctx"
+    assert result["answer_payload"]["caliber"]["time_range"] == "截至 2026-09-28"
+    assert result["answer_payload"]["caliber"]["data_updated_at"] == "2026-09-28T06:00:00+08:00"
+
+
+@pytest.mark.asyncio
+async def test_java_mcp_relative_window_uses_java_demo_clock(monkeypatch):
+    monkeypatch.setenv("HRCHAT_DEMO_NOW", "2026-09-28")
+    tools = FakeJavaTools()
+    await run_ask_flow(question="最近7天在职人数", session_id="s1", ask_id="ask_clock",
+                       adapter=ADAPTER, tools=tools, use_langgraph=False)  # type: ignore[arg-type]
+    assert tools.query_calls[0]["window"].start == date(2026, 9, 22)
+    assert tools.query_calls[0]["window"].end == date(2026, 9, 29)
 
 
 @pytest.mark.asyncio
