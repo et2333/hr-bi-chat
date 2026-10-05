@@ -44,9 +44,11 @@ class FakeJavaTools:
         window: Optional[Window],
         org_keys: list[str],
         context: dict[str, Any],
+        query_mode: str = "scalar",
     ) -> dict[str, Any]:
         self.query_calls.append(
-            {"code": code, "org_keys": org_keys, "context": context, "window": window}
+            {"code": code, "org_keys": org_keys, "context": context, "window": window,
+             "query_mode": query_mode}
         )
         if self.query_error:
             raise self.query_error
@@ -55,6 +57,7 @@ class FakeJavaTools:
             "compare": None,
             "prev_period": None,
             "rows": 1,
+            "query_mode": query_mode or "scalar",
             "metric": MetricView(code=code, name="在职人数", definition="", unit="人"),
         }
 
