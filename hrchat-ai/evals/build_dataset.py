@@ -2,7 +2,7 @@
 import json
 from datetime import date, timedelta
 
-from evals.dataset import DATASET, sha
+from evals.dataset import DATASET, sha_text
 from evals.reference import MIGRATIONS, count
 
 
@@ -80,8 +80,9 @@ def build():
     (DATASET / "cases.json").write_text(json.dumps(cases, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     manifest = {"schema_version": 1, "dataset_version": "hr-query-v1", "data_version": "h2-v6",
                 "as_of_date": "2026-09-28", "timezone": "Asia/Shanghai",
-                "cases_sha256": sha(DATASET / "cases.json"),
-                "migration_sha256": {p.name: sha(p) for p in sorted(MIGRATIONS.glob("*.sql"))},
+                "hash_scheme": "sha256-lf-text-v1",
+                "cases_sha256": sha_text(DATASET / "cases.json"),
+                "migration_sha256": {p.name: sha_text(p) for p in sorted(MIGRATIONS.glob("*.sql"))},
                 "expected_source": "literal seed rows + independent Python counting; no production SQL imports",
                 "freeze_policy": "group/template/sequence disjoint; first scored run is baseline, later runs regression",
                 "scope": "Java user API; scalar counts, multi-turn, permission and scope boundaries",

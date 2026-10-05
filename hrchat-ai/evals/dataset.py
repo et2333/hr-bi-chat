@@ -9,9 +9,16 @@ def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def sha_text(path):
+    # Git checks out text files with platform-dependent line endings. Hash the
+    # same LF representation on Windows and Linux so a frozen dataset is portable.
+    data = Path(path).read_bytes().replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
 def load_dataset(path=DATASET):
     manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
-    if sha(path / "cases.json") != manifest["cases_sha256"]:
+    if sha_text(path / "cases.json") != manifest["cases_sha256"]:
         raise ValueError("Dataset hash mismatch; publish a new version before scoring")
     cases = json.loads((path / "cases.json").read_text(encoding="utf-8"))
     ids, groups, templates = set(), {}, {}

@@ -5,7 +5,7 @@ import pytest
 
 from evals.api import JavaApi
 from evals.compare import compare
-from evals.dataset import load_dataset, sha
+from evals.dataset import load_dataset, sha_text
 from evals.reference import count, seed_rows
 from evals.run import execute, summarize
 from evals.scoring import score
@@ -68,10 +68,18 @@ def test_split_leakage_rejected(tmp_path):
     manifest, cases = load_dataset()
     cases[1]["split"] = "frozen"
     (tmp_path / "cases.json").write_text(json.dumps(cases), encoding="utf-8")
-    manifest["cases_sha256"] = sha(tmp_path / "cases.json")
+    manifest["cases_sha256"] = sha_text(tmp_path / "cases.json")
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="leakage"):
         load_dataset(tmp_path)
+
+
+def test_dataset_hash_is_portable_across_checkout_line_endings(tmp_path):
+    file = tmp_path / "cases.json"
+    file.write_bytes(b'{"a": 1}\r\n')
+    crlf = sha_text(file)
+    file.write_bytes(b'{"a": 1}\n')
+    assert sha_text(file) == crlf
 
 
 @pytest.mark.parametrize("failure", [TimeoutError, ConnectionError, ValueError])

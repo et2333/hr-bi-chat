@@ -4,11 +4,13 @@
   "data_version": "h2-v6",
   "as_of_date": "2026-09-28",
   "timezone": "Asia/Shanghai",
-  "cases_sha256": "c51eaaeeae8fb2c3f7a19e2e4b66a49450e39293002039156247eb92aea35eac",
+  "cases_sha256": "70e992921582b1f18438577ffdba9a13f7eafa9397e6b15807763cce01fc8913",
+  "hash_scheme": "sha256-lf-text-v1",
+  "legacy_cases_sha256": ["c51eaaeeae8fb2c3f7a19e2e4b66a49450e39293002039156247eb92aea35eac"],
   "migration_sha256": {
-    "V1__baseline.sql": "afb68bd770ebc1aaf27599ae3704a075f9831eab0d80b6c9b24b824446128510",
-    "V2__demo_seed.sql": "8b3f84f857ed815c58f96f1ed9164c685d1494646195e0850fb7f8c77dfc3b39",
-    "V3__role_function_permissions.sql": "812f5c3f864804e7ef2243613bcfcbfe8d8daf8db987cd9d5018bf7a39503d50",
+    "V1__baseline.sql": "bbcee78c03ac3d36804f8f384ad117236d46721ad354b5ad1bb39a8418a1cc44",
+    "V2__demo_seed.sql": "4d7d01c80b9e8fc11e9bc963b42d50a46eb66e105b0b0f6bd6d93fae365c1e40",
+    "V3__role_function_permissions.sql": "1c511519d5fe66f91a0996d6b16d04c1fd9abd589033537b9b548ca709cf5353",
     "V4__demo_reports.sql": "2dff36075ae87c3add4cb005b5b2f8fae05067607bd613a92d25d93c8f97736b",
     "V5__metric_card_drop_static_value.sql": "0e2f8a99409556d387affedfeb82e6a539a0a15f5fdd92e169e912e96146d907",
     "V6__headcount_as_of_version.sql": "31266e4a498befc4b2266b6c8c02c89cd9a8dc5081b3947ec05084710926b2f3"

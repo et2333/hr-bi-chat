@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from evals.api import JavaApi
-from evals.dataset import DATASET, load_dataset, sha
+from evals.dataset import DATASET, load_dataset, sha, sha_text
 from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
 
@@ -91,7 +91,7 @@ def main():
         parser.error("This runner uses demo identity headers; only local isolated servers are supported")
     manifest, all_cases = load_dataset()
     for name, digest in manifest["migration_sha256"].items():
-        if sha(MIGRATIONS / name) != digest:
+        if sha_text(MIGRATIONS / name) != digest:
             raise ValueError("Migration drift: " + name)
     server = json.loads(args.server_evidence.read_text(encoding="utf-8-sig"))
     for key, value in {"runtime": args.runtime, "as_of_date": manifest["as_of_date"],
@@ -105,7 +105,8 @@ def main():
     overlap = []
     for path in parent.glob("*/report.json"):
         old = json.loads(path.read_text(encoding="utf-8"))
-        if old["dataset"]["cases_sha256"] == manifest["cases_sha256"]:
+        equivalent_hashes = {manifest["cases_sha256"], *manifest.get("legacy_cases_sha256", [])}
+        if old["dataset"]["cases_sha256"] in equivalent_hashes:
             previous.append(path.parent.name)
             scored_ids = {r["case_id"] for r in old.get("results", []) if r.get("turns")}
             if scored_ids.intersection(c["case_id"] for c in cases):

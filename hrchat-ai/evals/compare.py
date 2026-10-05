@@ -18,7 +18,11 @@ def task_signature(row):
 def compare(originals, replay):
     old = {}
     for report in originals:
-        if report["dataset"]["cases_sha256"] != replay["dataset"]["cases_sha256"]:
+        old_hashes = {report["dataset"]["cases_sha256"],
+                      *report["dataset"].get("legacy_cases_sha256", [])}
+        new_hashes = {replay["dataset"]["cases_sha256"],
+                      *replay["dataset"].get("legacy_cases_sha256", [])}
+        if old_hashes.isdisjoint(new_hashes):
             raise ValueError("Different dataset versions cannot be a replay")
         if report["summary"]["status"] != "COMPLETED":
             raise ValueError("Original run is incomplete")
