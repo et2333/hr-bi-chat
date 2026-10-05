@@ -24,7 +24,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * 问句评测单测（S5）：问题集创建、回归运行确定性收敛、结果查询。
+ * 问句集可创建，但真实 runner 接入前不能生成模拟准确率。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -68,26 +68,15 @@ class EvaluationServiceTest {
     }
 
     @Test
-    void run_regressionDeterministic90Percent() {
+    void run_withoutRealRunnerRejectsWithoutWritingFakeResults() {
         String setId = service.createQuestionSet(new AdminViews.QuestionSetCreateRequest("集",
                 java.util.stream.IntStream.rangeClosed(1, 10)
                         .mapToObj(i -> new AdminViews.QuestionSetCreateRequest.QuestionSpec(
                                 "问句" + i, "simple", "{}"))
                         .toList()));
-        when(questionMapper.selectById(any())).thenAnswer(inv -> {
-            EvlEvalQuestion q = new EvlEvalQuestion();
-            q.setId((Long) inv.getArgument(0));
-            q.setQuestion("问句" + ((Long) inv.getArgument(0) - 100));
-            return q;
-        });
-
-        AdminViews.RunResultView result = service.run(setId);
-
-        assertEquals("COMPLETED", result.status());
-        assertEquals(10, result.total());
-        assertEquals(9, result.passed());
-        assertEquals(90.0, result.accuracy());
-        assertEquals(1, result.failedQuestions().size());
+        BizException error = assertThrows(BizException.class, () -> service.run(setId));
+        assertTrue(error.getMessage().contains("真实评测尚未接入"));
+        org.mockito.Mockito.verify(questionMapper, org.mockito.Mockito.never()).updateById(any());
     }
 
     @Test

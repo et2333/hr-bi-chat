@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 问句评测（接口文档 2.8，S5 admin-svc）。
  *
  * <p>问题集本地以内存注册表承载（无 evl 集表），问句本体落 evl_eval_question；
- * 回归运行以确定性规则模拟（本地无 LLM 运行时，S7 接入 LangGraph+MockLLM 后替换）。</p>
+ * 真实评测 runner 接入前仅管理示例问句，不提供无来源的准确率。</p>
  */
 @Slf4j
 @Service
@@ -40,7 +40,6 @@ public class EvaluationService {
 
     private final EvlEvalQuestionMapper questionMapper;
     private final Map<String, QuestionSetMeta> sets = new ConcurrentHashMap<>();
-    private final Map<String, AdminViews.RunResultView> runs = new ConcurrentHashMap<>();
     private final AtomicLong seq = new AtomicLong();
 
     /** 问题集列表。 */
@@ -87,45 +86,16 @@ public class EvaluationService {
         return setId;
     }
 
-    /** 运行回归（确定性模拟：约 92% 通过率，失败取序号为 9 的倍数的问句）。 */
+    /** 尚未接入真实 runner；拒绝将示例问句伪装成评测结果。 */
     public AdminViews.RunResultView run(String setId) {
-        QuestionSetMeta meta = sets.get(setId);
-        if (meta == null) {
+        if (!sets.containsKey(setId)) {
             throw new BizException(ErrorCode.PARAM_INVALID, "setId");
         }
-        int passed = 0;
-        List<String> failed = new ArrayList<>();
-        for (Long id : meta.questionIds()) {
-            EvlEvalQuestion q = questionMapper.selectById(id);
-            if (q == null) {
-                continue;
-            }
-            boolean pass = id % 10 != 9; // 确定性模拟：90% 通过
-            if (pass) {
-                passed++;
-            } else {
-                failed.add(q.getQuestion());
-            }
-            EvlEvalQuestion update = new EvlEvalQuestion();
-            update.setId(id);
-            update.setLastResult(pass ? 1 : 0);
-            questionMapper.updateById(update);
-        }
-        int total = meta.questionIds().size();
-        double accuracy = total == 0 ? 0.0 : Math.round((double) passed / total * 10000.0) / 100.0;
-        AdminViews.RunResultView result = new AdminViews.RunResultView(
-                "run" + String.format("%04d", seq.incrementAndGet()), "COMPLETED", accuracy,
-                Math.round((accuracy - 2.0) * 100.0) / 100.0, passed, total, failed);
-        runs.put(result.runId(), result);
-        return result;
+        throw new BizException(ErrorCode.PARAM_INVALID, "真实评测尚未接入；当前问题集仅供管理示例问句");
     }
 
     /** 查询回归结果。 */
     public AdminViews.RunResultView getRun(String runId) {
-        AdminViews.RunResultView result = runs.get(runId);
-        if (result == null) {
-            throw new BizException(ErrorCode.PARAM_INVALID, "runId");
-        }
-        return result;
+        throw new BizException(ErrorCode.PARAM_INVALID, "真实评测尚未接入；无可用运行结果");
     }
 }
