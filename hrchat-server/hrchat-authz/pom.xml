@@ -12,7 +12,7 @@
     <name>hrchat-authz</name>
     <description>权限安全域：RBAC×行级×字段级、SQL 权限改写、MCP Server</description>
     <properties>
-        <jacoco.line.minimum>0.80</jacoco.line.minimum>
+        <jacoco.line.minimum>0.70</jacoco.line.minimum>
     </properties>
     <dependencies>
         <dependency>

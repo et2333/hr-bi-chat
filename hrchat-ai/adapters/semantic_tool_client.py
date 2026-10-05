@@ -53,8 +53,9 @@ class SemanticToolClient(Protocol):
         window: Optional[Window],
         org_keys: list[str],
         context: dict[str, Any],
+        query_mode: str = "scalar",
     ) -> dict[str, Any]:
-        """返回 {current, compare, prev_period, rows, metric: MetricView}。"""
+        """返回 {current, compare, prev_period, rows, metric, query_mode, table?, chart?}。"""
         ...
 
 
@@ -88,6 +89,7 @@ class DemoSemanticToolClient:
         window: Optional[Window],
         org_keys: list[str],
         context: dict[str, Any],
+        query_mode: str = "scalar",
     ) -> dict[str, Any]:
         meta = METRICS[code]
         sql = f'SELECT ({meta.formula}) AS "{code}"'
@@ -97,11 +99,13 @@ class DemoSemanticToolClient:
             prev_result = self._executor.execute(sql, window, prev_window=True)
             compare = prev_result["value"]
             prev_period = window.prev().label
+        # demo 后端无真实 org/trend SQL，标量结果即可避免追问断链
         return {
             "current": current_result["value"],
             "compare": compare,
             "prev_period": prev_period,
             "rows": current_result["rows"],
+            "query_mode": query_mode or "scalar",
             "metric": MetricView(
                 code=meta.code,
                 name=meta.name,
@@ -163,6 +167,7 @@ class JavaMcpSemanticToolClient:
         window: Optional[Window],
         org_keys: list[str],
         context: dict[str, Any],
+        query_mode: str = "scalar",
     ) -> dict[str, Any]:
         catalog = await self.metric_catalog(context)
         view = catalog.get(code) or MetricView(code=code, name=code, definition="")
@@ -181,8 +186,15 @@ class JavaMcpSemanticToolClient:
                 "start": window.start.isoformat(),
                 "end": window.end.isoformat(),
             }
+            if query_mode == "trend":
+                time_range["grain"] = "MONTH"
 
-        current = await self._query_once(code, time_range, org_context, context)
+        mode = (query_mode or "scalar").strip().lower()
+        if mode in ("org", "detail", "trend"):
+            raw = await self._query_raw(code, time_range, org_context, context, mode)
+            return _present_from_mcp(code, view, raw, mode)
+
+        current = await self._query_scalar(code, time_range, org_context, context)
         compare, prev_period = None, None
         if window is not None:
             prev = window.prev()
@@ -192,7 +204,7 @@ class JavaMcpSemanticToolClient:
                 "end": prev.end.isoformat(),
             }
             try:
-                compare = await self._query_once(code, prev_range, org_context, context)
+                compare = await self._query_scalar(code, prev_range, org_context, context)
                 prev_period = prev.label
             except McpBusinessError:
                 compare, prev_period = None, None
@@ -202,23 +214,36 @@ class JavaMcpSemanticToolClient:
             "compare": compare,
             "prev_period": prev_period,
             "rows": 1 if current is not None else 0,
+            "query_mode": "scalar",
             "metric": view,
         }
 
-    async def _query_once(
+    async def _query_raw(
+        self,
+        code: str,
+        time_range: Optional[dict[str, Any]],
+        org_context: Optional[dict[str, Any]],
+        context: dict[str, Any],
+        query_mode: str,
+    ) -> dict[str, Any]:
+        args: dict[str, Any] = {"metrics": [code], "limit": 50, "query_mode": query_mode}
+        if query_mode == "org":
+            args["dimensions"] = ["org"]
+        if time_range:
+            args["time_range"] = time_range
+        if org_context:
+            args["org_context"] = org_context
+        return await self._mcp.tools_call("semantic_query", args, context) or {}
+
+    async def _query_scalar(
         self,
         code: str,
         time_range: Optional[dict[str, Any]],
         org_context: Optional[dict[str, Any]],
         context: dict[str, Any],
     ) -> Optional[float]:
-        args: dict[str, Any] = {"metrics": [code], "limit": 50}
-        if time_range:
-            args["time_range"] = time_range
-        if org_context:
-            args["org_context"] = org_context
-        result = await self._mcp.tools_call("semantic_query", args, context)
-        rows = (result or {}).get("rows") or []
+        raw = await self._query_raw(code, time_range, org_context, context, "scalar")
+        rows = raw.get("rows") or []
         if not rows:
             return None
         first = rows[0]
@@ -227,6 +252,80 @@ class JavaMcpSemanticToolClient:
         if isinstance(first, dict):
             return _to_float(first.get(code) or next(iter(first.values()), None))
         return None
+
+
+def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: str) -> dict[str, Any]:
+    columns_raw = raw.get("columns") or []
+    rows_raw = raw.get("rows") or []
+    col_keys: list[str] = []
+    columns: list[dict[str, Any]] = []
+    for c in columns_raw:
+        if isinstance(c, dict):
+            key = str(c.get("key") or "")
+            col_keys.append(key)
+            columns.append({
+                "key": key,
+                "name": str(c.get("name") or key),
+                "type": str(c.get("type") or "string"),
+                "masked": bool(c.get("masked")),
+            })
+    table_rows: list[dict[str, Any]] = []
+    for row in rows_raw:
+        if isinstance(row, list):
+            item = {col_keys[i]: row[i] for i in range(min(len(col_keys), len(row)))}
+            table_rows.append(item)
+        elif isinstance(row, dict):
+            table_rows.append(row)
+
+    chart = None
+    current = None
+    if mode == "org" and table_rows:
+        cats = [str(r.get("org_name") or "") for r in table_rows]
+        vals = [_to_float(r.get(code)) or 0 for r in table_rows]
+        current = vals[0] if vals else None
+        chart = {
+            "type": "BAR",
+            "recommended": True,
+            "config": {
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": cats},
+                "yAxis": {"type": "value"},
+                "series": [{"name": view.name, "type": "bar", "data": vals}],
+            },
+        }
+    elif mode == "trend" and table_rows:
+        periods = [str(r.get("period") or "") for r in table_rows]
+        vals = [_to_float(r.get(code)) or 0 for r in table_rows]
+        current = vals[-1] if vals else None
+        chart = {
+            "type": "LINE",
+            "recommended": True,
+            "config": {
+                "tooltip": {"trigger": "axis"},
+                "xAxis": {"type": "category", "data": periods},
+                "yAxis": {"type": "value"},
+                "series": [{"name": view.name, "type": "line", "data": vals, "smooth": True}],
+            },
+        }
+    elif mode == "detail":
+        current = float(len(table_rows)) if table_rows else None
+
+    return {
+        "current": current,
+        "compare": None,
+        "prev_period": None,
+        "rows": len(table_rows),
+        "query_mode": mode,
+        "table": {
+            "columns": columns,
+            "rows": table_rows,
+            "total": len(table_rows),
+            "page": 1,
+            "size": max(len(table_rows), 1),
+        },
+        "chart": chart,
+        "metric": view,
+    }
 
 
 def _to_float(value: Any) -> Optional[float]:

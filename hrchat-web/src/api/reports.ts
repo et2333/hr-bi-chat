@@ -75,6 +75,16 @@ export interface InsightView {
   points: Array<{ type: string; label: string }>
 }
 
+/** 指标卡实时数据（后端 ChartViews.MetricCardView） */
+export interface MetricCardView {
+  metricCode: string
+  metricName: string
+  title: string
+  value: number | null
+  unit: string
+  definition: string
+}
+
 // ---------------- 报表 CRUD ----------------
 
 export function listReports(scope: 'mine' | 'subscribed' | 'shared' | '' = 'mine', keyword = '', page = 1, size = 20) {
@@ -145,6 +155,10 @@ export function getChartData(reportId: number, componentId: number, dimValue?: s
   return get<ApiResponse<ChartDataView>>(`/reports/${reportId}/components/${componentId}/chart-data`, {
     params: dimValue ? { dimValue } : undefined,
   })
+}
+
+export function getMetricCardData(reportId: number, componentId: number) {
+  return get<ApiResponse<MetricCardView>>(`/reports/${reportId}/components/${componentId}/metric-card-data`)
 }
 
 /** 明细表数据（服务端筛选/排序/分页） */

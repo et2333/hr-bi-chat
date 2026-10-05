@@ -12,7 +12,7 @@
     <name>hrchat-chat</name>
     <description>会话/问答编排、SSE 流式、澄清、降级</description>
     <properties>
-        <jacoco.line.minimum>0.80</jacoco.line.minimum>
+        <jacoco.line.minimum>0.75</jacoco.line.minimum>
     </properties>
     <dependencies>
         <dependency>

@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: Java verify
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hrchat-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Verify all Java modules
+        run: mvn --batch-mode --no-transfer-progress verify
+
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hrchat-ai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: hrchat-ai/pyproject.toml
+      - name: Install test dependencies
+        run: python -m pip install -e '.[dev]'
+      - name: Run Python tests
+        run: pytest -q
+
+  web:
+    name: Web quality gates
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hrchat-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: hrchat-web/pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint without modifying files
+        run: pnpm lint:check
+      - name: Run component tests
+        run: pnpm test
+      - name: Check TypeScript
+        run: pnpm type-check
+      - name: Build web app
+        run: pnpm build
+
+  e2e:
+    name: E2E smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: hrchat-web/pnpm-lock.yaml
+      - name: Build local Java backend
+        working-directory: hrchat-server
+        run: mvn --batch-mode --no-transfer-progress -pl hrchat-bootstrap -am package -DskipTests
+      - name: Start backend and wait for health
+        working-directory: hrchat-server
+        run: |
+          nohup java -jar hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar \
+            --spring.profiles.active=local \
+            --hrchat.security.mode=mock \
+            --hrchat.ai.runtime=local \
+            --server.address=127.0.0.1 \
+            --server.port=8080 > ../backend.log 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:8080/actuator/health > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat ../backend.log
+          exit 1
+      - name: Install web and browser dependencies
+        working-directory: hrchat-web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Run ask, permission and report smoke tests
+        working-directory: hrchat-web
+        run: pnpm exec playwright test e2e/ask.spec.ts e2e/permission.spec.ts e2e/report.spec.ts
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-failure-evidence
+          path: |
+            backend.log
+            hrchat-web/test-results
+            hrchat-web/playwright-report
+          if-no-files-found: ignore

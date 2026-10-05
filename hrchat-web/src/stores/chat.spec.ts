@@ -9,10 +9,11 @@ describe('stores/chat', () => {
 
     const userId = store.pushUserTurn('研发中心在职人数')
     expect(userId).toBeTruthy()
-    const assistantId = store.pushAssistantTurn()
+    const assistantId = store.pushAssistantTurn('研发中心在职人数')
     expect(store.turns).toHaveLength(2)
     expect(store.turns[0].role).toBe('user')
     expect(store.turns[0].question).toBe('研发中心在职人数')
+    expect(store.turns[1].question).toBe('研发中心在职人数')
 
     store.updateTurn(assistantId, { state: 'streaming', streamingText: '正在解析' })
     expect(store.turns.find((t) => t.id === assistantId)?.streamingText).toBe('正在解析')

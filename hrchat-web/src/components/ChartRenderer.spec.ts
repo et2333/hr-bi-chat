@@ -83,6 +83,24 @@ describe('components/ChartRenderer', () => {
     expect((opt.series[0].label as { show: boolean }).show).toBe(true)
   })
 
+  it('PIE：无 pieData 时从 categories+series 派生（前端一键切换）', () => {
+    const wrapper = mount(ChartRenderer, {
+      props: {
+        chartType: 'PIE',
+        categories: ['研发一部', '研发二部'],
+        series: [{ name: '在职人数', data: [10, 8] }],
+        pieData: [],
+      },
+    })
+    expect(wrapper.find('.chart-empty').exists()).toBe(false)
+    const opt = optionOf(wrapper)
+    expect(opt.series[0].type).toBe('pie')
+    expect(opt.series[0].data).toEqual([
+      { name: '研发一部', value: 10 },
+      { name: '研发二部', value: 8 },
+    ])
+  })
+
   it('NUMBER_CARD：无 echarts，渲染居中数字与名称', () => {
     const wrapper = mount(ChartRenderer, {
       props: { chartType: 'NUMBER_CARD', series: [{ name: '在职人数', data: [128] }] },

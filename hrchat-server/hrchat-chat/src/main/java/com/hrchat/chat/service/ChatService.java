@@ -388,6 +388,11 @@ public class ChatService {
         answer.setChartType(result.payload() == null || result.payload().chart() == null
                 ? null : result.payload().chart().type());
         answer.setLatencyMs((int) result.elapsedMs());
+        // 列表/历史回放用的结论摘要（此前仅澄清续跑才写入，导致返回会话全是「无结论摘要」）
+        if (result.payload() != null && result.payload().conclusion() != null
+                && result.payload().conclusion().value() != null) {
+            answer.setSummaryText(String.valueOf(result.payload().conclusion().value()));
+        }
         answerMapper.insert(answer);
 
         if (result.isClarifying()) {

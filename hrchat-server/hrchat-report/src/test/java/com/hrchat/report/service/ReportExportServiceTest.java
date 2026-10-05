@@ -92,7 +92,7 @@ class ReportExportServiceTest {
                 new ReportDtos.ExportCreateRequest("csv", Map.of("row_count", 3)));
         assertThat(view.exportId()).startsWith("exp_");
         assertThat(view.format()).isEqualTo("CSV");
-        assertThat(view.status()).isEqualTo("PENDING");
+        assertThat(view.status()).isEqualTo("COMPLETED");
         assertThat(view.downloadUrl()).contains("/download");
         assertThat(view.rowCount()).isEqualTo(3);
         verify(auditCollector).record(any());
@@ -259,5 +259,33 @@ class ReportExportServiceTest {
         ReportViews.ExportTaskView view = service.create(ctx, 7L,
                 new ReportDtos.ExportCreateRequest("xlsx", null));
         assertThat(service.download(ctx, view.exportId()).content()).startsWith(new byte[]{'P', 'K'});
+    }
+
+    @Test
+    void create_xlsx_whenDataFetchFails_marksTaskFailedAndDoesNotReturnEmptySuccess() {
+        AtomicReference<RptExportTask> saved = new AtomicReference<>();
+        when(exportTaskMapper.insert(any())).thenAnswer(inv -> {
+            saved.set(inv.getArgument(0));
+            return 1;
+        });
+        when(chartService.chartDataForExport(anyLong(), any()))
+                .thenThrow(new IllegalStateException("query failed"));
+
+        assertThatThrownBy(() -> service.create(ctx, 7L,
+                new ReportDtos.ExportCreateRequest("xlsx", Map.of("row_count", 2))))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SYSTEM_BUSY);
+
+        assertThat(saved.get()).isNotNull();
+        assertThat(saved.get().getStatus()).isEqualTo("FAILED");
+        assertThat(saved.get().getFileBlob()).isNull();
+        verify(exportTaskMapper).updateById(saved.get());
+
+        when(exportTaskMapper.selectOne(any())).thenReturn(saved.get());
+        assertThatThrownBy(() -> service.download(ctx, saved.get().getExportId()))
+                .isInstanceOf(BizException.class)
+                .extracting(e -> ((BizException) e).getErrorCode())
+                .isEqualTo(ErrorCode.SYSTEM_BUSY);
     }
 }

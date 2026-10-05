@@ -372,7 +372,7 @@ function saveAsReport(t: ChatTurn) {
 }
 
 function resolveTurnQuestion(t: ChatTurn): string {
-  let q = (t.question ?? '').trim()
+  const q = (t.question ?? '').trim()
   if (q) return q
   const idx = chat.turns.findIndex((x) => x.id === t.id)
   for (let i = idx - 1; i >= 0; i--) {

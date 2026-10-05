@@ -39,7 +39,12 @@ public record AnswerPayload(
     public record Chart(String type, boolean recommended, Map<String, Object> config) {
     }
 
-    /** 口径溯源（BR-09 数据时效标注） */
-    public record Caliber(String metric, String definition, String timeRange, String dataUpdatedAt) {
+    /** 口径溯源（BR-09 数据时效标注）；metric 为展示名，metricCode 为语义层 code（存报表用）。 */
+    public record Caliber(String metric, String definition, String timeRange, String dataUpdatedAt,
+                          String metricCode) {
+        /** 兼容旧四参构造（无 code）。 */
+        public Caliber(String metric, String definition, String timeRange, String dataUpdatedAt) {
+            this(metric, definition, timeRange, dataUpdatedAt, null);
+        }
     }
 }

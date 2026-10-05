@@ -9,6 +9,7 @@
       <a-menu
         v-model:selectedKeys="selectedKeys"
         mode="horizontal"
+        theme="dark"
         class="nav-menu"
         @click="onNavClick"
       >
@@ -17,7 +18,7 @@
         <a-menu-item key="/profile"><user-outlined /> 个人中心</a-menu-item>
       </a-menu>
       <div class="user-area">
-        <a-button v-if="hasAdminEntry" class="admin-entry" size="small" @click="goAdmin">
+        <a-button v-if="hasAdminEntry" class="admin-entry" size="small" ghost @click="goAdmin">
           <template #icon><setting-outlined /></template>
           管理后台
         </a-button>
@@ -79,7 +80,11 @@ watch(() => auth.functionPerms, (perms) => {
   if (route.meta.permission && !hasPerm(perms, route.meta.permission)) void router.replace('/chat')
 })
 
-const selectedKeys = computed(() => [route.path])
+/** 报表详情/编辑器仍高亮「报表中心」 */
+const selectedKeys = computed(() => {
+  if (route.path.startsWith('/reports')) return ['/reports']
+  return [route.path]
+})
 
 /** 当前身份的服务端授权是否允许至少一个管理菜单。 */
 const hasAdminEntry = computed(() => ADMIN_MENUS.some(item => visible(item, auth.functionPerms)))

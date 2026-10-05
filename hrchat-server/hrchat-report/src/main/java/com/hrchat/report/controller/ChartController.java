@@ -5,6 +5,7 @@ import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.api.ApiResponse;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
 import com.hrchat.report.chart.ChartViews.InsightView;
+import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.chart.ChartViews.TableView;
 import com.hrchat.report.service.ReportChartService;
 import com.hrchat.report.service.ReportTableService;
@@ -38,6 +39,14 @@ public class ChartController {
                                                 @RequestParam(required = false) String dimValue,
                                                 @CurrentUser UserContext ctx) {
         return ApiResponse.ok(chartService.chartData(reportId, compId, dimValue, ctx));
+    }
+
+    @Operation(summary = "指标卡实时标量（与图表同源授权执行，非静态 def.value）")
+    @GetMapping("/{reportId}/components/{compId}/metric-card-data")
+    public ApiResponse<MetricCardView> metricCardData(@PathVariable Long reportId,
+                                                      @PathVariable Long compId,
+                                                      @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(chartService.metricCardData(reportId, compId, ctx));
     }
 
     @Operation(summary = "明细表数据（服务端筛选/排序/分页）")

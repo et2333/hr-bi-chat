@@ -84,7 +84,6 @@ public class ReportExportService {
         }
 
         String exportId = "exp_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-        byte[] content = buildFileContent(ctx, reportId, format, rows);
         OffsetDateTime expiresAt = OffsetDateTime.now(ZoneId.of("Asia/Shanghai")).plusMinutes(15);
         String url = "/api/v1/reports/" + reportId + "/exports/" + exportId + "/download";
         String fileName = "report-" + exportId + "." + format.toLowerCase();
@@ -95,19 +94,34 @@ public class ReportExportService {
         task.setTenantId(ctx.getTenantId());
         task.setOwnerEmpNo(ctx.getEmpNo());
         task.setFormat(format);
-        task.setStatus("COMPLETED");
+        task.setStatus("PENDING");
         task.setRowCount((int) Math.min(rows, MAX_ROWS));
-        task.setFileBlob(content);
         task.setExpiresAt(expiresAt.toLocalDateTime());
         task.setCreatedAt(LocalDateTime.now());
         exportTaskMapper.insert(task);
 
-        auditCollector.record(AuditEvent.of(AuditEvents.EXPORT, ctx.getEmpNo(), "report",
-                String.valueOf(reportId), toJson(Map.of("file_name", fileName, "rows", rows, "format", format)),
-                true));
-        log.info("报表导出完成: exportId={}, reportId={}, rows={}, format={}, user={}",
-                exportId, reportId, rows, format, ctx.getEmpNo());
-        return new ReportViews.ExportTaskView(exportId, format, "PENDING", rows, url, TS.format(expiresAt));
+        try {
+            byte[] content = buildFileContent(ctx, reportId, format, rows);
+            task.setFileBlob(content);
+            task.setStatus("COMPLETED");
+            exportTaskMapper.updateById(task);
+            auditCollector.record(AuditEvent.of(AuditEvents.EXPORT, ctx.getEmpNo(), "report",
+                    String.valueOf(reportId), toJson(Map.of("file_name", fileName, "rows", rows, "format", format)),
+                    true));
+            log.info("报表导出完成: exportId={}, reportId={}, rows={}, format={}, user={}",
+                    exportId, reportId, rows, format, ctx.getEmpNo());
+            return new ReportViews.ExportTaskView(exportId, format, "COMPLETED", rows, url, TS.format(expiresAt));
+        } catch (Exception e) {
+            task.setFileBlob(null);
+            task.setStatus("FAILED");
+            exportTaskMapper.updateById(task);
+            auditCollector.record(AuditEvent.of(AuditEvents.EXPORT, ctx.getEmpNo(), "report",
+                    String.valueOf(reportId), toJson(Map.of("file_name", fileName, "rows", rows,
+                            "format", format, "error_type", e.getClass().getSimpleName())), false));
+            log.warn("报表导出失败: exportId={}, reportId={}, format={}, user={}, err={}",
+                    exportId, reportId, format, ctx.getEmpNo(), e.getMessage());
+            throw new BizException(ErrorCode.SYSTEM_BUSY, "报表导出失败");
+        }
     }
 
     /** 查询导出任务（任务发起人）。 */
@@ -122,8 +136,12 @@ public class ReportExportService {
     /** 下载文件内容（任务发起人；按 format 返回字节）。 */
     public ExportDownload download(UserContext ctx, String exportId) {
         RptExportTask task = requireTask(ctx, exportId);
-        byte[] content = task.getFileBlob() == null ? new byte[0] : task.getFileBlob();
-        return new ExportDownload(task.getFormat() == null ? "CSV" : task.getFormat(), content);
+        if (!"COMPLETED".equals(task.getStatus())
+                || task.getFileBlob() == null
+                || task.getFileBlob().length == 0) {
+            throw new BizException(ErrorCode.SYSTEM_BUSY, "导出任务未完成");
+        }
+        return new ExportDownload(task.getFormat() == null ? "CSV" : task.getFormat(), task.getFileBlob());
     }
 
     private RptExportTask requireTask(UserContext ctx, String exportId) {
@@ -148,21 +166,12 @@ public class ReportExportService {
             return buildCsv(ctx, reportId, rows).getBytes(StandardCharsets.UTF_8);
         }
         String reportName = reportNameOf(reportId);
-        try {
-            ChartDataView view = chartService.chartDataForExport(reportId, ctx);
-            TableData table = toTable(view);
-            if ("XLSX".equals(format)) {
-                return excelExporter.export(reportName, ctx.getEmpNo(), table.headers(), table.rows());
-            }
-            return pdfExporter.export(reportName, ctx.getEmpNo(), table.headers(), table.rows());
-        } catch (Exception e) {
-            log.warn("导出取数失败，降级空表: reportId={}, format={}, err={}", reportId, format, e.getMessage());
-            TableData fallback = new TableData(List.of("提示"), List.of(List.of("暂无图表数据")));
-            if ("XLSX".equals(format)) {
-                return excelExporter.export(reportName, ctx.getEmpNo(), fallback.headers(), fallback.rows());
-            }
-            return pdfExporter.export(reportName, ctx.getEmpNo(), fallback.headers(), fallback.rows());
+        ChartDataView view = chartService.chartDataForExport(reportId, ctx);
+        TableData table = toTable(view);
+        if ("XLSX".equals(format)) {
+            return excelExporter.export(reportName, ctx.getEmpNo(), table.headers(), table.rows());
         }
+        return pdfExporter.export(reportName, ctx.getEmpNo(), table.headers(), table.rows());
     }
 
     /** 图表视图 → 二维表（BAR/LINE 取 categories+series，PIE 取 pieData）。 */

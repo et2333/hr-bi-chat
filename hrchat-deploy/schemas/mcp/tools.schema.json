@@ -71,6 +71,11 @@
             "include_children": { "type": "boolean" }
           }
         },
+        "query_mode": {
+          "type": "string",
+          "enum": ["scalar", "org", "detail", "trend"],
+          "description": "演示扩展：org=按组织分组；detail=明细行；trend=按月（需事实表）"
+        },
         "limit": { "type": "integer", "minimum": 1, "maximum": 10000 }
       }
     },

@@ -43,6 +43,16 @@ describe('components/AnswerCard', () => {
     expect(wrapper.emitted('feedback')?.[0]).toEqual(['UP'])
   })
 
+  it('完成态展示「存为报表」并 emit(saveReport)', async () => {
+    const wrapper = mount(AnswerCard, { props: { state: 'completed', payload: COMPLETED }, ...mountOpts })
+    expect(wrapper.text()).toContain('存为报表')
+    const saveBtn = wrapper.findAllComponents({ name: 'AButton' }).find((b) => b.text().includes('存为报表'))
+    expect(saveBtn).toBeTruthy()
+    expect(saveBtn!.props('disabled')).toBeFalsy()
+    await saveBtn!.trigger('click')
+    expect(wrapper.emitted('saveReport')).toBeTruthy()
+  })
+
   it('降级提示条（degraded=true）', () => {
     const degraded: AnswerPayload = { ...COMPLETED, degraded: true, degradedTip: 'AI 服务暂不可用，已使用模板直查' }
     const wrapper = mount(AnswerCard, { props: { state: 'completed', payload: degraded }, ...mountOpts })
