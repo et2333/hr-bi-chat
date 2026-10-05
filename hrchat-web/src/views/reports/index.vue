@@ -46,6 +46,14 @@
             </a-space>
           </template>
         </template>
+        <template #emptyText>
+          <a-empty description="暂无报表">
+            <a-space>
+              <a-button type="primary" @click="router.push('/reports/editor')">从模板创建</a-button>
+              <a-button @click="router.push('/chat')">去问数生成</a-button>
+            </a-space>
+          </a-empty>
+        </template>
       </a-table>
     </a-card>
 

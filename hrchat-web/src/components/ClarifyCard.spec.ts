@@ -59,4 +59,30 @@ describe('components/ClarifyCard', () => {
     const answers = emitted![0][0] as Array<{ questionId: string; optionIds: string[] }>
     expect(answers).toContainEqual({ questionId: 'q1', optionIds: ['RD'] })
   })
+
+  it('单题澄清选中后可提交（演示引导卡）', async () => {
+    const single: ClarifyQuestions = {
+      interruptType: 'CLARIFY',
+      askId: 'ask_cap',
+      questions: [
+        {
+          questionId: 'ask_cap-q1',
+          question: '您想查询哪个指标？',
+          multiple: false,
+          options: [
+            { optionId: 'turnover_rate', label: '离职率' },
+            { optionId: 'headcount', label: '在职人数' },
+          ],
+        },
+      ],
+    }
+    const wrapper = mount(ClarifyCard, { props: { clarify: single }, ...mountOpts })
+    expect(wrapper.find('button[type=button]').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('input[type="radio"]')[0].setValue()
+    expect(wrapper.find('button[type=button]').attributes('disabled')).toBeUndefined()
+    await wrapper.find('button[type=button]').trigger('click')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual([
+      { questionId: 'ask_cap-q1', optionIds: ['turnover_rate'] },
+    ])
+  })
 })

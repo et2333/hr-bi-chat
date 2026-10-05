@@ -92,7 +92,7 @@
         </a-space>
       </div>
 
-      <!-- 反馈 -->
+      <!-- 反馈 + 存为报表 -->
       <div class="feedback-bar">
         <a-space>
           <a-button size="small" shape="circle" @click="rate('UP')">
@@ -100,6 +100,16 @@
           </a-button>
           <a-button size="small" shape="circle" @click="rate('DOWN')">
             <DislikeOutlined :theme="rated === 'DOWN' ? 'filled' : 'outlined'" />
+          </a-button>
+          <a-button
+            size="small"
+            type="link"
+            data-testid="save-report"
+            :loading="savingReport"
+            :disabled="!saveReportEnabled"
+            @click="emit('saveReport')"
+          >
+            存为报表
           </a-button>
           <span v-if="payload.elapsedMs != null" class="elapsed">耗时 {{ payload.elapsedMs }}ms</span>
         </a-space>
@@ -131,6 +141,7 @@ const props = defineProps<{
   errorTitle?: string
   errorMessage?: string
   canViewSql?: boolean
+  savingReport?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -140,11 +151,14 @@ const emit = defineEmits<{
   loadMoreTable: []
   followup: [question: string]
   feedback: [rating: 'UP' | 'DOWN']
+  saveReport: []
   /** 打字机已打完当前正文（外层据此延后 ANSWER_DONE 的完成态切换） */
   typingDone: []
 }>()
 
 const rated = ref<'UP' | 'DOWN' | null>(null)
+/** 有 askId 才可存报表（Boolean prop 缺省会被编译为 false，故不用可选开关 prop） */
+const saveReportEnabled = computed(() => !!props.payload?.askId)
 const degradedTip = computed(() => (props.payload?.degraded ? props.payload.degradedTip ?? 'AI 服务暂不可用，已使用模板直查为您生成结果' : ''))
 
 /** 仅流式中的答案正文参与打字机；历史已完成消息直接展示 */

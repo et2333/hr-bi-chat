@@ -110,7 +110,10 @@ export interface Chart {
 }
 
 export interface Caliber {
+  /** 展示名（如「在职人数」） */
   metric: string
+  /** 语义层 code（如 headcount）；存报表 def.metric 必须用此字段 */
+  metricCode?: string
   definition: string
   timeRange?: string
   dataUpdatedAt: string
