@@ -1,0 +1,16 @@
+{
+  "runtime": "local",
+  "as_of_date": "2026-09-28",
+  "timezone": "Asia/Shanghai",
+  "data_version": "h2-v6",
+  "query_backend": "h2-in-memory-fresh-flyway",
+  "provider": null,
+  "model": null,
+  "llm_profile": "mock (NoopLlmChatClient)",
+  "tenant_active_configs": 0,
+  "memory": false,
+  "repair": false,
+  "retrieval": "existing deterministic synonym/hash fallback",
+  "launch_command": "java -jar hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar --server.address=127.0.0.1 --server.port=18085 --spring.profiles.active=local --hrchat.ai.runtime=local --hrchat.demo.now=2026-09-28",
+  "note": "Launch recipe only. Use a fresh process and verify startup reports zero ACTIVE tenant configurations. This file does not attest a running server."
+}

@@ -160,10 +160,17 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                                  String forcedMetricCode, ContextOverride contextOverride, long start) {
         List<SseEvent> events = new ArrayList<>();
         events.add(delta(SseEvents.MESSAGE_DELTA, Map.of("delta", "正在解析您的问句…", "phase", "PARSING")));
+        List<BizSynonym> synonyms = synonymMapper.selectList(null);
+        String refusal = LocalQueryScopeGuard.refusal(question, synonyms);
+        if (refusal != null) {
+            events.add(errorEvent(ErrorCode.QUERY_UNSUPPORTED.getCode(), refusal, false));
+            return new AgentResult(askId, events, null, List.of(), null,
+                    SseEvents.INTENT_QUERY, false, elapsed(start));
+        }
         events.add(toolStart("semantic_search", "正在检索指标语义…"));
 
         long searchStart = System.currentTimeMillis();
-        Resolved resolved = resolve(question, ctx);
+        Resolved resolved = resolve(question, ctx, synonyms);
         long searchMs = System.currentTimeMillis() - searchStart;
         events.add(toolEnd("semantic_search", searchMs, resolved.metricCodes().size()));
 
@@ -390,8 +397,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
     /**
      * 解析问句：同义词最长匹配（指标/组织）+ 多向量混合检索兜底。
      */
-    private Resolved resolve(String question, UserContext ctx) {
-        List<BizSynonym> synonyms = synonymMapper.selectList(null);
+    private Resolved resolve(String question, UserContext ctx, List<BizSynonym> synonyms) {
         // 最长匹配（指标/组织各自独立）：仅保留长度最大的命中同义词组，避免「离职率」同时命中「离职」，
         // 且避免指标词「在职人数」压过组织词「销售部」导致组织过滤失效
         int metricMaxLen = -1;

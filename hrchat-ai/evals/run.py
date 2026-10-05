@@ -1,0 +1,145 @@
+"""python -m evals.run --base-url http://127.0.0.1:18085 --split dev"""
+import argparse
+from collections import Counter
+from datetime import datetime, timezone
+import hashlib
+import json
+import platform
+import math
+import subprocess
+import sys
+import time
+from pathlib import Path
+from urllib.parse import urlparse
+
+from evals.api import JavaApi
+from evals.dataset import DATASET, load_dataset, sha, sha_text
+from evals.reference import ROOT, MIGRATIONS
+from evals.scoring import score
+
+
+def git(*args):
+    return subprocess.check_output(["git", *args], cwd=ROOT)
+
+
+def code_evidence():
+    status = git("status", "--porcelain")
+    diff = git("diff", "HEAD", "--binary")
+    untracked = git("ls-files", "--others", "--exclude-standard", "-z").decode().split("\0")
+    return {"commit": git("rev-parse", "HEAD").decode().strip(), "dirty": bool(status),
+            "patch_sha256": hashlib.sha256(diff).hexdigest(),
+            "untracked_sha256": {p: sha(ROOT / p) for p in untracked if p and (ROOT / p).is_file()}}
+
+
+def execute(cases, api, on_result=lambda results: None):
+    results = []
+    for case in cases:
+        row = {"case_id": case["case_id"], "scene": case["scene"], "split": case["split"], "turns": []}
+        try:
+            session = api.session(case["session_owner"])
+            for turn in case["turns"]:
+                actual = api.ask(session, case["identity_fixture"], turn)
+                row["turns"].append({"question": turn["question"], "expected": turn["expected"],
+                                     "actual": actual, **score(turn["expected"], actual)})
+        except (Exception, KeyboardInterrupt) as exc:
+            # Do not serialize raw exception messages (may include credentials or arbitrary payloads).
+            row["execution_error"] = type(exc).__name__
+            if isinstance(exc, KeyboardInterrupt):
+                results.append(row)
+                on_result(results)
+                break
+        row["passed"] = len(row["turns"]) == len(case["turns"]) and all(t["passed"] for t in row["turns"])
+        results.append(row)
+        on_result(results)
+    return results
+
+
+def summarize(cases, results):
+    completed = sum(len(r["turns"]) == len(c["turns"]) for c, r in zip(cases, results))
+    passed = sum(bool(r.get("passed")) for r in results)
+    full = completed == len(cases)
+    groups = {}
+    for c in cases:
+        bucket = groups.setdefault(c["scene"], {"passed": 0, "total": 0})
+        bucket["total"] += 1
+    for r in results:
+        groups[r["scene"]]["passed"] += int(bool(r.get("passed")))
+    latencies = sorted(t["actual"]["elapsed_ms"] for r in results for t in r["turns"]
+                       if "actual" in t and "elapsed_ms" in t["actual"])
+    return {"status": "COMPLETED" if full else "PARTIAL" if completed else "FAILED",
+            "passed": passed, "total": len(cases), "executed_cases": completed,
+            "planned_turns": sum(len(c["turns"]) for c in cases),
+            "executed_turns": sum(len(r["turns"]) for r in results),
+            "success_rate": passed / len(cases) if full and cases else None,
+            "by_scene": groups,
+            "turn_latency_ms": {"count": len(latencies), "includes_sql_evidence_fetch": True,
+                                "p50": latencies[math.ceil(len(latencies) * .5) - 1] if latencies else None,
+                                "p95": latencies[math.ceil(len(latencies) * .95) - 1] if latencies else None},
+            "failure_types": dict(Counter(e for r in results for t in r["turns"] for e in t["errors"]))}
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-url", default="http://127.0.0.1:18085")
+    parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
+    parser.add_argument("--runtime", choices=["local", "remote"], default="local")
+    parser.add_argument("--timeout", type=float, default=30)
+    parser.add_argument("--server-evidence", type=Path, required=True,
+                        help="JSON of the isolated server launch/configuration (no secrets)")
+    args = parser.parse_args()
+    if urlparse(args.base_url).hostname not in {"localhost", "127.0.0.1", "::1"}:
+        parser.error("This runner uses demo identity headers; only local isolated servers are supported")
+    manifest, all_cases = load_dataset()
+    for name, digest in manifest["migration_sha256"].items():
+        if sha_text(MIGRATIONS / name) != digest:
+            raise ValueError("Migration drift: " + name)
+    server = json.loads(args.server_evidence.read_text(encoding="utf-8-sig"))
+    for key, value in {"runtime": args.runtime, "as_of_date": manifest["as_of_date"],
+                       "data_version": manifest["data_version"], "timezone": manifest["timezone"]}.items():
+        if server.get(key) != value:
+            raise ValueError("Server evidence mismatch: " + key)
+    cases = [c for c in all_cases if args.split == "all" or c["split"] == args.split]
+    parent = ROOT / "docs/evaluation-runs"
+    parent.mkdir(parents=True, exist_ok=True)
+    previous = []
+    overlap = []
+    for path in parent.glob("*/report.json"):
+        old = json.loads(path.read_text(encoding="utf-8"))
+        equivalent_hashes = {manifest["cases_sha256"], *manifest.get("legacy_cases_sha256", [])}
+        if old["dataset"]["cases_sha256"] in equivalent_hashes:
+            previous.append(path.parent.name)
+            scored_ids = {r["case_id"] for r in old.get("results", []) if r.get("turns")}
+            if scored_ids.intersection(c["case_id"] for c in cases):
+                overlap.append(path.parent.name)
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    output = parent / run_id
+    output.mkdir()
+    report = {"run_id": run_id, "started_at": datetime.now(timezone.utc).isoformat(),
+              "dataset": manifest, "split": args.split, "scope": "java_user_api",
+              "server": server, "server_evidence_source": "operator launch record, not runtime attestation",
+              "runtime": args.runtime, "model_effectiveness": False, "usage": None,
+              "usage_reason": "not exposed by current runtime; no estimated tokens treated as actual",
+              "code": code_evidence(), "environment": {"python": platform.python_version(), "os": platform.platform()},
+              "command": sys.argv, "timeout_seconds": args.timeout, "retries": 0,
+              "prior_dataset_runs": previous,
+              "prior_overlapping_runs": overlap,
+              "measurement_kind": "regression" if overlap else "initial_baseline"}
+
+    def save(results):
+        report.update(summary=summarize(cases, results), results=results)
+        temp = output / "report.tmp"
+        temp.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temp.replace(output / "report.json")
+
+    save([])
+    started = time.perf_counter()
+    results = execute(cases, JavaApi(args.base_url, args.timeout), save)
+    report["elapsed_seconds"] = time.perf_counter() - started
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    save(results)
+    print(json.dumps({"report": str(output / "report.json"), **report["summary"]}, ensure_ascii=False))
+    return 0 if report["summary"]["status"] == "COMPLETED" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

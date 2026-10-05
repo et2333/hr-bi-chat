@@ -50,6 +50,7 @@ public enum ErrorCode {
     QUERY_ASYNC_TIMEOUT("HRA-4003", 200, "查询超时，已转后台执行，完成后将通知您"),
     AI_DEGRADED("HRA-4004", 200, "智能解析暂不可用，已返回预设查询"),
     BUDGET_EXCEEDED("HRA-4005", 200, "分析预算已达上限，已返回基础对比结果"),
+    QUERY_UNSUPPORTED("HRA-4006", 200, "当前查询条件无法执行：{0}"),
 
     // ---------------- 数据错误 HRD-5xxx ----------------
     QUERY_TIMEOUT("HRD-5001", 200, "数据查询超时，请缩小时间范围后重试"),

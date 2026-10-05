@@ -47,3 +47,14 @@ htmlcov/
 **/push-out/
 *.mv.db
 *.trace.db
+
+# Local/generated benchmark evidence (may contain machine paths or mock datasets)
+/docs/resume-claims.local.md
+/docs/evaluation-baseline.md
+/docs/schema-linking-benchmark.md
+/docs/performance-baseline.md
+/docs/runtime-parity.md
+/docs/evaluation-runs/
+
+# Local implementation notes for the 1005 interview-preparation work
+/docs/development-plans/1005*.md

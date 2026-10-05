@@ -24,6 +24,8 @@ import com.hrchat.semantic.service.SemanticMetaService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -127,6 +129,34 @@ class LocalAgentRuntimeImplTest {
     }
 
     // ---------------- 用例 1：CHITCHAT ----------------
+
+    @ParameterizedTest
+    @ValueSource(strings = {"产品部在职人数", "市场部在职人数", "运营中心在职人数",
+            "研发中心和市场部在职人数", "研发中心和销售部在职人数",
+            "研发中心按性别统计在职人数", "研发中心女员工在职人数", "研发中心按职级统计在职人数"})
+    void unsupportedScope_stopsBeforeRetrievalModelAndQuery(String question) {
+        stubSynonyms();
+        AgentResult result = runtime.ask(new AskRequest(question, "STREAM", null), hr01);
+        assertNull(result.payload());
+        assertNull(result.sql());
+        assertFalse(result.events().stream().anyMatch(e -> SseEvents.ANSWER_DONE.equals(e.event())));
+        SseEvent error = result.events().stream().filter(e -> SseEvents.ERROR.equals(e.event())).findFirst().orElseThrow();
+        assertEquals("HRA-4006", error.payload().get("code"));
+        assertEquals(false, error.payload().get("recoverable"));
+        assertTrue(String.valueOf(error.payload().get("message")).contains("未"));
+        org.mockito.Mockito.verifyNoInteractions(hybridRetriever, semanticMetaService, queryExecService);
+    }
+
+    @Test
+    void scopeGuard_usesCatalogAndPreservesGenericAllScope() {
+        assertNull(LocalQueryScopeGuard.refusal("查看全部在职人数", List.of()));
+        assertNull(LocalQueryScopeGuard.refusal("岗位研究中心在职人数",
+                List.of(syn("岗位研究中心", 2, 99L))));
+        assertNull(LocalQueryScopeGuard.refusal("研发中心在职人数按部门对比",
+                List.of(syn("研发中心", 2, 2L))));
+        assertTrue(LocalQueryScopeGuard.refusal("市场部在职人数",
+                List.of(syn("研发中心", 2, 2L))).contains("组织无法识别"));
+    }
 
     @Test
     void chitchat_returnsTextAnswerWithoutQuery() {
