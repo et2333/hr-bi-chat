@@ -45,4 +45,9 @@ public final class ChartViews {
     /** 洞察要点（value=均值 / trend=趋势 / extreme=极值）。 */
     public record InsightPoint(String type, String label) {
     }
+
+    /** 指标卡实时数据（与图表同源权限改写 + 只读执行，非静态 def.value）。 */
+    public record MetricCardView(String metricCode, String metricName, String title,
+                                 Number value, String unit, String definition) {
+    }
 }
