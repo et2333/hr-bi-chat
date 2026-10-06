@@ -13,9 +13,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from evals.api import JavaApi
-from evals.dataset import DATASET, load_dataset, sha, sha_text
+from evals.dataset import DATASET, load_dataset, select_cases, sha, sha_text
 from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
+from evals.stage_policy import score_stage, stage_report
+from adapters.model_usage import summarize_calls
 
 
 def git(*args):
@@ -40,7 +42,8 @@ def execute(cases, api, on_result=lambda results: None):
             for turn in case["turns"]:
                 actual = api.ask(session, case["identity_fixture"], turn)
                 row["turns"].append({"question": turn["question"], "expected": turn["expected"],
-                                     "actual": actual, **score(turn["expected"], actual)})
+                                     "actual": actual, **score(turn["expected"], actual),
+                                     "stage_score": score_stage(case, turn, actual)})
         except (Exception, KeyboardInterrupt) as exc:
             # Do not serialize raw exception messages (may include credentials or arbitrary payloads).
             row["execution_error"] = type(exc).__name__
@@ -82,7 +85,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:18085")
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
+    parser.add_argument("--case-id", action="append", help="Repeat to select complete cases for a focused run")
     parser.add_argument("--runtime", choices=["local", "remote"], default="local")
+    parser.add_argument("--model-kind", choices=["real", "fixture", "unknown"], default="unknown")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--server-evidence", type=Path, required=True,
                         help="JSON of the isolated server launch/configuration (no secrets)")
@@ -98,7 +103,10 @@ def main():
                        "data_version": manifest["data_version"], "timezone": manifest["timezone"]}.items():
         if server.get(key) != value:
             raise ValueError("Server evidence mismatch: " + key)
-    cases = [c for c in all_cases if args.split == "all" or c["split"] == args.split]
+    try:
+        cases = select_cases(all_cases, args.split, args.case_id)
+    except ValueError as exc:
+        parser.error(str(exc))
     parent = ROOT / "docs/evaluation-runs"
     parent.mkdir(parents=True, exist_ok=True)
     previous = []
@@ -116,6 +124,8 @@ def main():
     output.mkdir()
     report = {"run_id": run_id, "started_at": datetime.now(timezone.utc).isoformat(),
               "dataset": manifest, "split": args.split, "scope": "java_user_api",
+              "selection": "subset" if args.case_id else "full_split",
+              "selected_case_ids": [c["case_id"] for c in cases],
               "server": server, "server_evidence_source": "operator launch record, not runtime attestation",
               "runtime": args.runtime, "model_effectiveness": False, "usage": None,
               "usage_reason": "not exposed by current runtime; no estimated tokens treated as actual",
@@ -127,6 +137,25 @@ def main():
 
     def save(results):
         report.update(summary=summarize(cases, results), results=results)
+        report["stage_evaluation"] = stage_report(cases, results, summarize)
+        turns = [t for r in results for t in r["turns"]]
+        evidence = [(t.get("actual") or {}).get("evidence") or {} for t in turns]
+        calls = [c for e in evidence for c in e.get("model_calls", [])]
+        for call in calls:
+            call["run_id"] = run_id
+        report["cost_summary"] = summarize_calls(calls, report["summary"]["passed"])
+        report["evidence_coverage"] = {"observed_turns": len(turns), "planned_turns": report["summary"]["planned_turns"],
+                                       "turns_with_evidence": sum(bool(e) for e in evidence)}
+        if not evidence or not all(evidence) or report["summary"]["status"] != "COMPLETED":
+            report["cost_summary"]["cost_per_success"] = None
+        report["model_kind"] = args.model_kind
+        report["model_effectiveness"] = args.model_kind == "real" and bool(calls) and all(c.get("provider") != "fixture" for c in calls)
+        report["effective_runtimes"] = [dict(t) for t in {
+            tuple(sorted(e.get("runtime_config", {}).items())) for e in evidence if e.get("runtime_config")}]
+        report["catalog_reason_counts"] = dict(Counter(e.get("reason") for e in evidence if e.get("reason")))
+        if calls:
+            report["usage"] = report["cost_summary"]["actual_usage_known_sum"]
+            report["usage_reason"] = "per-attempt API usage; absent usage remains unknown, estimates are not a provider bill"
         temp = output / "report.tmp"
         temp.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         temp.replace(output / "report.json")
