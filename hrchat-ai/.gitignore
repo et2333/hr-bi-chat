@@ -17,6 +17,7 @@ htmlcov/
 # 环境变量
 .env
 .env.*
+!.env.example
 
 # IDE / 系统
 .idea/
