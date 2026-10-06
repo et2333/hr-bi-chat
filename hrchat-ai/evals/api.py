@@ -55,5 +55,12 @@ class JavaApi:
             actual["sql_http_status"] = code
             if code == 200:
                 actual["sql"] = json.loads(view)["data"].get("sql")
+        task_ids = [e.get("payload", {}).get("askId") or e.get("payload", {}).get("ask_id") for e in events]
+        ask_id = next((a for a in task_ids if a), None)
+        if ask_id:
+            evidence_status, raw_evidence = self.request(f"/api/v1/chat/asks/{ask_id}/evidence", identity)
+            actual["evidence_http_status"] = evidence_status
+            if evidence_status == 200:
+                actual["evidence"] = json.loads(raw_evidence)["data"]
         actual["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 3)
         return actual

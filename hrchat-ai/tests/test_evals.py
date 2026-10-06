@@ -5,7 +5,7 @@ import pytest
 
 from evals.api import JavaApi
 from evals.compare import compare
-from evals.dataset import load_dataset, sha_text
+from evals.dataset import load_dataset, select_cases, sha_text
 from evals.reference import count, seed_rows
 from evals.run import execute, summarize
 from evals.scoring import score
@@ -19,6 +19,22 @@ def example():
                          "conclusion": {"unit": "人", "value": expected["value"]},
                          "table": {"rows": [{"headcount": expected["value"]}]}}}
     return copy.deepcopy(expected), actual
+
+
+def test_focused_selection_keeps_whole_multi_turn_case():
+    _, cases = load_dataset()
+    target = next(c for c in cases if c["split"] == "dev" and len(c["turns"]) > 1)
+    selected = select_cases(cases, "dev", [target["case_id"], target["case_id"]])
+    assert selected == [target]
+    assert len(selected[0]["turns"]) > 1
+
+
+def test_focused_selection_rejects_wrong_split_and_unknown_id():
+    _, cases = load_dataset()
+    frozen = next(c["case_id"] for c in cases if c["split"] == "frozen")
+    for case_id in (frozen, "typo"):
+        with pytest.raises(ValueError, match="outside selected split"):
+            select_cases(cases, "dev", [case_id])
 
 
 def test_reference_manual_anchors():

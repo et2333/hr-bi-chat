@@ -5,6 +5,17 @@ from pathlib import Path
 DATASET = Path(__file__).parent / "datasets/hr-query-v1"
 
 
+def select_cases(cases, split, case_ids=None):
+    selected = [c for c in cases if split == "all" or c["split"] == split]
+    if case_ids:
+        requested = set(case_ids)
+        missing = requested - {c["case_id"] for c in selected}
+        if missing:
+            raise ValueError("Case IDs outside selected split: " + ", ".join(sorted(missing)))
+        selected = [c for c in selected if c["case_id"] in requested]
+    return selected
+
+
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 

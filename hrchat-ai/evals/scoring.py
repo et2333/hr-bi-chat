@@ -1,6 +1,7 @@
 """Strict task scoring; missing evidence is a failure, never a guessed pass."""
 import math
 import re
+from datetime import date, timedelta
 
 
 def score(expected, actual):
@@ -31,7 +32,26 @@ def score(expected, actual):
         # Verify explicit scope even if two departments happen to have equal counts.
         scopes = [set(map(int, re.findall(r"\d+", s))) for s in
                   re.findall(r"\borg_key\s+in\s*\(([^)]+)\)", sql)]
-        if not scopes or set.intersection(*scopes) != set(plan["org_keys"]):
+        evidence = actual.get("evidence") or {}
+        execution = evidence.get("execution")
+        if execution:
+            actual_plan = execution.get("query_plan") or {}
+            if set(execution.get("effective_org_ids", [])) != set(plan["org_keys"]):
+                errors.append("org_scope_evidence")
+            if actual_plan.get("metric_codes") != [plan["metric_code"]]:
+                errors.append("executed_metric")
+            if actual_plan.get("query_mode") != plan["query_mode"]:
+                errors.append("executed_mode")
+            # Card labels alone cannot prove that Java queried the right dates.
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}", plan["time_label"]):
+                start, inclusive_end = plan["time_label"].split("/")
+                window = actual_plan.get("time_range") or {}
+                if (window.get("start"), window.get("end")) != (start, (
+                        date.fromisoformat(inclusive_end) + timedelta(days=1)).isoformat()):
+                    errors.append("executed_time_range")
+            if evidence.get("query_plan") != actual_plan or not execution.get("metric_version"):
+                errors.append("execution_plan_mismatch")
+        elif not scopes or set.intersection(*scopes) != set(plan["org_keys"]):
             errors.append("org_scope_evidence")
         rows = (payload.get("table") or {}).get("rows", [])
         if plan["query_mode"] == "scalar":

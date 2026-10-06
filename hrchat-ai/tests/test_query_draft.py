@@ -163,3 +163,17 @@ def test_complete_or_unfamiliar_wording_still_reaches_model(question):
 
 def test_explicitly_selected_metric_makes_followup_actionable_without_memory():
     assert not is_slot_only_question("那本月呢？", CATALOG, {"metrics": ["headcount"]})
+
+
+@pytest.mark.parametrize("question,reason", [
+    ("研发中心主动离职人数", "metric_unavailable"),
+    ("研发中心预测下月离职人数", "unsupported_capability"),
+    ("研发中心为什么离职人数增加了", "unsupported_capability"),
+    ("研发中心按性别统计在职人数", "unsupported_capability"),
+])
+async def test_known_unsupported_request_is_not_misrepresented_as_missing_period(question, reason):
+    tools, adapter = Tools(), DraftPlanner(draft(metric_codes=["leave_count"]).model_dump())
+    result = await run_ask_flow(question=question, session_id="s", ask_id="ask_unsupported", tools=tools, adapter=adapter)
+    assert result["error"]["code"] == "HRA-4006" and not result["clarify_questions"]
+    assert result["evidence"]["reason"] == reason
+    assert [c[0] for c in tools.calls] == ["catalog"] and adapter.prompts == []
