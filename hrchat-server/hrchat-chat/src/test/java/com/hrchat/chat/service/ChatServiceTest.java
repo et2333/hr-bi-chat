@@ -269,6 +269,8 @@ class ChatServiceTest {
         askStore.put(new ChatAskStore.AskRecord("ask_other", 1L, 2L, "t01", 1L, "q", SseEvents.INTENT_QUERY,
                 SseEvents.ASK_COMPLETED, "SELECT 1", null, "", null));
         assertThrows(BizException.class, () -> chatService.getSql(hr01, "ask_other"));
+        askStore.putEvidence("ask_other", Map.of("query_plan", "private"));
+        assertThrows(BizException.class, () -> chatService.getEvidence(hr01, "ask_other"));
     }
 
     // ---------------- 用例 6：反馈校验（差评必须带原因） ----------------
@@ -300,6 +302,7 @@ class ChatServiceTest {
         org.mockito.Mockito.doThrow(new BizException(ErrorCode.FUNC_FORBIDDEN))
                 .when(authzService).checkFunc(any(), any());
         assertThrows(BizException.class, () -> chatService.getSql(hr01, "ask_v"));
+        assertThrows(BizException.class, () -> chatService.getEvidence(hr01, "ask_v"));
     }
 
     // ---------------- 用例 8：会话列表/重命名/删除 ----------------

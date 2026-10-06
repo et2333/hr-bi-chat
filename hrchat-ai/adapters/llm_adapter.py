@@ -7,12 +7,24 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+import time
+import uuid
+
+from adapters.model_usage import ModelResult
 
 
 class ModelAdapter(ABC):
     """LLM/模型适配器抽象基类。"""
 
     name: str = "adapter"
+    supports_query_plan: bool = False
+
+    async def complete(self, prompt: str) -> ModelResult:
+        """Backward-compatible adapters have unknown API usage, never invented tokens."""
+        started = time.perf_counter()
+        text = await self.generate(prompt)
+        return ModelResult(text, self.name, getattr(self, "model", self.name),
+                           "llm_" + uuid.uuid4().hex, int((time.perf_counter() - started) * 1000))
 
     @abstractmethod
     async def generate(self, prompt: str) -> str:

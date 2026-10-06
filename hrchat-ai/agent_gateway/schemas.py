@@ -78,6 +78,7 @@ class TerminalResponse(BaseModel):
     answer_payload: Optional[dict[str, Any]] = None
     questions: list[dict[str, Any]] = Field(default_factory=list)
     error: Optional[dict[str, Any]] = None
+    evidence: Optional[dict[str, Any]] = None
 
 
 class AskRequest(BaseModel):

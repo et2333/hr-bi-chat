@@ -213,7 +213,7 @@ class RemoteAgentRuntimeClientTest {
         assertEquals("ask_snake", result.askId());
         assertEquals("ask_snake", result.payload().askId());
         assertEquals("ask_snake", result.events().get(0).payload().get("askId"));
-        assertEquals("SELECT COUNT(1) FROM dim_employee", result.sql());
+        assertNull(result.sql()); // A business definition is not evidence of executed SQL.
     }
 
     @Test

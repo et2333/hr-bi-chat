@@ -167,6 +167,13 @@ public class ChatController {
         return ApiResponse.ok(chatService.getSql(ctx, askId));
     }
 
+    @Operation(summary = "查看规划与执行证据（权限点 chat:view_sql）")
+    @GetMapping("/asks/{askId}/evidence")
+    public ApiResponse<java.util.Map<String, Object>> getEvidence(@PathVariable String askId,
+                                                                 @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(chatService.getEvidence(ctx, askId));
+    }
+
     @Operation(summary = "表格分页拉取")
     @GetMapping("/asks/{askId}/table")
     public ApiResponse<AnswerPayload.TableData> getTable(@PathVariable String askId,

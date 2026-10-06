@@ -4,6 +4,7 @@ import com.hrchat.api.chat.AnswerPayload;
 import com.hrchat.api.sse.SseEvent;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 问数编排结果（由 AgentRuntime 产出，会话层负责 seq/ts 帧化与持久化）。
@@ -25,7 +26,18 @@ public record AgentResult(
         String sql,
         String intent,
         boolean degraded,
-        long elapsedMs) {
+        long elapsedMs,
+        Map<String, Object> evidence) {
+
+    public AgentResult(String askId, List<SseEvent> events, AnswerPayload payload,
+                       List<ClarifyQuestion> clarifyQuestions, String sql, String intent,
+                       boolean degraded, long elapsedMs) {
+        this(askId, events, payload, clarifyQuestions, sql, intent, degraded, elapsedMs, Map.of());
+    }
+
+    public AgentResult withEvidence(Map<String, Object> evidence) {
+        return new AgentResult(askId, events, payload, clarifyQuestions, sql, intent, degraded, elapsedMs, evidence);
+    }
 
     /** 是否进入澄清态。 */
     public boolean isClarifying() {

@@ -53,7 +53,8 @@ def test_terminal_response_has_fixed_envelope():
         status="FAILED",
         error={"code": "HRC-2003", "message": "无权限", "recoverable": False},
     ).model_dump()
-    assert set(response) == {"ask_id", "status", "answer_payload", "questions", "error"}
+    assert set(response) == {"ask_id", "status", "answer_payload", "questions", "error", "evidence"}
+    assert response["evidence"] is None
     assert response["error"]["code"] == "HRC-2003"
 
 
