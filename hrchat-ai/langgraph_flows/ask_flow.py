@@ -564,6 +564,7 @@ async def run_ask_flow(
     tool_context_token: Optional[str] = None,
     invocation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
+    runtime_evidence: Optional[dict[str, Any]] = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """执行一次问数（SYNC/STREAM 共用）。
@@ -576,6 +577,14 @@ async def run_ask_flow(
         tools = DemoSemanticToolClient(executor)
     if tools is None:
         raise TypeError("run_ask_flow 需要 tools=SemanticToolClient")
+
+    if adapter.supports_query_plan:
+        from langgraph_flows.planned_flow import run_planned_flow
+        return await run_planned_flow(question=question, session_id=session_id, ask_id=ask_id,
+            adapter=adapter, tools=tools, context_override=context_override,
+            forced_metric_code=forced_metric_code, tool_context_token=tool_context_token,
+            invocation_id=invocation_id, trace_id=trace_id, runtime_evidence=runtime_evidence,
+            use_langgraph=LANGGRAPH_AVAILABLE if use_langgraph is None else use_langgraph)
 
     start_ts = time.perf_counter()
     state = new_state(
