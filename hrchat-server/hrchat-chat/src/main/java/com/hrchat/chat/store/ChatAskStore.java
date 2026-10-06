@@ -5,6 +5,7 @@ import com.hrchat.api.chat.AnswerPayload;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -17,6 +18,15 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChatAskStore {
 
     private final ConcurrentHashMap<String, AskRecord> records = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Map<String, Object>> evidence = new ConcurrentHashMap<>();
+
+    public void putEvidence(String askId, Map<String, Object> value) {
+        evidence.put(askId, value == null ? Map.of() : value);
+    }
+
+    public Map<String, Object> evidence(String askId) {
+        return evidence.getOrDefault(askId, Map.of());
+    }
 
     /** 问句任务记录。 */
     public record AskRecord(

@@ -18,6 +18,9 @@ class FakeMcp:
 
 
 class ClientWithCatalog(JavaMcpSemanticToolClient):
+    async def planning_catalog(self, context, requested_org_id=None):
+        return {"organizations": [{"org_id": "2", "name": "研发中心", "aliases": ["研发"]}]}
+
     async def metric_catalog(self, context):
         return {"leave_count": MetricView("leave_count", "离职人数", "COUNT(*)")}
 

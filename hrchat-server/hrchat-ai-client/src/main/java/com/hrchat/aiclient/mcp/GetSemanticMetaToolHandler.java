@@ -15,6 +15,11 @@ import com.hrchat.semantic.dto.SynonymItem;
 import com.hrchat.semantic.service.SemanticMetaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.hrchat.audit.service.AuditCollector;
+import com.hrchat.audit.model.AuditEvent;
+import com.hrchat.audit.model.AuditEvents;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +35,9 @@ public class GetSemanticMetaToolHandler implements McpToolHandler {
 
     private final SemanticMetaService semanticMetaService;
     private final AuthzService authzService;
+    private final PlanningCatalogService planningCatalogService;
+    @Autowired(required = false)
+    private AuditCollector auditCollector;
 
     @Override
     public String toolName() {
@@ -43,11 +51,35 @@ public class GetSemanticMetaToolHandler implements McpToolHandler {
         if (type == null || type.isBlank()) {
             type = "METRIC";
         }
+        if ("PLANNING".equalsIgnoreCase(type.trim())) {
+            if (arguments.get("requested_org_id") != null) {
+                planningCatalogService.checkRequestedOrg(user, String.valueOf(arguments.get("requested_org_id")));
+            }
+            return planningCatalogService.metrics(user);
+        }
+        if ("RESOLVE_ORG".equalsIgnoreCase(type.trim())) {
+            var resolution = planningCatalogService.resolveOrganization(user, stringVal(arguments.get("name")));
+            if (auditCollector != null) {
+                try {
+                    Map<String, Object> detail = new LinkedHashMap<>();
+                    detail.put("tool", "resolve_organization");
+                    detail.put("resolution", resolution.auditReason());
+                    detail.put("invocation_id", context.get("invocation_id"));
+                    detail.put("tool_call_id", context.get("tool_call_id"));
+                    auditCollector.record(AuditEvent.of(AuditEvents.MCP_TOOL_CALL, user.getEmpNo(),
+                            "mcp_tool", stringVal(context.get("tool_call_id")),
+                            new ObjectMapper().writeValueAsString(detail), false));
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    throw new BizException(ErrorCode.SYSTEM_BUSY);
+                }
+            }
+            return resolution.publicResult();
+        }
         List<String> names = arguments != null && arguments.get("names") instanceof List<?> list
                 ? list.stream().map(String::valueOf).toList() : List.of();
 
         List<Map<String, Object>> objects = switch (type.trim().toUpperCase()) {
-            case "METRIC" -> loadMetrics(names);
+            case "METRIC" -> loadMetrics(user, names);
             case "DIMENSION" -> loadDimensions(names);
             case "SYNONYM" -> loadSynonyms(names);
             default -> throw new BizException(ErrorCode.PARAM_INVALID, "type");
@@ -55,17 +87,21 @@ public class GetSemanticMetaToolHandler implements McpToolHandler {
         return Map.of("objects", objects);
     }
 
-    private List<Map<String, Object>> loadMetrics(List<String> names) {
+    private List<Map<String, Object>> loadMetrics(UserContext user, List<String> names) {
         List<Map<String, Object>> out = new ArrayList<>();
         if (names == null || names.isEmpty()) {
-            PageResult<MetricSummary> page = semanticMetaService.listMetrics(null, 1, null, 1, 200);
-            for (MetricSummary m : page.getRecords()) {
-                out.add(metricView(semanticMetaService.getMetricByCode(m.code())));
+            List<MetricSummary> all = PlanningCatalogService.allPages(
+                    p -> semanticMetaService.listMetrics(null, 1, null, p, 200));
+            for (MetricSummary m : all) {
+                MetricDetail detail = semanticMetaService.getMetricByCode(m.code());
+                if (PlanningCapabilities.visible(user, detail)) out.add(metricView(detail));
             }
             return out;
         }
         for (String name : names) {
-            out.add(metricView(semanticMetaService.getMetricByCode(name)));
+            MetricDetail detail = semanticMetaService.getMetricByCode(name);
+            PlanningCapabilities.requireVisible(user, detail);
+            out.add(metricView(detail));
         }
         return out;
     }
@@ -111,6 +147,7 @@ public class GetSemanticMetaToolHandler implements McpToolHandler {
         row.put("domain", detail.domain());
         row.put("available_dimensions", detail.availableDimensions());
         row.put("version", detail.effectiveVersion());
+        row.putAll(PlanningCapabilities.describe(detail));
         return row;
     }
 

@@ -150,6 +150,14 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
     /** 解析固定终态信封：COMPLETED / CLARIFYING / FAILED。 */
     @SuppressWarnings("unchecked")
     private AgentResult parse(Map<?, ?> json, long elapsedMs) {
+        AgentResult result = parseTerminal(json, elapsedMs);
+        Map<String, Object> evidence = json != null && json.get("evidence") instanceof Map<?, ?> m
+                ? (Map<String, Object>) m : Map.of();
+        return result.withEvidence(evidence);
+    }
+
+    @SuppressWarnings("unchecked")
+    private AgentResult parseTerminal(Map<?, ?> json, long elapsedMs) {
         String status = json == null ? null : stringValue(json.get("status"));
         if (SseEvents.ASK_COMPLETED.equals(status) && json.get("answer_payload") != null) {
             Object answerPayload = json.get("answer_payload");
@@ -170,7 +178,7 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
             payloadMap.put("askId", askId);
             return new AgentResult(askId,
                     List.of(new SseEvent(SseEvents.ANSWER_DONE, payloadMap)),
-                    payload, List.of(), sqlFromCaliber(payload), SseEvents.INTENT_QUERY, false, elapsedMs);
+                    payload, List.of(), null, payload.intent(), false, elapsedMs);
         }
         Object questionsObj = json == null ? null : json.get("questions");
         if (SseEvents.ASK_CLARIFYING.equals(status)
@@ -215,13 +223,14 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
             errPayload.put("code", remoteCode == null ? ErrorCode.AI_DEGRADED.getCode() : remoteCode);
             errPayload.put("message", remoteMessage);
             errPayload.put("recoverable", recoverable);
+            errPayload.put("askId", askId);
             return new AgentResult(askId,
                     List.of(new SseEvent(SseEvents.ERROR, errPayload)),
                     null, List.of(), null, SseEvents.INTENT_QUERY, false, elapsedMs);
         }
         Map<String, Object> degraded = new LinkedHashMap<>();
         degraded.put("code", ErrorCode.AI_DEGRADED.getCode());
-        degraded.put("message", ErrorCode.AI_DEGRADED.format());
+        degraded.put("message", "智能解析暂不可用，本次未执行查询，请稍后重试");
         degraded.put("recoverable", true);
         String askId = json == null ? "ask_remote" : stringValue(json.get("ask_id"));
         if (askId == null || askId.isBlank()) {

@@ -16,14 +16,6 @@ from langgraph_flows.demo_data import (
 
 logger = logging.getLogger(__name__)
 
-# H2 演示组织键 → Java sec_org_node ID；正式组织目录尚未接入 Python。
-# 未知组织必须拒绝，不能将 org_context 留空扩大查询范围。
-ORG_KEY_TO_ID: dict[str, str] = {
-    "研发": "2",
-    "销售": "5",
-}
-
-
 @dataclass(frozen=True)
 class MetricView:
     code: str
@@ -31,6 +23,7 @@ class MetricView:
     definition: str
     unit: str = ""
     percent: bool = False
+    version: int | None = None
 
 
 class SemanticToolClient(Protocol):
@@ -122,42 +115,82 @@ class JavaMcpSemanticToolClient:
 
     def __init__(self, mcp: McpClient) -> None:
         self._mcp = mcp
-        self._catalog_cache: dict[str, MetricView] | None = None
-        self._catalog_loaded_at: float = 0.0
-        self._catalog_ttl = 60.0
 
     def check_org(self, user_no: Optional[str], org_keys: list[str]) -> None:
         return  # 权限由 Java semantic_query 裁决
 
     async def metric_catalog(self, context: dict[str, Any]) -> dict[str, MetricView]:
-        now = time.monotonic()
-        if self._catalog_cache is not None and now - self._catalog_loaded_at < self._catalog_ttl:
-            return self._catalog_cache
-        result = await self._mcp.tools_call(
-            "get_semantic_meta",
-            {"type": "METRIC", "names": []},
-            context,
-        )
-        objects = (result or {}).get("objects") or []
-        catalog: dict[str, MetricView] = {}
-        for obj in objects:
-            code = str(obj.get("code") or "")
-            if not code:
-                continue
-            name = str(obj.get("name") or code)
-            definition = str(obj.get("definition") or "")
-            # 展示提示：若本地 METRICS 有同名则复用 unit/percent
-            local = METRICS.get(code)
-            catalog[code] = MetricView(
-                code=code,
-                name=name,
-                definition=definition,
-                unit=local.unit if local else "",
-                percent=local.percent if local else ("率" in name or "rate" in code.lower()),
-            )
-        self._catalog_cache = catalog
-        self._catalog_loaded_at = now
-        return catalog
+        metadata = await self.planning_catalog(context)
+        return {m["code"]: metric_view(m) for m in metadata["metrics"]}
+
+    async def planning_catalog(self, context: dict[str, Any], requested_org_id=None) -> dict[str, Any]:
+        args = {"type": "PLANNING"}
+        if requested_org_id is not None:
+            args["requested_org_id"] = requested_org_id
+        raw = await self._mcp.tools_call("get_semantic_meta", args, context)
+        try:
+            if raw["complete"] is not True or raw["schema_version"] != "1":
+                raise ValueError("incomplete catalog")
+            if raw["metric_count"] != len(raw["metrics"]) or raw["org_count"] != len(raw["organizations"]):
+                raise ValueError("catalog count mismatch")
+            if len({m["code"] for m in raw["metrics"]}) != len(raw["metrics"]):
+                raise ValueError("duplicate metric")
+            if len({o["org_id"] for o in raw["organizations"]}) != len(raw["organizations"]):
+                raise ValueError("duplicate organization")
+            from datetime import date
+            date.fromisoformat(raw["as_of_date"])
+            for m in raw["metrics"]:
+                if not isinstance(m["allowed_modes"], list) or type(m["version"]) is not int or m["version"] < 1:
+                    raise ValueError("invalid metric capabilities")
+                for field in ("name", "definition", "unit", "aliases", "percent", "requires_period", "time_type"):
+                    m[field]
+            for o in raw["organizations"]:
+                if not isinstance(o["org_id"], str) or not o["org_id"]:
+                    raise ValueError("invalid organization")
+                o["name"], o["aliases"]
+        except (KeyError, ValueError, TypeError) as exc:
+            raise McpBusinessError("HRS-3002", "语义目录不完整，暂时无法规划查询", retryable=True) from exc
+        return raw
+
+    async def execute_plan(self, plan, metric, context):
+        raw = await self._mcp.tools_call("semantic_query", {
+            "query_plan": plan.model_dump(exclude_none=True), "metric_version": metric["version"]}, context)
+        if not isinstance(raw, dict) or raw.get("query_plan") != plan.model_dump(exclude_none=True):
+            raise McpBusinessError("HRS-3002", "工具未返回一致的执行计划")
+        if raw.get("metric_version") != metric["version"] or not isinstance(raw.get("effective_org_ids"), list):
+            raise McpBusinessError("HRS-3002", "工具执行证据不完整")
+        code = metric["code"]
+        view = metric_view(metric)
+        if raw.get("query_mode") != plan.query_mode:
+            raise McpBusinessError("HRS-3002", "工具实际执行模式与计划不符")
+        if plan.query_mode == "scalar":
+            rows = raw.get("rows")
+            if not isinstance(rows, list) or len(rows) > 1:
+                raise McpBusinessError("HRS-3002", "标量结果格式异常")
+            columns = [c["key"] for c in raw.get("columns", [])]
+            if rows and (columns != [code] or not isinstance(rows[0], list) or len(rows[0]) != 1):
+                raise McpBusinessError("HRS-3002", "标量结果列与指标不一致")
+            value = rows[0][0] if rows else None
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+                raise McpBusinessError("HRS-3002", "标量结果并非数值或空值")
+            result = {"current": value, "compare": None, "prev_period": None,
+                      "rows": len(rows), "query_mode": "scalar", "metric": view,
+                      "as_of_date": raw.get("as_of_date")}
+        else:
+            result = _present_from_mcp(code, view, raw, plan.query_mode)
+        result["execution_evidence"] = {"query_plan": raw["query_plan"],
+            "metric_version": raw["metric_version"], "effective_org_ids": raw["effective_org_ids"]}
+        return result
+
+    async def resolve_organization(self, name, context):
+        raw = await self._mcp.tools_call("get_semantic_meta", {"type": "RESOLVE_ORG", "name": name}, context)
+        if not isinstance(raw, dict) or raw.get("status") not in {"RESOLVED", "UNAVAILABLE", "AMBIGUOUS"}:
+            raise McpBusinessError("HRS-3002", "组织核查服务返回异常", retryable=True)
+        if raw["status"] == "RESOLVED":
+            org = raw.get("organization")
+            if not isinstance(org, dict) or not org.get("org_id") or not org.get("name") or not isinstance(org.get("aliases"), list):
+                raise McpBusinessError("HRS-3002", "组织核查结果不完整", retryable=True)
+        return raw
 
     async def query_metric(
         self,
@@ -175,10 +208,12 @@ class JavaMcpSemanticToolClient:
         if org_keys:
             if len(set(org_keys)) != 1:
                 raise McpBusinessError("HRC-1003", "暂不支持同时指定多个组织，请选择一个组织")
-            oid = ORG_KEY_TO_ID.get(org_keys[0])
-            if oid is None:
+            metadata = await self.planning_catalog(context)
+            matches = [o["org_id"] for o in metadata["organizations"]
+                       if org_keys[0] in [o["org_id"], o["name"], *o["aliases"]]]
+            if len(matches) != 1:
                 raise McpBusinessError("HRC-1003", f"组织“{org_keys[0]}”尚未映射到权威目录，请明确组织")
-            org_context = {"org_id": oid, "include_children": True}
+            org_context = {"org_id": matches[0], "include_children": True}
 
         time_range = None
         if window is not None:
@@ -292,7 +327,7 @@ def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: st
     current = None
     if mode == "org" and table_rows:
         cats = [str(r.get("org_name") or "") for r in table_rows]
-        vals = [_to_float(r.get(code)) or 0 for r in table_rows]
+        vals = [_to_float(r.get(code)) for r in table_rows]
         current = vals[0] if vals else None
         chart = {
             "type": "BAR",
@@ -306,7 +341,7 @@ def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: st
         }
     elif mode == "trend" and table_rows:
         periods = [str(r.get("period") or "") for r in table_rows]
-        vals = [_to_float(r.get(code)) or 0 for r in table_rows]
+        vals = [_to_float(r.get(code)) for r in table_rows]
         current = vals[-1] if vals else None
         chart = {
             "type": "LINE",
@@ -348,6 +383,11 @@ def _to_float(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         # 脱敏后的字符串无法数值化
         return None
+
+
+def metric_view(row: dict) -> MetricView:
+    return MetricView(row["code"], row["name"], row["definition"], row["unit"],
+                      row["percent"], row["version"])
 
 
 def build_semantic_tool_client(

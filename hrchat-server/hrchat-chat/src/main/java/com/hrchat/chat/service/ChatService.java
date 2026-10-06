@@ -203,6 +203,7 @@ public class ChatService {
                         ? new ChatAskStore.AskRecord.PendingClarify(request.question().trim(), result.clarifyQuestions())
                         : null));
         touchSession(session);
+        askStore.putEvidence(askId, result.evidence());
         auditAsk(ctx, sessionId, askId, request.question(), result);
         return new AskOutcome(askId, sseBody, payload, result.isClarifying());
     }
@@ -233,6 +234,7 @@ public class ChatService {
         String sseBody = buildSse(result);
 
         updateTurnAnswer(record.turnId(), ctx, payload, result.elapsedMs());
+        askStore.putEvidence(askId, result.evidence());
         askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), ctx.getTenantId(),
                 record.turnId(),
                 record.question(), result.intent(), status, result.sql(), payload, sseBody,
@@ -266,6 +268,13 @@ public class ChatService {
         }
         auditSqlView(ctx, askId, record.sql());
         return new SqlView(askId, record.sql(), caliber);
+    }
+
+    /** Diagnostic evidence is owner- and permission-bound, not a public answer card. */
+    public Map<String, Object> getEvidence(UserContext ctx, String askId) {
+        authzService.checkFunc(ctx, PERM_VIEW_SQL);
+        requireOwnAsk(ctx, askId, null);
+        return askStore.evidence(askId);
     }
 
     /** 表格分页拉取（接口文档 2.2.11：明细 >20 条分页）。 */

@@ -67,7 +67,8 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
         this.objectMapper = objectMapper;
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(30000);
-        factory.setReadTimeout(30000);
+        // Allow the model's 30s timeout plus metadata/query tools to return a structured failure.
+        factory.setReadTimeout(90000);
         this.restTemplate = new RestTemplate(factory);
     }
 

@@ -151,7 +151,7 @@ def apply_llm_config(payload: dict) -> dict:
         base_url=payload.get("base_url"),
         api_key=payload.get("api_key"),
         model=payload.get("model"),
-        temperature=float(payload.get("temperature") or 0.2),
+        temperature=float(payload["temperature"] if payload.get("temperature") is not None else 0.2),
     )
     key = tenant_no or DEFAULT_TENANT_KEY
     model = payload.get("model") or getattr(adapter, "model", None) or ("mock" if profile == "mock" else "")
@@ -213,6 +213,7 @@ def _terminal_response(ask_id: str, result: dict[str, Any]) -> dict[str, Any]:
                 "recoverable": False,
             },
         )
+    terminal.evidence = result.get("evidence")
     return terminal.model_dump()
 
 
@@ -323,11 +324,16 @@ def create_app(
         })
 
         async def run() -> dict:
+            runtime = _ensure_runtime(x_tenant_no)
             return await run_ask_flow(
                 question=body.question,
                 session_id=session_id,
                 ask_id=ask_id,
-                adapter=get_current_adapter(x_tenant_no),
+                adapter=runtime["adapter"],
+                runtime_evidence={"profile": runtime["profile"], "model": runtime.get("model"),
+                                  "config_version": runtime.get("config_version"),
+                                  "inherited": runtime.get("inherited"), "tenant_no": x_tenant_no,
+                                  "java_ask_id": body.java_ask_id},
                 tools=tools,
                 mode=body.mode,
                 context_override=context_override,
@@ -337,29 +343,13 @@ def create_app(
                 trace_id=body.trace_id,
             )
 
+        def save_terminal(result):
+            terminal = _terminal_response(ask_id, result)
+            store.save_ask(ask_id, {**(store.get_ask(ask_id) or {}), **terminal})
+            return terminal
+
         if body.mode == "SYNC":
-            result = await run()
-            # 澄清态必须保留 tool_context_token / invocation_id，供后续 MCP 转交
-            base_ask = {
-                "ask_id": ask_id,
-                "session_id": session_id,
-                "question": body.question,
-                "context_override": context_override,
-                "user_no": x_user_no,
-                "tenant_no": x_tenant_no,
-                "invocation_id": body.invocation_id,
-                "tool_context_token": body.tool_context_token,
-                "trace_id": body.trace_id,
-            }
-            if result.get("answer_payload"):
-                store.save_ask(ask_id, {**base_ask, "status": ASK_COMPLETED,
-                                        "answer_payload": result["answer_payload"]})
-            elif result.get("clarify_questions"):
-                store.save_ask(ask_id, {**base_ask, "status": ASK_CLARIFYING})
-            else:
-                store.save_ask(ask_id, {**base_ask, "status": ASK_FAILED,
-                                        "error": result.get("error")})
-            return _terminal_response(ask_id, result)
+            return save_terminal(await run())
 
         # STREAM：Last-Event-ID 断线回放优先
         framer = store.framer(session_id)
@@ -375,21 +365,9 @@ def create_app(
 
         async def flow_events() -> AsyncGenerator[dict[str, Any], None]:
             result = await run()
+            save_terminal(result)
             for evt in result["events"]:
                 yield evt
-            if result.get("answer_payload"):
-                store.save_ask(ask_id, {
-                    "ask_id": ask_id,
-                    "session_id": session_id,
-                    "question": body.question,
-                    "user_no": x_user_no,
-                    "tenant_no": x_tenant_no,
-                    "invocation_id": body.invocation_id,
-                    "tool_context_token": body.tool_context_token,
-                    "trace_id": body.trace_id,
-                    "status": ASK_COMPLETED,
-                    "answer_payload": result["answer_payload"],
-                })
 
         async def stream_gen() -> AsyncGenerator[str, None]:
             for frame in replay_frames:
@@ -410,9 +388,15 @@ def create_app(
         stored = store.get_ask(ask_id)
         if not stored:
             raise HTTPException(404, f"ask {ask_id} 不存在")
+        if stored.get("session_id") != session_id or (stored.get("user_no") and x_user_no != stored["user_no"]):
+            raise HTTPException(403, "无权访问该问句")
         if not body.answers:
             raise HTTPException(400, "answers 不能为空")
         forced_metric_code = body.answers[0].option_ids[0]
+        pending = stored.get("questions") or []
+        if not any(q["question_id"] == body.answers[0].question_id
+                and any(o["option_id"] == forced_metric_code for o in q.get("options", [])) for q in pending):
+            raise HTTPException(400, "请选择原问句提供的有效选项，或重新提交完整问题")
         # Java 澄清续签时覆盖；未携带则沿用首次问数落库的令牌
         if body.invocation_id:
             stored["invocation_id"] = body.invocation_id
@@ -434,6 +418,8 @@ def create_app(
             tool_context_token=stored.get("tool_context_token"),
             invocation_id=stored.get("invocation_id"),
             trace_id=stored.get("trace_id"),
+            runtime_evidence={k: v for k, v in _runtime_view(_ensure_runtime(stored.get("tenant_no")),
+                              stored.get("tenant_no")).items() if k != "base_url"},
         )
         terminal = _terminal_response(ask_id, result)
         store.save_ask(ask_id, {
@@ -441,6 +427,7 @@ def create_app(
             "status": terminal["status"],
             "answer_payload": terminal.get("answer_payload"),
             "error": terminal.get("error"),
+            "questions": result.get("clarify_questions", []),
         })
         return terminal
 
@@ -450,7 +437,7 @@ def create_app(
         stored = store.get_ask(ask_id)
         if not stored:
             raise HTTPException(404, f"ask {ask_id} 不存在")
-        return stored
+        return {k: v for k, v in stored.items() if k != "tool_context_token"}
 
     @app.post("/v1/chat/asks/{ask_id}/attribution")
     async def attribution(ask_id: str):
