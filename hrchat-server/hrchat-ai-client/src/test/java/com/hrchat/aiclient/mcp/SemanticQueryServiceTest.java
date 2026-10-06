@@ -36,6 +36,56 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class SemanticQueryServiceTest {
 
+    private Map<String, Object> plannerRequest() {
+        return new java.util.LinkedHashMap<>(Map.of("query_plan", new java.util.LinkedHashMap<>(Map.of(
+                "schema_version", "1", "decision", "execute", "reason", "ready",
+                "metric_codes", List.of("headcount"), "query_mode", "scalar")), "metric_version", 1));
+    }
+
+    @Test
+    void modelPlanReturnsExecutedScopeAndVersion() {
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(metric("headcount",
+                "SELECT COUNT(1) FROM dim_employee"));
+        when(sqlRewriteService.authorize(anyString(), any())).thenReturn(
+                new AuthorizedQuery("SELECT 7", List.of(), Set.of("dim_employee"), "fp"));
+        when(queryExecService.executeReadonly(any())).thenReturn(new QueryResult(
+                List.of(new QueryResult.ColumnMeta("headcount", "人数", "NUMBER", false)),
+                List.of(Map.of("headcount", 7)), 1));
+        var request = plannerRequest();
+        var result = service.execute(hr01, request, Map.of());
+        assertEquals(request.get("query_plan"), result.get("query_plan"));
+        assertEquals(List.of(2L, 3L, 4L), result.get("effective_org_ids"));
+        assertEquals(1, result.get("metric_version"));
+    }
+
+    @Test
+    void stalePlanVersionNeverExecutes() {
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(metric("headcount", "SELECT COUNT(1) FROM dim_employee"));
+        var request = plannerRequest(); request.put("metric_version", 99);
+        assertThrows(BizException.class, () -> service.execute(hr01, request, Map.of()));
+        verifyNoInteractions(queryExecService, sqlRewriteService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void unknownPlanFieldsNeverExecute() {
+        var request = plannerRequest();
+        ((Map<String, Object>) request.get("query_plan")).put("sql", "SELECT secret");
+        assertThrows(BizException.class, () -> service.execute(hr01, request, Map.of()));
+        verifyNoInteractions(queryExecService, sqlRewriteService);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void validPlanStillCannotBypassCurrentOrganizationAuthorization() {
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(metric("headcount", "SELECT COUNT(1) FROM dim_employee"));
+        var request = plannerRequest();
+        ((Map<String, Object>) request.get("query_plan")).put("org_scope", Map.of("org_id", "5", "include_children", true));
+        var ex = assertThrows(BizException.class, () -> service.execute(hr01, request, Map.of()));
+        assertEquals(ErrorCode.DATA_RANGE_FORBIDDEN, ex.getErrorCode());
+        verifyNoInteractions(queryExecService, sqlRewriteService);
+    }
+
     @Mock private SemanticMetaService semanticMetaService;
     @Mock private SqlRewriteService sqlRewriteService;
     @Mock private QueryExecService queryExecService;

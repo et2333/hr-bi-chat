@@ -1,6 +1,8 @@
 package com.hrchat.aiclient.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.hrchat.api.mcp.QueryPlan;
 import com.hrchat.audit.model.AuditEvent;
 import com.hrchat.audit.model.AuditEvents;
 import com.hrchat.audit.service.AuditCollector;
@@ -64,6 +66,11 @@ public class SemanticQueryService {
 
     public Map<String, Object> execute(UserContext user, Map<String, Object> arguments, Map<String, Object> context) {
         authzService.checkFunc(user, "chat:ask");
+        Map<String, Object> planEvidence = null;
+        if (arguments.containsKey("query_plan")) {
+            planEvidence = normalizePlan(user, arguments);
+            arguments = planEvidence;
+        }
         rejectPhysicalOverrides(arguments);
 
         @SuppressWarnings("unchecked")
@@ -123,12 +130,16 @@ public class SemanticQueryService {
         }
         // SQL 始终保留 {authz_org_filter}；org_context 越权在窄化上下文时拒绝（1A）
         UserContext effectiveUser = narrowForOrgContext(user, orgContext);
+        if ("detail".equals(queryMode) && !effectiveUser.canViewDetail()) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        }
 
         List<MetricDetail> details = new ArrayList<>();
         for (String code : metrics) {
             details.add(semanticMetaService.getMetricByCode(code));
         }
         MetricDetail primary = details.get(0);
+        PlanningCapabilities.requireVisible(user, primary);
         if (window == null && ("hire_count".equals(primary.code())
                 || "leave_count".equals(primary.code()))) {
             throw new BizException(ErrorCode.PARAM_MISSING, "人事变动人数需要明确统计期间");
@@ -156,12 +167,78 @@ public class SemanticQueryService {
         QueryResult raw = queryExecService.executeReadonly(authorized);
         Map<String, Object> result = toMaskedResult(user, details, raw, limit);
         result.put("query_mode", queryMode);
+        if (planEvidence != null) {
+            result.put("query_plan", planEvidence.get("validated_plan"));
+            result.put("metric_version", primary.effectiveVersion());
+            result.put("effective_org_ids", effectiveUser.getGrantedOrgs().stream()
+                    .flatMap(g -> g.getSubtreeOrgKeys().stream()).distinct().sorted().toList());
+        }
         if ("headcount".equals(primary.code())) {
             result.put("as_of_date", HeadcountAsOf.date(window == null ? null : window.end(), demoNow).toString());
         }
 
         audit(user, context, authorized, (Integer) result.get("row_count"));
         return result;
+    }
+
+    /** Validate a planner request again at the trusted execution boundary. */
+    private Map<String, Object> normalizePlan(UserContext user, Map<String, Object> request) {
+        if (!Set.of("query_plan", "metric_version").containsAll(request.keySet())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "查询计划含未知参数");
+        }
+        QueryPlan plan;
+        try {
+            plan = objectMapper.copy().enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+                    .convertValue(request.get("query_plan"), QueryPlan.class);
+        } catch (IllegalArgumentException ex) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "查询计划格式错误");
+        }
+        if (plan == null || !"1".equals(plan.schemaVersion()) || !"execute".equals(plan.decision())
+                || !"ready".equals(plan.reason()) || plan.metricCodes() == null || plan.metricCodes().size() != 1
+                || (plan.missingSlots() != null && !plan.missingSlots().isEmpty())
+                || (plan.clarificationOptions() != null && !plan.clarificationOptions().isEmpty())) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "查询计划尚不可执行");
+        }
+        MetricDetail metric = semanticMetaService.getMetricByCode(plan.metricCodes().get(0));
+        PlanningCapabilities.requireVisible(user, metric);
+        if (!(request.get("metric_version") instanceof Number version)
+                || version.intValue() != metric.effectiveVersion()) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标口径版本已变化，请重新规划");
+        }
+        Map<String, Object> capability = PlanningCapabilities.describe(metric);
+        if (!((List<?>) capability.get("allowed_modes")).contains(plan.queryMode())) {
+            throw new BizException(ErrorCode.QUERY_UNSUPPORTED, "指标不支持这种统计方式");
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("metrics", plan.metricCodes());
+        out.put("query_mode", plan.queryMode());
+        if (plan.orgScope() != null) {
+            if (plan.orgScope().orgId() == null || plan.orgScope().orgId().isBlank()
+                    || plan.orgScope().requestedName() != null) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "组织不能为空");
+            }
+            out.put("org_context", Map.of("org_id", plan.orgScope().orgId(),
+                    "include_children", !Boolean.FALSE.equals(plan.orgScope().includeChildren())));
+        }
+        if (plan.timeRange() != null) {
+            QueryPlan.TimeRange t = plan.timeRange();
+            try {
+                LocalDate start = LocalDate.parse(t.start()), end = LocalDate.parse(t.end());
+                if (!start.isBefore(end) || end.isAfter(demoNow.plusDays(1))
+                        || !"Asia/Shanghai".equals(t.timezone())
+                        || !capability.get("time_type").equals(t.timeType())
+                        || !("trend".equals(plan.queryMode()) ? "MONTH" : "NONE").equals(t.grain())) {
+                    throw new IllegalArgumentException();
+                }
+            } catch (RuntimeException e) {
+                throw new BizException(ErrorCode.PARAM_INVALID, "计划时间范围不合法");
+            }
+            out.put("time_range", Map.of("preset", "CUSTOM", "start", t.start(), "end", t.end(), "grain", t.grain()));
+        } else if (Boolean.TRUE.equals(capability.get("requires_period")) || "trend".equals(plan.queryMode())) {
+            throw new BizException(ErrorCode.PARAM_MISSING, "统计期间");
+        }
+        out.put("validated_plan", request.get("query_plan"));
+        return out;
     }
 
     private void audit(UserContext user, Map<String, Object> context, AuthorizedQuery authorized, int rowCount) {
