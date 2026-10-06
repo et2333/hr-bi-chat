@@ -26,12 +26,19 @@ MESSAGES = {
 }
 
 
+def guard_known_capabilities(question):
+    """Known unsupported requirements take priority over asking for missing slots."""
+    if "主动离职" in question:
+        raise PlanRejected("metric_unavailable", MESSAGES["metric_unavailable"])
+    if re.search(r"预测|为什么|原因|归因|性别|职级|司龄|年龄|学历|岗位|男性|女性|男员工|女员工|同比|去年同期", question):
+        raise PlanRejected("unsupported_capability", MESSAGES["unsupported_capability"])
+
+
 def guard_request(plan, question, metadata, context, selected):
     """Deterministic known-failure checks complement, not replace, model understanding."""
     if plan.decision != "execute":
         return
-    if re.search(r"预测|为什么|原因|归因|主动离职|性别|职级|司龄|年龄|学历|岗位|男性|女性|男员工|女员工|同比|去年同期", question):
-        raise PlanRejected("unsupported_capability", MESSAGES["unsupported_capability"])
+    guard_known_capabilities(question)
     residual = question
     matches = set()
     names = sorted([(name, o["org_id"]) for o in metadata["organizations"]
@@ -119,6 +126,8 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
 
     async def plan_query(s, trace):
         if uses_draft:
+            s["evidence"]["capability_guard_version"] = "known-capability-guard-v1"
+            guard_known_capabilities(question)
             s["evidence"]["followup_guard_version"] = FOLLOWUP_GUARD_VERSION
             if is_slot_only_question(question, s["catalog"], context_override, forced_metric_code):
                 raise PlanRejected("missing_slots", "请补充希望查询的指标；入职或离职人数还需提供统计期间。", "clarify")
