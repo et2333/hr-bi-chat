@@ -86,7 +86,7 @@ class ChatServiceTest {
         askStore = new ChatAskStore();
         chatService = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
                 feedbackMapper, askStore, idempotencyService, agentRuntime, authzService,
-                toolContextTokenService, auditCollector, new ObjectMapper());
+                toolContextTokenService, auditCollector, new ObjectMapper(), new com.hrchat.chat.store.QueryContextStore(1800));
         lenient().when(toolContextTokenService.issue(any(), any(), any())).thenReturn("test-tool-token");
         lenient().when(idempotencyService.execute(any(UserContext.class), anyString(), anyString(), anyString(),
                         nullable(String.class), any(), eq(ChatService.AskOutcome.class), any()))

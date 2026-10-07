@@ -54,6 +54,12 @@ public class ChatController {
 
     // ---------------- 会话 ----------------
 
+    @DeleteMapping("/query-contexts")
+    public ApiResponse<Void> clearQueryContexts(@CurrentUser UserContext ctx) {
+        chatService.clearQueryContexts(ctx);
+        return ApiResponse.ok();
+    }
+
     @Operation(summary = "创建会话")
     @PostMapping("/sessions")
     @ResponseStatus(HttpStatus.CREATED)

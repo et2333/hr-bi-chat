@@ -60,7 +60,7 @@ class ChatServiceFlowTest {
                 .thenReturn("test-tool-token");
         service = new ChatService(sessionMapper, turnMapper, answerMapper, clarifyMapper,
                 feedbackMapper, askStore, idempotencyService, agentRuntime, authzService,
-                toolContextTokenService, auditCollector, objectMapper);
+                toolContextTokenService, auditCollector, objectMapper, new com.hrchat.chat.store.QueryContextStore(1800));
     }
 
     private ChtSession session(long id, String title) {
