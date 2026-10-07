@@ -2,7 +2,7 @@ import copy
 
 from evals.dataset import load_dataset
 from evals.run import execute, summarize
-from evals.stage_policy import score_stage, stage_report
+from evals.stage_policy import load_policy, score_stage, stage_report
 from evals.scoring import score
 from tests.test_evals import example
 
@@ -80,3 +80,15 @@ def test_correct_display_and_value_cannot_mask_wrong_execution_dates():
     assert score(expected, actual)["passed"]
     actual["evidence"]["execution"]["query_plan"]["time_range"]["end"] = "2026-08-31"
     assert "executed_time_range" in score(expected, actual)["errors"]
+
+
+def test_s3_counts_all_multi_turn_failures_in_stage_denominator():
+    cases = [case("hr-v1-025"), case("hr-v1-033")]
+    class Api:
+        def session(self, owner): return "s"
+        def ask(self, session, identity, turn): return clarification()
+    policy = load_policy("s3")
+    results = execute(cases, Api(), policy=policy)
+    report = stage_report(cases, results, summarize, policy)
+    assert report["s3_scope"]["total"] == 2 and report["s3_scope"]["passed"] == 1
+    assert report["deferred_cases"] == []

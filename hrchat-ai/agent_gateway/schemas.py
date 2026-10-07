@@ -92,6 +92,8 @@ class AskRequest(BaseModel):
     tool_context_token: Optional[str] = None
     trace_id: Optional[str] = None
     java_ask_id: Optional[str] = None
+    # Accepted only from an authenticated Java service request, never browser state.
+    query_context: Optional[dict[str, Any]] = None
 
 
 class ClarifyAnswer(BaseModel):
@@ -108,6 +110,8 @@ class ClarifyAnswerRequest(BaseModel):
     invocation_id: Optional[str] = None
     tool_context_token: Optional[str] = None
     trace_id: Optional[str] = None
+    java_ask_id: Optional[str] = None
+    query_context: Optional[dict[str, Any]] = None
 
 
 class FeedbackRequest(BaseModel):

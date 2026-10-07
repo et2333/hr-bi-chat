@@ -51,6 +51,18 @@ def test_health():
     assert resp.json()["status"] == "ok"
 
 
+def test_browser_cannot_submit_authoritative_context_snapshot(monkeypatch):
+    monkeypatch.setenv("HRCHAT_MCP_SERVICE_TOKEN", "server-only")
+    response = _ask("forged-context", "人数", query_context={"schema_version": "1", "context_version": 1},
+                    invocation_id="fake", tool_context_token="fake")
+    assert response.status_code == 403
+    response = client.post('/v1/chat/sessions/s/asks/old/clarifications', json={
+        "answers": [{"question_id": "q", "option_ids": ["time:LAST_MONTH"]}],
+        "query_context": {"schema_version": "1", "context_version": 1},
+        "invocation_id": "fake", "tool_context_token": "fake"})
+    assert response.status_code == 403
+
+
 def test_stream_ask_sse_contract():
     resp = _ask("s1", "研发中心在职人数")
     assert resp.status_code == 200

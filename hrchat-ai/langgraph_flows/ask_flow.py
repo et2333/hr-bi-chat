@@ -254,7 +254,7 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
     }
     return {
         "ask_id": state["ask_id"],
-        "answer_id": f"ans_{state['ask_id'].split('_', 1)[1]}",
+        "answer_id": f"ans_{state['ask_id'].split('_', 1)[-1]}",
         "status": ASK_COMPLETED,
         "intent": INTENT_QUERY,
         "degraded": state.get("degraded", False),
@@ -565,6 +565,7 @@ async def run_ask_flow(
     invocation_id: Optional[str] = None,
     trace_id: Optional[str] = None,
     runtime_evidence: Optional[dict[str, Any]] = None,
+    query_context: Optional[dict[str, Any]] = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """执行一次问数（SYNC/STREAM 共用）。
@@ -584,6 +585,7 @@ async def run_ask_flow(
             adapter=adapter, tools=tools, context_override=context_override,
             forced_metric_code=forced_metric_code, tool_context_token=tool_context_token,
             invocation_id=invocation_id, trace_id=trace_id, runtime_evidence=runtime_evidence,
+            query_context=query_context,
             use_langgraph=LANGGRAPH_AVAILABLE if use_langgraph is None else use_langgraph)
 
     start_ts = time.perf_counter()

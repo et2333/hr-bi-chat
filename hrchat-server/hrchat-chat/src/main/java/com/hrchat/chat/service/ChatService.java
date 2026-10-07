@@ -33,6 +33,7 @@ import com.hrchat.chat.mapper.ChtFeedbackMapper;
 import com.hrchat.chat.mapper.ChtSessionMapper;
 import com.hrchat.chat.mapper.ChtTurnMapper;
 import com.hrchat.chat.store.ChatAskStore;
+import com.hrchat.chat.store.QueryContextStore;
 import com.hrchat.common.api.PageResult;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
@@ -81,6 +82,7 @@ public class ChatService {
     private final ToolContextTokenService toolContextTokenService;
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
+    private final QueryContextStore queryContexts;
 
     /** 问句编排结果（SYNC 直接返回 payload；STREAM 返回 SSE 帧文本）。 */
     public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying,
@@ -138,6 +140,11 @@ public class ChatService {
         session.setIsDeleted(1);
         session.setUpdatedBy(ctx.getEmpNo());
         sessionMapper.updateById(session);
+        queryContexts.clear(QueryContextStore.key(ctx, sessionId));
+    }
+
+    public void clearQueryContexts(UserContext ctx) {
+        queryContexts.clearUser(ctx);
     }
 
     public List<TurnView> listTurns(UserContext ctx, Long sessionId) {
@@ -183,10 +190,12 @@ public class ChatService {
     }
 
     private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session) {
-        AgentInvocationContext invocation = buildInvocation(ctx, sessionId, null);
+        QueryContextStore.Ticket ticket = queryContexts.begin(QueryContextStore.key(ctx, sessionId));
+        AgentInvocationContext invocation = buildInvocation(ctx, sessionId, null).withQueryContext(ticket.snapshot());
         AgentResult result = agentRuntime.ask(request, ctx, invocation);
         String askId = result.askId();
         Long turnId = persistTurn(sessionId, ctx, request.question(), result);
+        result = recordContextCommit(ticket, result, request.question());
 
         String status = result.isClarifying()
                 ? SseEvents.ASK_CLARIFYING
@@ -213,6 +222,7 @@ public class ChatService {
      */
     public AskOutcome clarify(UserContext ctx, Long sessionId, String askId, ClarifyAnswerRequest request) {
         authzService.checkFunc(ctx, PERM_ASK);
+        requireSession(ctx, sessionId);
         ChatAskStore.AskRecord record = requireOwnAsk(ctx, askId, sessionId);
         ChatAskStore.AskRecord.PendingClarify pending = record.pending();
         if (pending == null) {
@@ -221,7 +231,12 @@ public class ChatService {
         if (request.answers() == null || request.answers().isEmpty()) {
             throw new BizException(ErrorCode.PARAM_MISSING, "answers");
         }
+        if (request.answers().size() != 1) throw new BizException(ErrorCode.PARAM_INVALID, "每次仅回答一个澄清问题");
+        boolean taskMemory = askStore.evidence(askId).containsKey("query_context_candidate");
+        QueryContextStore.Ticket ticket = taskMemory
+                ? queryContexts.begin(QueryContextStore.key(ctx, sessionId), askId, request.answers().get(0)) : null;
         AgentInvocationContext invocation = buildInvocation(ctx, sessionId, askId);
+        if (ticket != null) invocation = invocation.withQueryContext(ticket.snapshot());
         AgentResult result = agentRuntime.clarify(askId, pending.question(), request.answers().get(0), ctx, invocation);
 
         String status = result.isClarifying()
@@ -234,6 +249,7 @@ public class ChatService {
         String sseBody = buildSse(result);
 
         updateTurnAnswer(record.turnId(), ctx, payload, result.elapsedMs());
+        if (ticket != null) result = recordContextCommit(ticket, result, pending.question());
         askStore.putEvidence(askId, result.evidence());
         askStore.put(new ChatAskStore.AskRecord(askId, record.sessionId(), ctx.getUserId(), ctx.getTenantId(),
                 record.turnId(),
@@ -242,6 +258,13 @@ public class ChatService {
                         ? new ChatAskStore.AskRecord.PendingClarify(pending.question(), result.clarifyQuestions())
                         : null));
         return new AskOutcome(askId, sseBody, payload, result.isClarifying());
+    }
+
+    private AgentResult recordContextCommit(QueryContextStore.Ticket ticket, AgentResult result, String question) {
+        String status = queryContexts.finish(ticket, result, question);
+        Map<String, Object> evidence = new LinkedHashMap<>(result.evidence() == null ? Map.of() : result.evidence());
+        evidence.put("memory_commit", Map.of("status", status, "context_version", ticket.version()));
+        return result.withEvidence(evidence);
     }
 
     // =================================================================
@@ -485,8 +508,11 @@ public class ChatService {
     }
 
     private void touchSession(ChtSession session) {
-        session.setLastActiveAt(LocalDateTime.now());
-        sessionMapper.updateById(session);
+        // A slow answer must not undo a concurrent soft-delete with a stale entity.
+        ChtSession patch = new ChtSession();
+        patch.setId(session.getId());
+        patch.setLastActiveAt(LocalDateTime.now());
+        sessionMapper.updateById(patch);
     }
 
     private SessionView toView(ChtSession s) {
@@ -496,7 +522,8 @@ public class ChatService {
 
     private static AnswerPayload clarifyingPayload(String askId, String intent, List<ClarifyQuestion> questions) {
         return new AnswerPayload(askId, null, SseEvents.ASK_CLARIFYING, intent, false, null,
-                new AnswerPayload.Conclusion("TEXT", "请在选项中选择您要查询的指标。", null, null),
+                new AnswerPayload.Conclusion("TEXT", questions == null || questions.isEmpty()
+                        ? "请补充查询条件。" : questions.get(0).question(), null, null),
                 new AnswerPayload.TableData(List.of(), List.of(), 0, 1, 1), null, null, List.of(), 0L);
     }
 

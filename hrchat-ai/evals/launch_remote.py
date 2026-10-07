@@ -32,10 +32,12 @@ def wait_for(url, process):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
+    parser.add_argument("--stage", choices=["s2", "s3"], default="s3")
     parser.add_argument("--java-port", type=int, default=18088)
     parser.add_argument("--python-port", type=int, default=18089)
     parser.add_argument("--org-catalog-scope", default="authorized", choices=["authorized"])
     parser.add_argument("--fixture-smoke", action="store_true")
+    parser.add_argument("--memory-smoke", action="store_true", help="Run S3 continuation and isolation sequences")
     parser.add_argument("--case-id", action="append", help="Repeat to run only these complete cases")
     parser.add_argument("--model", help="Explicit model override for a controlled comparison; does not edit .env.local")
     parser.add_argument("--planner-diagnostics", action="store_true",
@@ -74,6 +76,8 @@ def main():
     if args.model:
         env["OPENAI_MODEL"] = args.model
     module = "evals.fixture_gateway:app" if args.fixture_smoke else "agent_gateway.app:app"
+    if args.fixture_smoke and args.memory_smoke:
+        module = "evals.memory_fixture_gateway:app"
     if args.planner_diagnostics:
         env["HRCHAT_PLANNER_DIAGNOSTIC_DIR"] = str(run_dir / "planner-diagnostics")
         env["HRCHAT_PLANNER_VARIANT"] = args.planner_variant
@@ -103,6 +107,12 @@ def main():
                     "java_launch_command": java_cmd, "python_launch_command": python_cmd}
         path = run_dir / "server-evidence.json"
         path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+        if args.memory_smoke:
+            from evals.api import JavaApi
+            from evals.memory_smoke import run_memory_smoke
+            summary = run_memory_smoke(JavaApi(java_url, 100), run_dir / "memory-smoke.json", evidence["model_kind"])
+            print(json.dumps(summary, ensure_ascii=False))
+            return 0 if summary["passed"] == summary["total"] else 2
         if args.fixture_smoke:
             from evals.api import JavaApi
             api = JavaApi(java_url, 60)
@@ -137,7 +147,7 @@ def main():
         case_args = [arg for case_id in (args.case_id or []) for arg in ("--case-id", case_id)]
         return subprocess.run([sys.executable, "-m", "evals.run", "--base-url", java_url,
             "--runtime", "remote", "--model-kind", "real", "--split", args.split,
-            "--timeout", "100", "--server-evidence", str(path), *case_args], cwd=ROOT / "hrchat-ai").returncode
+            "--timeout", "100", "--stage", args.stage, "--server-evidence", str(path), *case_args], cwd=ROOT / "hrchat-ai").returncode
     finally:
         for proc in reversed(procs):
             proc.terminate()

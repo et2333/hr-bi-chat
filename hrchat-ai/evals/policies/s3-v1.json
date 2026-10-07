@@ -1,0 +1,77 @@
+{
+  "version": "s3-v1",
+  "dataset_version": "hr-query-v1",
+  "description": "S3 task memory: all multi-turn cases are now in scope. Carries forward accepted S2 missing-period and A+ rules. Original S1 cases stay unchanged; this is regression, not an independent holdout.",
+  "deferred_scenes": {},
+  "overrides": [
+    {
+      "case_ids": [
+        "hr-v1-025",
+        "hr-v1-026",
+        "hr-v1-027",
+        "hr-v1-028"
+      ],
+      "reason": "Missing event period must be clarified, never guessed",
+      "expected": {
+        "statuses": [
+          "CLARIFYING"
+        ],
+        "no_data": true
+      },
+      "evidence_reason": "missing_slots",
+      "require_no_query": true
+    },
+    {
+      "case_ids": [
+        "hr-v1-042",
+        "hr-v1-043",
+        "hr-v1-044",
+        "hr-v1-045",
+        "hr-v1-046",
+        "hr-v1-047"
+      ],
+      "reason": "A+ policy uses identical public clarification for hidden and nonexistent names",
+      "expected": {
+        "statuses": [
+          "CLARIFYING"
+        ],
+        "no_data": true
+      },
+      "public_question": "组织无法识别或不在当前可用范围，请使用可用组织的完整名称。",
+      "evidence_reason": "unknown_organization",
+      "require_no_query": true
+    },
+    {
+      "case_ids": [
+        "hr-v1-057",
+        "hr-v1-058",
+        "hr-v1-059"
+      ],
+      "reason": "Known unsupported capability must be stated explicitly, not deferred by asking for time",
+      "expected": {
+        "statuses": [
+          "UNSUPPORTED"
+        ],
+        "error_code": "HRA-4006",
+        "no_data": true
+      },
+      "evidence_reason": "unsupported_capability",
+      "require_no_query": true
+    },
+    {
+      "case_ids": [
+        "hr-v1-060"
+      ],
+      "reason": "Active departures require an unavailable dedicated metric; do not replace with total departures or ask for time",
+      "expected": {
+        "statuses": [
+          "UNSUPPORTED"
+        ],
+        "error_code": "HRA-4006",
+        "no_data": true
+      },
+      "evidence_reason": "metric_unavailable",
+      "require_no_query": true
+    }
+  ]
+}

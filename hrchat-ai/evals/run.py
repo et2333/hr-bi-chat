@@ -16,7 +16,7 @@ from evals.api import JavaApi
 from evals.dataset import DATASET, load_dataset, select_cases, sha, sha_text
 from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
-from evals.stage_policy import score_stage, stage_report
+from evals.stage_policy import POLICY, load_policy, score_stage, stage_report
 from adapters.model_usage import summarize_calls
 
 
@@ -33,7 +33,7 @@ def code_evidence():
             "untracked_sha256": {p: sha(ROOT / p) for p in untracked if p and (ROOT / p).is_file()}}
 
 
-def execute(cases, api, on_result=lambda results: None):
+def execute(cases, api, on_result=lambda results: None, policy=POLICY):
     results = []
     for case in cases:
         row = {"case_id": case["case_id"], "scene": case["scene"], "split": case["split"], "turns": []}
@@ -43,7 +43,7 @@ def execute(cases, api, on_result=lambda results: None):
                 actual = api.ask(session, case["identity_fixture"], turn)
                 row["turns"].append({"question": turn["question"], "expected": turn["expected"],
                                      "actual": actual, **score(turn["expected"], actual),
-                                     "stage_score": score_stage(case, turn, actual)})
+                                     "stage_score": score_stage(case, turn, actual, policy)})
         except (Exception, KeyboardInterrupt) as exc:
             # Do not serialize raw exception messages (may include credentials or arbitrary payloads).
             row["execution_error"] = type(exc).__name__
@@ -88,10 +88,12 @@ def main():
     parser.add_argument("--case-id", action="append", help="Repeat to select complete cases for a focused run")
     parser.add_argument("--runtime", choices=["local", "remote"], default="local")
     parser.add_argument("--model-kind", choices=["real", "fixture", "unknown"], default="unknown")
+    parser.add_argument("--stage", choices=["s2", "s3"], default="s2")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--server-evidence", type=Path, required=True,
                         help="JSON of the isolated server launch/configuration (no secrets)")
     args = parser.parse_args()
+    policy = load_policy(args.stage)
     if urlparse(args.base_url).hostname not in {"localhost", "127.0.0.1", "::1"}:
         parser.error("This runner uses demo identity headers; only local isolated servers are supported")
     manifest, all_cases = load_dataset()
@@ -137,7 +139,7 @@ def main():
 
     def save(results):
         report.update(summary=summarize(cases, results), results=results)
-        report["stage_evaluation"] = stage_report(cases, results, summarize)
+        report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
         turns = [t for r in results for t in r["turns"]]
         evidence = [(t.get("actual") or {}).get("evidence") or {} for t in turns]
         calls = [c for e in evidence for c in e.get("model_calls", [])]
@@ -162,7 +164,7 @@ def main():
 
     save([])
     started = time.perf_counter()
-    results = execute(cases, JavaApi(args.base_url, args.timeout), save)
+    results = execute(cases, JavaApi(args.base_url, args.timeout), save, policy)
     report["elapsed_seconds"] = time.perf_counter() - started
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
     save(results)
