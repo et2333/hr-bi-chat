@@ -255,4 +255,22 @@ class RemoteAgentRuntimeClientTest {
         return Map.of("ask_id", payload.askId() == null ? "ask_remote" : payload.askId(),
                 "status", "COMPLETED", "answer_payload", payload);
     }
+
+    @Test
+    void javaSnapshotIsForwardedOnlyWithServiceAuthenticationAndFreshInvocation() {
+        client.withServiceToken("service-secret");
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class))).thenReturn(ResponseEntity.ok(
+                Map.of("ask_id", "a", "status", "CLARIFYING", "questions", List.of())));
+        Map<String, Object> snapshot = Map.of("schema_version", "1", "context_version", 5);
+        var invocation = new AgentInvocationContext("t01", "12", "a", "new-inv", "trace", "new-tool")
+                .withQueryContext(snapshot);
+        client.clarify("a", "period", new ClarifyAnswerRequest.Answer("q", List.of("time:LAST_MONTH")), ctx, invocation);
+        ArgumentCaptor<HttpEntity> request = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).postForEntity(eq("http://gateway:8000/v1/chat/sessions/12/asks/a/clarifications"), request.capture(), eq(Map.class));
+        assertEquals("service-secret", request.getValue().getHeaders().getFirst("X-Hrchat-Service-Token"));
+        Map<?, ?> body = (Map<?, ?>) request.getValue().getBody();
+        assertEquals(snapshot, body.get("query_context"));
+        assertEquals("new-inv", body.get("invocation_id"));
+        assertEquals("new-tool", body.get("tool_context_token"));
+    }
 }

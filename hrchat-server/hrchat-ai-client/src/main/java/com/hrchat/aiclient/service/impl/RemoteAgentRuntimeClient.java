@@ -48,6 +48,12 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
     private final ObjectMapper snakeCaseMapper;
     private final RestTemplate restTemplate;
     private final Map<String, String> pendingSessionIds = new ConcurrentHashMap<>();
+    private String serviceToken;
+
+    public RemoteAgentRuntimeClient withServiceToken(String value) {
+        this.serviceToken = value;
+        return this;
+    }
 
     /** 兼容无租户构造（P1 既有签名）：tenantNo 为 null，不携带 X-Tenant-No。 */
     public RemoteAgentRuntimeClient(String baseUrl, String apiKey, String model,
@@ -267,11 +273,14 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         putIfNotNull(body, "tool_context_token", invocation.toolContextToken());
         putIfNotNull(body, "trace_id", invocation.traceId());
         putIfNotNull(body, "java_ask_id", invocation.javaAskId());
+        putIfNotNull(body, "query_context", invocation.queryContext());
     }
 
     private HttpHeaders requestHeaders(UserContext ctx, AgentInvocationContext invocation) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        if (invocation != null && invocation.queryContext() != null && serviceToken != null && !serviceToken.isBlank())
+            headers.set("X-Hrchat-Service-Token", serviceToken);
         headers.set("X-User-No", ctx.getEmpNo());
         String effectiveTenant = invocation != null && invocation.tenantId() != null && !invocation.tenantId().isBlank()
                 ? invocation.tenantId()

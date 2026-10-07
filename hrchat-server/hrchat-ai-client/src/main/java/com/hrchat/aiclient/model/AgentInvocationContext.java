@@ -16,6 +16,14 @@ public record AgentInvocationContext(
         String javaAskId,
         String invocationId,
         String traceId,
-        String toolContextToken
+        String toolContextToken,
+        java.util.Map<String, Object> queryContext
 ) {
+    public AgentInvocationContext(String tenantId, String sessionId, String javaAskId,
+                                  String invocationId, String traceId, String toolContextToken) {
+        this(tenantId, sessionId, javaAskId, invocationId, traceId, toolContextToken, null);
+    }
+    public AgentInvocationContext withQueryContext(java.util.Map<String, Object> snapshot) {
+        return new AgentInvocationContext(tenantId, sessionId, javaAskId, invocationId, traceId, toolContextToken, snapshot);
+    }
 }

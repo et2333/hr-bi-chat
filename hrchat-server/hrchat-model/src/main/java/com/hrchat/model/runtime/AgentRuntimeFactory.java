@@ -49,6 +49,8 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     private final String remoteBaseUrl;
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate;
+    @Value("${HRCHAT_MCP_SERVICE_TOKEN:${hrchat.mcp.service-token:local-dev-mcp-service-token}}")
+    private String serviceToken;
 
     /** 租户 key → 委托实例（懒加载） */
     private final Map<String, AgentRuntimeClient> clients = new ConcurrentHashMap<>();
@@ -159,7 +161,8 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
         }
         if ("remote".equals(runtime)) {
             log.info("agent runtime[{}] 使用配置远程模型: {}", tenantNo, remoteBaseUrl);
-            return new RemoteAgentRuntimeClient(remoteBaseUrl, null, null, tenantNo, objectMapper, restTemplate);
+            return new RemoteAgentRuntimeClient(remoteBaseUrl, null, null, tenantNo, objectMapper, restTemplate)
+                    .withServiceToken(serviceToken);
         }
         return local;
     }
@@ -172,7 +175,7 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
         }
         return new RemoteAgentRuntimeClient(trimTrailingSlash(config.getDeployUrl()),
                 config.getApiKey(), config.getModel(), tenantNo,
-                objectMapper, restTemplate);
+                objectMapper, restTemplate).withServiceToken(serviceToken);
     }
 
     private boolean isRoutable(LlmDeployState state, LlmModelConfig config) {
