@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import hmac
 import uuid
 from typing import Any, AsyncGenerator, Optional
 
@@ -95,6 +96,16 @@ class AskStore:
 
 
 store = AskStore()
+
+
+def require_java_context(snapshot, service_token, invocation_id, tool_token):
+    if snapshot is None:
+        return
+    expected = os.getenv("HRCHAT_MCP_SERVICE_TOKEN", "")
+    if not expected or not service_token or not hmac.compare_digest(expected, service_token):
+        raise HTTPException(403, "查询上下文仅接受受信 Java 服务传入")
+    if not invocation_id or not tool_token or snapshot.get("schema_version") != "1" or type(snapshot.get("context_version")) is not int or snapshot["context_version"] <= 0:
+        raise HTTPException(400, "查询上下文或本轮工具凭据无效")
 
 # 可重建 LLM 适配器运行池（P2）：tenant_no → {"profile","adapter"}，缺省槽位 key=DEFAULT_TENANT_KEY。
 # Java 管理台经 POST /v1/config 热应用（带 tenant_no 则落到对应租户槽位，缺省走默认槽位）。
@@ -306,8 +317,10 @@ def create_app(
         x_user_no: Optional[str] = Header(default=None),
         x_tenant_no: Optional[str] = Header(default=None),
         last_event_id: Optional[str] = Header(default=None),
+        x_hrchat_service_token: Optional[str] = Header(default=None),
     ):
         """提交问句：mode=STREAM 返回 SSE；mode=SYNC 返回固定终态信封。"""
+        require_java_context(body.query_context, x_hrchat_service_token, body.invocation_id, body.tool_context_token)
         ask_id = "ask_" + uuid.uuid4().hex[:8]
         context_override = body.context_override.model_dump() if body.context_override else None
         store.save_ask(ask_id, {
@@ -337,6 +350,7 @@ def create_app(
                 tools=tools,
                 mode=body.mode,
                 context_override=context_override,
+                query_context=body.query_context,
                 user_no=x_user_no,
                 tool_context_token=body.tool_context_token,
                 invocation_id=body.invocation_id,
@@ -383,12 +397,32 @@ def create_app(
         ask_id: str,
         body: ClarifyAnswerRequest,
         x_user_no: Optional[str] = Header(default=None),
+        x_tenant_no: Optional[str] = Header(default=None),
+        x_hrchat_service_token: Optional[str] = Header(default=None),
     ):
         """澄清应答后续跑原问数流，并返回与 SYNC 问数一致的终态信封。"""
+        if body.query_context is not None:
+            require_java_context(body.query_context, x_hrchat_service_token, body.invocation_id, body.tool_context_token)
+            pending = body.query_context.get("pending") or {}
+            choice = body.query_context.get("selection") or {}
+            if pending.get("ask_id") != ask_id or len(body.answers) != 1 or len(body.answers[0].option_ids) != 1 or choice != {
+                    "question_id": body.answers[0].question_id, "option_id": body.answers[0].option_ids[0]}:
+                raise HTTPException(400, "澄清任务或选项不匹配")
+            runtime = _ensure_runtime(x_tenant_no)
+            result = await run_ask_flow(question=pending["question"], session_id=session_id, ask_id=ask_id,
+                adapter=runtime["adapter"], tools=tools, mode="SYNC", query_context=body.query_context,
+                invocation_id=body.invocation_id, tool_context_token=body.tool_context_token, trace_id=body.trace_id,
+                runtime_evidence={"profile": runtime["profile"], "model": runtime.get("model"),
+                                  "config_version": runtime.get("config_version"), "tenant_no": x_tenant_no,
+                                  "java_ask_id": body.java_ask_id})
+            terminal = _terminal_response(ask_id, result)
+            store.save_ask(ask_id, {"session_id": session_id, "user_no": x_user_no, "tenant_no": x_tenant_no, **terminal})
+            return terminal
         stored = store.get_ask(ask_id)
         if not stored:
             raise HTTPException(404, f"ask {ask_id} 不存在")
-        if stored.get("session_id") != session_id or (stored.get("user_no") and x_user_no != stored["user_no"]):
+        if (stored.get("session_id") != session_id or (stored.get("user_no") and x_user_no != stored["user_no"])
+                or stored.get("tenant_no") != x_tenant_no):
             raise HTTPException(403, "无权访问该问句")
         if not body.answers:
             raise HTTPException(400, "answers 不能为空")
@@ -397,7 +431,10 @@ def create_app(
         if not any(q["question_id"] == body.answers[0].question_id
                 and any(o["option_id"] == forced_metric_code for o in q.get("options", [])) for q in pending):
             raise HTTPException(400, "请选择原问句提供的有效选项，或重新提交完整问题")
-        # Java 澄清续签时覆盖；未携带则沿用首次问数落库的令牌
+        # Java MCP continuations require newly issued, invocation-bound credentials.
+        if tools.backend == "java_mcp" and (not body.invocation_id or not body.tool_context_token
+                or body.invocation_id == stored.get("invocation_id")):
+            raise HTTPException(400, "澄清续查需要本轮新签发的工具凭据")
         if body.invocation_id:
             stored["invocation_id"] = body.invocation_id
         if body.tool_context_token:

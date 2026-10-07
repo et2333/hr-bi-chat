@@ -15,6 +15,8 @@ from langgraph_flows.query_plan import QueryPlan, OrgScope, PlanRejected, planni
 from langgraph_flows.query_draft import (ModelQueryDraft, draft_messages, compile_draft, DRAFT_VERSION,
                                         is_slot_only_question, FOLLOWUP_GUARD_VERSION)
 from langgraph_flows.demo_data import Window, resolve_window
+from langgraph_flows.query_memory import (ContextQueryDraft, memory_messages, compile_contextual,
+    context_candidate, selection_draft, task_action, PERIOD_OPTIONS, MEMORY_PROMPT_VERSION)
 
 
 MESSAGES = {
@@ -47,7 +49,8 @@ def guard_request(plan, question, metadata, context, selected):
         if name in residual:
             matches.add(oid)
             residual = residual.replace(name, " ")
-    for phrase in ("按部门对比", "按组织对比", "全部", "各部门"):
+    for phrase in ("按部门对比", "按组织对比", "全部部门", "所有部门", "全部组织", "所有组织", "全公司",
+                   "不限部门", "取消组织条件", "不限制部门", "全部", "各部门"):
         residual = residual.replace(phrase, " ")
     if re.search(r"[\u4e00-\u9fffA-Za-z0-9]{1,24}(?:部门|事业群|分公司|事业部|中心|团队|小组|部)", residual):
         raise PlanRejected("unknown_organization", MESSAGES["unknown_organization"], "clarify")
@@ -71,11 +74,13 @@ def guard_request(plan, question, metadata, context, selected):
 
 async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                            context_override=None, forced_metric_code=None, tool_context_token=None,
-                           invocation_id=None, trace_id=None, use_langgraph=True, runtime_evidence=None, **unused):
+                           invocation_id=None, trace_id=None, use_langgraph=True, runtime_evidence=None,
+                           query_context=None, **unused):
     from langgraph_flows.ask_flow import _build_payload, _window_to_dict
     started = time.perf_counter()
     uses_draft = getattr(adapter, "supports_query_draft", False)
-    evidence = {"schema_version": "1", "planner": "model", "prompt_version": DRAFT_VERSION if uses_draft else "query-plan-v1",
+    uses_memory = uses_draft and query_context is not None
+    evidence = {"schema_version": "1", "planner": "model", "prompt_version": MEMORY_PROMPT_VERSION if uses_memory else DRAFT_VERSION if uses_draft else "query-plan-v1",
                 "runtime": "remote", "query_backend": tools.backend,
                 "runtime_config": runtime_evidence or {}, "trace": [], "model_calls": [],
                 "query_plan": None, "execution": None, "reason": None}
@@ -102,6 +107,12 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             by_code = {m["code"]: m for m in s.get("catalog", {}).get("metrics", [])}
             options = [{"option_id": o.option_id, "label": by_code[o.option_id]["name"]}
                        for o in (plan.clarification_options if plan else []) if o.option_id in by_code]
+            if uses_memory and plan and plan.missing_slots == ["time_range"]:
+                options = [{"option_id": code, "label": label} for code, label in PERIOD_OPTIONS.items()]
+                metric_name = by_code.get(plan.metric_codes[0], {}).get("name", "该指标") if plan.metric_codes else "该指标"
+                org_name = next((o["name"] for o in s["catalog"]["organizations"]
+                                 if plan.org_scope and o["org_id"] == plan.org_scope.org_id), "当前授权组织")
+                message = f"已保留：{org_name} · {metric_name}。请选择统计期间，也可在输入框直接输入其他期间。"
             s["clarify_questions"] = [{"question_id": ask_id + "-q1", "question": message, "options": options}]
             s["events"].append({"event": "INTERRUPT", "payload": {
                 "interrupt_type": "CLARIFY", "ask_id": ask_id, "questions": s["clarify_questions"]}})
@@ -125,6 +136,32 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         s["evidence"]["metric_versions"] = {m["code"]: m["version"] for m in s["catalog"]["metrics"]}
 
     async def plan_query(s, trace):
+        nonlocal question
+        if uses_memory:
+            selected = selection_draft(query_context)
+            if selected:
+                draft, question = selected
+            elif task_action(question) == "cancel":
+                s["answer_payload"] = {"ask_id": ask_id, "answer_id": "ans_" + ask_id,
+                    "status": "COMPLETED", "intent": "CHITCHAT", "degraded": False,
+                    "conclusion": {"type": "TEXT", "value": "已取消待澄清问题。", "unit": None},
+                    "table": {"columns": [], "rows": [], "total": 0, "page": 1, "size": 1},
+                    "chart": None, "caliber": None, "followups": [], "elapsed_ms": 0}
+                s["events"].append({"event": "ANSWER_DONE", "payload": s["answer_payload"]})
+                return
+            else:
+                guard_known_capabilities(question)
+                result = await adapter.complete_query_draft(*memory_messages(question, s["catalog"], context_override, query_context))
+                s["evidence"]["model_calls"].append(result.evidence(ask_id=ask_id, invocation_id=invocation_id, prices=prices))
+                trace["call_id"] = result.call_id
+                if result.finish_reason not in (None, "stop"):
+                    raise PlanRejected("incomplete_model_output", "模型未完成查询计划，请重试", "failed")
+                draft = ContextQueryDraft.model_validate_json(result.text)
+            s["evidence"]["model_query_draft"] = draft.model_dump(exclude_none=True)
+            s["plan"], s["evidence"]["compilation"], s["effective_context"] = compile_contextual(
+                draft, question, s["catalog"], context_override, query_context, ask_id)
+            s["evidence"]["query_plan"] = s["plan"].model_dump(exclude_none=True)
+            return
         if uses_draft:
             s["evidence"]["capability_guard_version"] = "known-capability-guard-v1"
             guard_known_capabilities(question)
@@ -181,7 +218,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             p.org_scope = OrgScope(org_id=org["org_id"], include_children=p.org_scope.include_children)
             s["evidence"]["query_plan"] = p.model_dump(exclude_none=True)
         validate_plan(p, s["catalog"], turn_id=ask_id)
-        guard_request(p, question, s["catalog"], context_override, forced_metric_code)
+        guard_request(p, question, s["catalog"], s.get("effective_context", context_override), forced_metric_code)
         if p.decision in ("unsupported", "clarify"):
             stop(s, p.reason, MESSAGES.get(p.reason, MESSAGES["missing_slots"]), p.decision)
         elif p.decision == "chitchat":
@@ -211,6 +248,10 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         payload = _build_payload(output)
         # Never invent a data refresh timestamp. Demo clock is a query reference, not ETL evidence.
         payload["caliber"]["data_updated_at"] = None
+        selected_org = next((o["name"] for o in s["catalog"]["organizations"]
+                             if p.org_scope and o["org_id"] == p.org_scope.org_id), "当前全部授权组织")
+        payload["caliber"]["organization"] = selected_org + ("（含下级）" if p.org_scope and p.org_scope.include_children else "")
+        payload["caliber"]["query_mode"] = {"scalar": "汇总", "org": "按组织对比", "trend": "趋势", "detail": "明细"}[p.query_mode]
         if window:
             payload["caliber"]["time_range"] = f"{window.start.isoformat()}/{(window.end - timedelta(days=1)).isoformat()}"
         elif metric["time_type"] == "as_of":
@@ -281,6 +322,10 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             if stopped(state):
                 break
     state["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+    if uses_memory:
+        candidate = context_candidate(state, query_context, question)
+        if candidate is not None:
+            state["evidence"]["query_context_candidate"] = candidate
     state["evidence"]["cost_summary"] = summarize_calls(state["evidence"]["model_calls"])
     if state.get("answer_payload"):
         state["answer_payload"]["elapsed_ms"] = state["elapsed_ms"]
