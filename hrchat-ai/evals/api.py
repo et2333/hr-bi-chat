@@ -10,9 +10,9 @@ class JavaApi:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def request(self, path, identity, body=None):
-        headers = {"X-User-No": identity, "Content-Type": "application/json"}
-        req = urllib.request.Request(self.base_url + path, headers=headers,
+    def request(self, path, identity, body=None, *, method=None, headers=None):
+        headers = {"X-User-No": identity, "Content-Type": "application/json", **(headers or {})}
+        req = urllib.request.Request(self.base_url + path, headers=headers, method=method,
                                      data=None if body is None else json.dumps(body).encode())
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
@@ -32,6 +32,15 @@ class JavaApi:
         if "context_override" in turn:
             body["contextOverride"] = turn["context_override"]
         status, raw = self.request(f"/api/v1/chat/sessions/{session}/asks", identity, body)
+        return self.read_turn(status, raw, identity, started)
+
+    def clarify(self, session, identity, ask_id, question_id, option_id):
+        started = time.perf_counter()
+        status, raw = self.request(f"/api/v1/chat/sessions/{session}/asks/{ask_id}/clarifications", identity,
+                                  {"answers": [{"questionId": question_id, "optionIds": [option_id]}]})
+        return self.read_turn(status, raw, identity, started)
+
+    def read_turn(self, status, raw, identity, started):
         events = []
         for block in raw.replace("\r\n", "\n").split("\n\n"):
             data = "\n".join(line[5:].strip() for line in block.splitlines() if line.startswith("data:"))
