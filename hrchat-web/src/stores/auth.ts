@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { get } from '@/api/http'
+import { get, del } from '@/api/http'
 import type { ApiResponse } from '@/api/types'
 import { TENANT_NO_KEY, TENANT_SWITCH_REASON_KEY, USER_NO_KEY } from '@/api/http'
 
@@ -69,7 +69,8 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   /** 切换身份（持久化并全局生效；租户管理员身份同步切换其租户上下文，普通身份复位为默认租户 t01） */
-  function switchUser(userNo: string) {
+  async function switchUser(userNo: string) {
+    await del('/chat/query-contexts')
     ++requestVersion
     functionPerms.value = []
     roles.value = []
