@@ -261,7 +261,9 @@ async function send(question?: string) {
   const sessionId = chat.currentSessionId
   if (sessionId == null) return
 
-  // 先清输入框，避免 v-model 与按钮传参竞态导致问句残留
+  // 先清输入框；等 DOM 刷完再禁用，避免 a-textarea 在 disabled 切换时把旧值写回
+  input.value = ''
+  await nextTick()
   input.value = ''
   chat.pushUserTurn(q)
   // 助手轮次带上问句，存报表时用问句区分「对比 / 趋势 / 标量」
@@ -532,6 +534,8 @@ function normalizeAnswerPayload(payload: Record<string, unknown>): AnswerPayload
             ? String(c.metric_code)
             : undefined,
       definition: String(c.definition ?? ''),
+      organization: c.organization == null ? undefined : String(c.organization),
+      queryMode: c.queryMode == null && c.query_mode == null ? undefined : String(c.queryMode ?? c.query_mode),
       timeRange:
         c.timeRange != null
           ? String(c.timeRange)

@@ -24,7 +24,8 @@
         </a-radio>
       </a-radio-group>
     </div>
-    <a-button type="primary" :disabled="!allAnswered" :loading="submitting" @click="submit">
+    <p>也可在下方输入框补充条件；输入“取消”结束澄清，输入“重新查询”开始新任务。</p>
+    <a-button v-if="clarify.questions.some(q => q.options.length)" type="primary" :disabled="!allAnswered || submitting" :loading="submitting" @click="submit">
       确认回答
     </a-button>
   </div>

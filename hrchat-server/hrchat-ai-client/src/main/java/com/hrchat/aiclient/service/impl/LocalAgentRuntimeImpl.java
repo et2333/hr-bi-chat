@@ -48,6 +48,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -84,6 +86,19 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             "payroll_total", "元", "avg_salary", "元");
     private static final Map<String, Integer> PERCENT_METRICS = Map.of(
             "turnover_rate", 1, "attendance_rate", 1);
+
+    /** 缺期间澄清选项；续跑时作为 TimeRange.preset，不能当作指标 code。 */
+    private static final Set<String> PERIOD_PRESETS = Set.of(
+            "THIS_MONTH", "LAST_MONTH", "LAST_30D", "LAST_7D");
+
+    private static final Pattern DIGIT_MONTH = Pattern.compile("(?<!\\d)(1[0-2]|0?[1-9])\\s*月份?");
+
+    /** 长月名优先，避免「十一月」命中「一月」。 */
+    private static final String[] CN_MONTHS = {
+            "十一月", "十二月", "十月", "一月", "二月", "三月", "四月", "五月",
+            "六月", "七月", "八月", "九月"
+    };
+    private static final int[] CN_MONTH_NUMBERS = {11, 12, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9};
 
     private final HybridRetriever hybridRetriever;
     private final SemanticMetaService semanticMetaService;
@@ -148,8 +163,14 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             throw new BizException(ErrorCode.PARAM_MISSING, "answers[].option_ids");
         }
         long start = System.currentTimeMillis();
-        // 澄清选项为语义对象编码，续跑时强制指定指标
-        return runQuery(askId, question.trim(), ctx, answers.optionIds().get(0), null, start);
+        String option = answers.optionIds().get(0);
+        // 期间澄清选项带 TimeRange preset；指标澄清选项仍作为 forcedMetricCode
+        if (PERIOD_PRESETS.contains(option)) {
+            ContextOverride period = new ContextOverride(new TimeRange(option, null, null, null),
+                    null, null, null);
+            return runQuery(askId, question.trim(), ctx, null, period, start);
+        }
+        return runQuery(askId, question.trim(), ctx, option, null, start);
     }
 
     // =================================================================
@@ -251,9 +272,15 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
                     SseEvents.INTENT_QUERY, false, elapsed(start));
         }
         if (window == null && ("hire_count".equals(metricCode) || "leave_count".equals(metricCode))) {
-            events.add(errorEvent(ErrorCode.PARAM_MISSING.getCode(),
-                    "请明确入职或离职人数的统计期间", false));
-            return new AgentResult(askId, events, null, List.of(), null,
+            String prompt = "请明确入职或离职人数的统计期间";
+            List<ClarifyQuestion.Option> periodOptions = List.of(
+                    new ClarifyQuestion.Option("THIS_MONTH", "本月"),
+                    new ClarifyQuestion.Option("LAST_MONTH", "上月"),
+                    new ClarifyQuestion.Option("LAST_30D", "近30天"));
+            List<ClarifyQuestion> questions = List.of(new ClarifyQuestion(
+                    askId + "-q1", prompt, periodOptions, false));
+            events.add(new SseEvent(SseEvents.INTERRUPT, periodClarifyPayload(askId, prompt, periodOptions)));
+            return new AgentResult(askId, events, null, questions, null,
                     SseEvents.INTENT_QUERY, false, elapsed(start));
         }
 
@@ -352,6 +379,23 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             o.put("label", d.name());
             options.add(o);
         }
+        return clarifyPayload(askId, prompt, options);
+    }
+
+    /** 期间澄清载荷：option_id 为 TimeRange preset。 */
+    private Map<String, Object> periodClarifyPayload(String askId, String prompt,
+                                                     List<ClarifyQuestion.Option> periodOptions) {
+        List<Map<String, Object>> options = new ArrayList<>();
+        for (ClarifyQuestion.Option opt : periodOptions) {
+            Map<String, Object> o = new LinkedHashMap<>();
+            o.put("option_id", opt.optionId());
+            o.put("label", opt.label());
+            options.add(o);
+        }
+        return clarifyPayload(askId, prompt, options);
+    }
+
+    private Map<String, Object> clarifyPayload(String askId, String prompt, List<Map<String, Object>> options) {
         Map<String, Object> question = new LinkedHashMap<>();
         question.put("question_id", askId + "-q1");
         question.put("question", prompt);
@@ -829,6 +873,10 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         if (co != null && co.timeRange() != null && co.timeRange().preset() != null) {
             return mapPreset(co.timeRange().preset(), co.timeRange());
         }
+        // 「上个月」不含连续子串「上月」，须先匹配
+        if (question.contains("上个月") || question.contains("上一个月")) {
+            return mapPreset("LAST_MONTH", null);
+        }
         if (question.contains("上月")) {
             return mapPreset("LAST_MONTH", null);
         }
@@ -862,6 +910,40 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
         if (question.contains("近一年") || question.contains("近12个月")
                 || question.contains("最近一年") || question.contains("最近12个月")) {
             return new TimeWindow(now.withDayOfMonth(1).minusMonths(11), now.plusDays(1));
+        }
+        TimeWindow calendarMonth = resolveCalendarMonth(question);
+        if (calendarMonth != null) {
+            return calendarMonth;
+        }
+        return null;
+    }
+
+    /** 演示年内的日历月：7月 / 07月份 / 七月（相对 demoNow 的年份）。 */
+    private TimeWindow resolveCalendarMonth(String question) {
+        Matcher digit = DIGIT_MONTH.matcher(question);
+        if (digit.find()) {
+            int month = Integer.parseInt(digit.group(1));
+            LocalDate start = LocalDate.of(demoNow.getYear(), month, 1);
+            return new TimeWindow(start, start.plusMonths(1));
+        }
+        for (int i = 0; i < CN_MONTHS.length; i++) {
+            String name = CN_MONTHS[i];
+            int idx = question.indexOf(name);
+            if (idx < 0) {
+                continue;
+            }
+            // 跳过「近一月」「本七月」等相对说法中的假阳性
+            if (idx > 0) {
+                char prev = question.charAt(idx - 1);
+                if ("近去今本上下".indexOf(prev) >= 0) {
+                    continue;
+                }
+            }
+            if (question.regionMatches(idx, name + "份", 0, name.length() + 1)
+                    || question.regionMatches(idx, name, 0, name.length())) {
+                LocalDate start = LocalDate.of(demoNow.getYear(), CN_MONTH_NUMBERS[i], 1);
+                return new TimeWindow(start, start.plusMonths(1));
+            }
         }
         return null;
     }

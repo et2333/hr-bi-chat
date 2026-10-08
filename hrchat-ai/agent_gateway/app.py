@@ -40,7 +40,18 @@ from agentscope_teams.attribution_team import AttributionTeam
 
 # 环境变量：LLM_PROFILE=mock|openai；HEARTBEAT_INTERVAL=15
 # QUERY_BACKEND=java_mcp（默认）|demo；java_mcp 需 JAVA_MCP_BASE_URL + HRCHAT_MCP_SERVICE_TOKEN
-LLM_PROFILE = os.getenv("LLM_PROFILE", "mock")
+# .env.local 含 OPENAI_API_KEY 且未写 LLM_PROFILE 时，自动走 openai 规划路线
+from adapters.local_env import LOCAL_ENV_FILE, load_local_model_env
+from dotenv import dotenv_values
+
+_had_llm_profile = "LLM_PROFILE" in os.environ
+_local_env = dotenv_values(LOCAL_ENV_FILE) if LOCAL_ENV_FILE.is_file() else {}
+# CLI 已加载文件并应用 --model；子进程不能再次用文件覆盖显式启动配置。
+load_local_model_env(override=False)
+LLM_PROFILE = os.getenv("LLM_PROFILE", "mock").strip().lower() or "mock"
+if (not _had_llm_profile and "LLM_PROFILE" not in _local_env
+        and (_local_env.get("OPENAI_API_KEY") or "").strip()):
+    LLM_PROFILE = "openai"
 HEARTBEAT_INTERVAL = float(os.getenv("HEARTBEAT_INTERVAL", "15"))
 ALLOW_ORIGINS = os.getenv(
     "ALLOW_ORIGINS", "http://localhost:5173,http://localhost:5175"
@@ -359,7 +370,10 @@ def create_app(
 
         def save_terminal(result):
             terminal = _terminal_response(ask_id, result)
-            store.save_ask(ask_id, {**(store.get_ask(ask_id) or {}), **terminal})
+            extra = {}
+            if result.get("metric_code"):
+                extra["metric_code"] = result["metric_code"]
+            store.save_ask(ask_id, {**(store.get_ask(ask_id) or {}), **terminal, **extra})
             return terminal
 
         if body.mode == "SYNC":
@@ -426,10 +440,10 @@ def create_app(
             raise HTTPException(403, "无权访问该问句")
         if not body.answers:
             raise HTTPException(400, "answers 不能为空")
-        forced_metric_code = body.answers[0].option_ids[0]
+        selected = body.answers[0].option_ids[0]
         pending = stored.get("questions") or []
         if not any(q["question_id"] == body.answers[0].question_id
-                and any(o["option_id"] == forced_metric_code for o in q.get("options", [])) for q in pending):
+                and any(o["option_id"] == selected for o in q.get("options", [])) for q in pending):
             raise HTTPException(400, "请选择原问句提供的有效选项，或重新提交完整问题")
         # Java MCP continuations require newly issued, invocation-bound credentials.
         if tools.backend == "java_mcp" and (not body.invocation_id or not body.tool_context_token
@@ -442,6 +456,13 @@ def create_app(
         if body.trace_id:
             stored["trace_id"] = body.trace_id
 
+        time_presets = {"THIS_MONTH", "LAST_MONTH", "LAST_30D", "LAST_7D"}
+        context_override = dict(stored.get("context_override") or {})
+        forced_metric_code = selected
+        if selected in time_presets:
+            context_override["time_range"] = {"preset": selected}
+            forced_metric_code = stored.get("metric_code")
+
         result = await run_ask_flow(
             question=stored["question"],
             session_id=session_id,
@@ -449,7 +470,7 @@ def create_app(
             adapter=get_current_adapter(stored.get("tenant_no")),
             tools=tools,
             mode="SYNC",
-            context_override=stored.get("context_override"),
+            context_override=context_override or None,
             user_no=x_user_no or stored.get("user_no"),
             forced_metric_code=forced_metric_code,
             tool_context_token=stored.get("tool_context_token"),

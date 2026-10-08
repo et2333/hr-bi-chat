@@ -55,6 +55,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { get } from '@/api/http'
+import { message } from 'ant-design-vue'
 import type { ApiResponse, EffectivePermissions } from '@/api/types'
 import { useAuthStore } from '@/stores/auth'
 
@@ -79,9 +80,14 @@ async function loadPerms() {
   }
 }
 
-function switchUser(empNo: string) {
-  auth.switchUser(empNo)
-  loadPerms()
+async function switchUser(empNo: string) {
+  try {
+    await auth.switchUser(empNo)
+    loadPerms()
+  } catch {
+    selectedUser.value = auth.empNo
+    message.error('未能清理当前查询条件，身份尚未切换，请重试')
+  }
 }
 </script>
 

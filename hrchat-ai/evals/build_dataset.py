@@ -39,7 +39,7 @@ def build():
             for org, orgs in [("研发中心", [2, 3, 4]), ("研发一部", [3])]:
                 add(group, "single", [{"question": template.format(org=org, metric=name),
                                       "expected": expected(metric, orgs, start, end)}], split=split)
-    # Missing/ambiguous slots: S0 requires a missing period to stop with HRX-1001.
+    # Preserve the frozen S1 baseline; S2/S3 stage policies score period clarification separately.
     for metric in ["入职人数", "离职人数"]:
         for org in ["研发中心", "研发一部"]:
             add("missing_period", "clarify", [{"question": org + metric,

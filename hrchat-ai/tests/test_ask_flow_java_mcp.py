@@ -26,9 +26,14 @@ class FakeJavaTools:
 
     async def metric_catalog(self, context: dict[str, Any]) -> dict[str, MetricView]:
         self.catalog_contexts.append(context)
+        if getattr(self, "catalog", None):
+            return self.catalog
         return {
             "headcount": MetricView(
                 code="headcount", name="在职人数", definition="COUNT(*)", unit="人"
+            ),
+            "leave_count": MetricView(
+                code="leave_count", name="离职人数", definition="COUNT(*)", unit="人"
             ),
             "turnover_rate": MetricView(
                 code="turnover_rate", name="离职率", definition="...", percent=True
@@ -121,6 +126,32 @@ async def test_java_mcp_permission_error_no_demo_fallback():
     error_events = [e for e in result["events"] if e["event"] == "ERROR"]
     assert error_events
     assert error_events[0]["payload"]["code"] == "HRC-2003"
+
+
+@pytest.mark.asyncio
+async def test_java_mcp_leave_without_period_clarifies_instead_of_query():
+    tools = FakeJavaTools()
+    result = await run_ask_flow(
+        question="离职人数", session_id="s1", ask_id="ask_period",
+        adapter=ADAPTER, tools=tools, use_langgraph=False,  # type: ignore[arg-type]
+    )
+    assert result["clarify_questions"]
+    assert [o["option_id"] for o in result["clarify_questions"][0]["options"]] == [
+        "THIS_MONTH", "LAST_MONTH", "LAST_30D"]
+    assert not tools.query_calls
+
+
+@pytest.mark.asyncio
+async def test_java_mcp_digit_month_leave_queries_with_window(monkeypatch):
+    monkeypatch.setenv("HRCHAT_DEMO_NOW", "2026-09-28")
+    tools = FakeJavaTools()
+    result = await run_ask_flow(
+        question="7月离职人数", session_id="s1", ask_id="ask_july",
+        adapter=ADAPTER, tools=tools, use_langgraph=False,  # type: ignore[arg-type]
+    )
+    assert result.get("answer_payload")
+    assert tools.query_calls[0]["window"].start == date(2026, 7, 1)
+    assert tools.query_calls[0]["window"].end == date(2026, 8, 1)
 
 
 @pytest.mark.asyncio

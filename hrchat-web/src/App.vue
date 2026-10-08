@@ -57,6 +57,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
+import { message } from 'ant-design-vue'
 import { useAuthStore } from '@/stores/auth'
 import { ADMIN_MENUS, visible, hasPerm } from '@/layouts/adminMenu'
 
@@ -98,8 +99,12 @@ function goAdmin() {
   if (first) router.push(first.path)
 }
 
-function onSwitchUser({ key }: { key: string }) {
-  auth.switchUser(key)
+async function onSwitchUser({ key }: { key: string }) {
+  try {
+    await auth.switchUser(key)
+  } catch {
+    message.error('未能清理当前查询条件，身份尚未切换，请重试')
+  }
 }
 
 watch(

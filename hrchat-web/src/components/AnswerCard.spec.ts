@@ -26,6 +26,12 @@ const COMPLETED: AnswerPayload = {
 }
 
 describe('components/AnswerCard', () => {
+  it('shows actual adopted conditions including inherited organization and period', () => {
+    const wrapper = mount(AnswerCard, { props: { state: 'completed', payload: { ...COMPLETED,
+      caliber: { ...COMPLETED.caliber!, organization: '研发中心（含下级）', timeRange: '2026-08-01/2026-08-31', queryMode: '趋势' },
+    } }, ...mountOpts })
+    expect(wrapper.find('.adopted-conditions').text()).toContain('研发中心（含下级） · 2026-08-01/2026-08-31 · 趋势')
+  })
   it('完成态渲染三段式：结论/数据/口径/追问/反馈', () => {
     const wrapper = mount(AnswerCard, { props: { state: 'completed', payload: COMPLETED, canViewSql: true }, ...mountOpts })
     expect(wrapper.text()).toContain('128')

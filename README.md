@@ -21,49 +21,14 @@ hr-bi-chat/
 - Maven 3.9+
 - Node.js 20+
 - pnpm 9.1.3
-- Python 3.11+（仅运行 `hrchat-ai` 时需要）
+- Python 3.11+
 
 ## 本地启动
 
-默认配置使用 H2 内存数据库、模拟身份和 Java 本地问数引擎，启动前后端即可体验主要功能；无需安装 MySQL、Redis、Python 或配置模型密钥。
+默认配置使用 H2 内存数据库、模拟身份和 Java 本地问数引擎，启动前后端即可体验主要功能。
 
-以下使用 Windows PowerShell。每个新终端先进入仓库根目录（例如 `Set-Location D:\et-repo\bi-chat`），再执行对应命令。Java/Node 不需要 Python 虚拟环境；前端依赖安装在项目 `node_modules` 中。
 
-### 1. 启动后端
-
-```powershell
-cd hrchat-server
-mvn -pl hrchat-bootstrap -am package "-DskipTests"
-java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar --spring.profiles.active=local --hrchat.security.mode=mock --hrchat.ai.runtime=local --server.address=127.0.0.1 --server.port=8080
-```
-
-后端地址：http://localhost:8080  
-Swagger：http://localhost:8080/swagger-ui.html  
-健康检查：http://localhost:8080/actuator/health
-
-构建成功后再执行 `java`；更新 Java 代码或迁移脚本后需要重新构建并重启。启动时 Flyway 自动执行 V1～V3，创建表、加载演示身份及默认角色权限，不要再手动导入 SQL。保持该终端运行，`Ctrl+C` 停止服务。
-
-### 2. 启动前端
-
-另开一个终端，从仓库根目录执行（不要在 `hrchat-server` 内执行 `cd hrchat-web`）：
-
-```powershell
-cd hrchat-web
-pnpm install --frozen-lockfile
-pnpm dev --host 127.0.0.1 --port 5173 --strictPort
-```
-
-浏览器访问 http://localhost:5173。前端将 `/api` 请求代理到后端 8080 端口。首次访问默认演示身份为 `hr01`，之后会记住上次身份；可通过右上角下拉菜单或个人中心切换为管理员 `adm01`。
-
-端口被占用时先确认是否已有项目服务运行，不要重复启动。mock 身份不是登录认证，仅用于本机演示，不要将服务暴露到公网。
-
-## 手动验证功能权限
-
-参见 [统一功能权限来源：本地手动验收](docs/统一功能权限来源本地验收.md)。推荐使用新角色和 `test09`，依次验证“无权限 → 授权 → 能访问 → 撤权 → 403”，不修改默认管理员角色。
-
-## 可选：启动 Python AI 服务
-
-本次功能权限验收不需要此服务。若要单独体验 Python 运行时，另开终端，从仓库根目录执行；以下直接使用虚拟环境解释器，无需激活环境：
+## 1. 终端A：启动 Python AI 服务
 
 ```powershell
 cd hrchat-ai
@@ -75,6 +40,8 @@ $env:JAVA_MCP_BASE_URL = "http://127.0.0.1:8080/mcp"
 $env:HRCHAT_MCP_SERVICE_TOKEN = "local-dev-mcp-service-token"
 .\.venv\Scripts\python.exe -m uvicorn agent_gateway.app:app --host 127.0.0.1 --port 8000
 ```
+
+默认 `LLM_PROFILE=mock`：规则引擎 + 期间澄清芯片（本月/上月/近30天），识别「上个月」「7月」等，**不调用大模型**。要用真实 LLM 规划时，复制 `hrchat-ai/.env.example` 为 `.env.local`，填入 `OPENAI_*` 与 `LLM_PROFILE=openai`（若 `.env.local` 只填了 Key、未写 `LLM_PROFILE`，启动时也会自动切到 openai），然后**重启** uvicorn。管理台「一键部署」ACTIVE 模型也会热切换到 openai。
 
 默认 `QUERY_BACKEND=java_mcp`：问数取数走 Java `/mcp`（`get_semantic_meta` / `semantic_query`），需同时配置 `JAVA_MCP_BASE_URL` 与 `HRCHAT_MCP_SERVICE_TOKEN`，否则 Python **启动失败**（避免误当正式）。仅本地假数据演示时显式设 `QUERY_BACKEND=demo`。MCP 客户端使用 `trust_env=False`，避免 Windows 系统代理把本机 `127.0.0.1` 请求变成空 body 的 HTTP 502。
 
@@ -92,11 +59,49 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
 
 注意：Java `hrchat.ai.runtime=local`（默认）不进 Python，现有本地演示不受影响。remote 链路与 MCP/`semantic_query` 同源（H2 种子），不再使用 Python 字典假数。ask/clarify 在 MVC 异步线程执行，以便 Python 回调本机 `/mcp`。后台 ACTIVE 模型部署配置优先于 `hrchat.ai.runtime`；测试默认本地链路时不要点击模型“一键部署”。
 
-答案卡上的「查看明细」等追问 chips 为**占位**（点击会作为独立短句发送，易 HRA-4001），多轮上下文不在本期范围，详见验收文档。
+追问 chips 已带指标名并可走明细 / 组织对比 / 近三月趋势（详见 [Demo 口播脚本](docs/demo-walkthrough.md)）。同会话多轮条件继承需 `runtime=remote` + Python；local 规则引擎支持期间/指标澄清与常见时间说法（含「上个月」「7月」）。
 
-## 手动验证 remote + Java MCP 问数
+### 2. 终端B：启动后端
 
-参见 [remote + Java MCP 问数：本地手动验收](docs/remote-java-mcp问数本地验收.md)。推荐顺序：hr01 有数且可查看 SQL → hr02 为 HRC-2003（非 HRS-3001）→ 发送后输入框清空。准备步骤见上文「可选：启动 Python AI 服务」。
+```powershell
+cd hrchat-server
+mvn -pl hrchat-bootstrap -am package "-DskipTests"
+java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar --spring.profiles.active=local --hrchat.security.mode=mock --hrchat.ai.runtime=local --server.address=127.0.0.1 --server.port=8080
+```
+
+后端地址：http://localhost:8080  
+Swagger：http://localhost:8080/swagger-ui.html  
+健康检查：http://localhost:8080/actuator/health
+
+构建成功后再执行 `java`；更新 Java 代码或迁移脚本后需要重新构建并重启。启动时 Flyway 自动执行 V1～V5，创建表、加载演示身份、默认角色权限与样例报表。
+
+### 3. 终端C：启动前端
+
+```powershell
+cd hrchat-web
+pnpm install --frozen-lockfile
+pnpm dev --host 127.0.0.1 --port 5173 --strictPort
+```
+
+浏览器访问 http://localhost:5173。前端将 `/api` 请求代理到后端 8080 端口。首次访问默认演示身份为 `hr01`，之后会记住上次身份；可通过右上角下拉菜单或个人中心切换为管理员 `adm01`。
+
+
+
+
+
+
+
+
+
+
+E2E 需先按“本地启动”启动 8080 端口的 Java local/mock 服务；首次运行还需执行 `pnpm exec playwright install chromium`：
+
+```powershell
+cd hrchat-web
+pnpm exec playwright test e2e/ask.spec.ts e2e/permission.spec.ts e2e/report.spec.ts
+```
+
+三条 E2E 分别验证正常问数、越权拦截和报表创建。
 
 ## 常用配置
 
@@ -112,4 +117,4 @@ java -jar .\hrchat-bootstrap\target\hrchat-bootstrap-1.0.0-SNAPSHOT.jar `
 | `OPENAI_API_KEY` | OpenAI 兼容接口密钥 | 未设置 |
 | `OPENAI_MODEL` | 模型名称 | `gpt-4o-mini` |
 
-本地 H2 数据会在后端停止后清空，重启时自动载入演示数据。更多信息参见 [项目文档](docs/) 和 [开发计划](docs/development-plans/)。
+本地 H2 数据会在后端停止后清空，重启时自动载入演示数据。

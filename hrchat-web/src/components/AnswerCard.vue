@@ -78,6 +78,9 @@
 
       <!-- 口径溯源 -->
       <div v-if="payload.caliber" class="caliber-box">
+        <span v-if="payload.caliber.organization || payload.caliber.timeRange" class="adopted-conditions">
+          本次查询：{{ [payload.caliber.metric, payload.caliber.organization, payload.caliber.timeRange, payload.caliber.queryMode].filter(Boolean).join(' · ') }}
+        </span>
         <span class="caliber-label">口径溯源</span>
         <span class="caliber-text">{{ payload.caliber.definition }}</span>
       </div>
@@ -255,6 +258,11 @@ function rate(rating: 'UP' | 'DOWN') {
 .caliber-label {
   font-weight: 600;
   margin-right: 8px;
+}
+
+.adopted-conditions {
+  display: block;
+  margin-bottom: 6px;
 }
 
 .caliber-text {

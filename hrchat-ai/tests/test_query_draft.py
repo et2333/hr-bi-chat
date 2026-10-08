@@ -54,7 +54,6 @@ def test_missing_event_period_is_clarification_even_if_model_says_execute():
 
 @pytest.mark.parametrize("question,expression,reason", [
     ("研发中心离职人数", "本月", "time_source_mismatch"),
-    ("上月研发中心人数", None, "time_condition_omitted"),
     ("昨天研发中心人数", None, "time_condition_omitted"),
     ("昨天研发中心人数", "昨天", "unresolved_time"),
     ("上月和本月研发中心人数", "本月", "conflicting_time"),
@@ -63,6 +62,12 @@ def test_invented_omitted_and_conflicting_time_never_becomes_a_query(question, e
     with pytest.raises(PlanRejected) as exc:
         compile_intent(draft(time_expression=expression), question)
     assert exc.value.reason == reason
+
+
+def test_single_resolvable_time_mention_fills_omitted_expression():
+    p, e = compile_intent(draft(time_expression=None), "上月研发中心人数")
+    assert p.decision == "execute" and e["time_expression"] == "上月"
+    assert (p.time_range.start, p.time_range.end) == ("2026-08-01", "2026-09-01")
 
 
 def test_explicit_ui_range_keeps_exclusive_end_and_overrides_natural_time():
@@ -89,12 +94,24 @@ def test_model_cannot_invent_requested_name():
 @pytest.mark.parametrize("clock,expression,start,end", [
     ("2024-03-05", "上月", "2024-02-01", "2024-03-01"),
     ("2026-01-01", "上个月", "2025-12-01", "2026-01-01"),
+    ("2026-09-28", "上一个月", "2026-08-01", "2026-09-01"),
     ("2026-09-28", "最近7天", "2026-09-22", "2026-09-29"),
     ("2026-09-28", "近30天", "2026-08-30", "2026-09-29"),
     ("2026-09-28", "2026-08-01至2026-08-20", "2026-08-01", "2026-08-21"),
+    ("2026-09-28", "7月", "2026-07-01", "2026-08-01"),
+    ("2026-09-28", "07月份", "2026-07-01", "2026-08-01"),
+    ("2026-09-28", "七月", "2026-07-01", "2026-08-01"),
+    ("2025-03-01", "2026年7月", "2026-07-01", "2026-08-01"),
 ])
 def test_calendar_boundaries(clock, expression, start, end):
     assert tuple(d.isoformat() for d in resolve_expression(expression, date.fromisoformat(clock))) == (start, end)
+
+
+def test_digit_month_in_question_compiles_even_if_model_omits_time_expression():
+    p, e = compile_intent(
+        draft(metric_codes=["leave_count"], organization=None, time_expression=None), "7月离职人数")
+    assert p.decision == "execute" and (p.time_range.start, p.time_range.end) == ("2026-07-01", "2026-08-01")
+    assert e["time_expression"] == "7月"
 
 
 class DraftPlanner(Planner):
