@@ -6,8 +6,11 @@ from agent_gateway.app import _runtimes, apply_llm_config, create_app
 
 
 @pytest.fixture(autouse=True)
-def _reset_runtime():
+def _reset_runtime(monkeypatch):
     """用例结束后复位全局 _runtime，避免污染其它测试文件。"""
+    import agent_gateway.app as app_mod
+    # 本机 .env.local 含 Key 时启动档会自动 openai；配置测试固定 mock
+    monkeypatch.setattr(app_mod, "LLM_PROFILE", "mock")
     _runtimes.clear()
     yield
     _runtimes.clear()

@@ -6,7 +6,9 @@ from agent_gateway.app import _runtimes, apply_llm_config, create_app
 
 
 @pytest.fixture(autouse=True)
-def _reset_runtime():
+def _reset_runtime(monkeypatch):
+    import agent_gateway.app as app_mod
+    monkeypatch.setattr(app_mod, "LLM_PROFILE", "mock")
     _runtimes.clear()
     yield
     _runtimes.clear()
