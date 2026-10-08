@@ -41,7 +41,10 @@ public record AnswerPayload(
 
     /** 口径溯源（BR-09 数据时效标注）；metric 为展示名，metricCode 为语义层 code（存报表用）。 */
     public record Caliber(String metric, String definition, String timeRange, String dataUpdatedAt,
-                          String metricCode) {
+                          String metricCode, String organization, String queryMode) {
+        public Caliber(String metric, String definition, String timeRange, String dataUpdatedAt, String metricCode) {
+            this(metric, definition, timeRange, dataUpdatedAt, metricCode, null, null);
+        }
         /** 兼容旧四参构造（无 code）。 */
         public Caliber(String metric, String definition, String timeRange, String dataUpdatedAt) {
             this(metric, definition, timeRange, dataUpdatedAt, null);

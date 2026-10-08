@@ -116,6 +116,8 @@ export interface Caliber {
   metricCode?: string
   definition: string
   timeRange?: string
+  organization?: string
+  queryMode?: string
   dataUpdatedAt: string
 }
 
