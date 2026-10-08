@@ -12,6 +12,7 @@ import urllib.request
 from adapters.local_env import load_local_model_env
 from evals.dataset import load_dataset, select_cases, sha
 from evals.reference import ROOT
+from evals.s5_compare import source_fingerprint
 
 
 def wait_for(url, process):
@@ -33,6 +34,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
     parser.add_argument("--stage", choices=["s2", "s3", "s4"], default="s3")
+    parser.add_argument("--runtime", choices=["remote", "local"], default="remote")
+    parser.add_argument("--memory", choices=["on", "off"], default="on", help="Evaluation-only history ablation")
+    parser.add_argument("--report-pointer", help="Write the exact report path for an experiment controller")
     parser.add_argument("--repair", choices=["on", "off"], help="Defaults on for S4, off for S2/S3")
     parser.add_argument("--repair-smoke", action="store_true", help="S4 injected fixture checks through Java API")
     parser.add_argument("--repair-real-smoke", action="store_true", help="S4: 3 injected first drafts with real API repair calls")
@@ -48,6 +52,14 @@ def main():
     parser.add_argument("--planner-variant", choices=["baseline", "contract-notes-v1"], default="baseline",
                         help="Prompt experiment; only used with --planner-diagnostics")
     args = parser.parse_args()
+    if args.runtime == "local" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
+                                   or args.repair_real_smoke or args.planner_diagnostics or args.model
+                                   or args.memory == "off" or args.repair == "on"):
+        parser.error("Local rule baseline cannot use model, ablation, repair or smoke options")
+    if args.memory == "off" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
+                                or args.repair_real_smoke or args.planner_diagnostics):
+        parser.error("Memory ablation uses natural cases only")
+    real_model = args.runtime == "remote" and not args.fixture_smoke
     if args.repair_real_smoke and (args.fixture_smoke or args.repair_smoke or args.memory_smoke or args.case_id
                                  or args.planner_diagnostics or args.stage != "s4" or args.repair == "off"):
         parser.error("Real repair smoke requires --stage s4 with repair enabled, without other smoke/selection options")
@@ -65,12 +77,12 @@ def main():
         parser.error(str(exc))
     if args.planner_diagnostics and sum(len(c["turns"]) for c in selected) > 8:
         parser.error("Planner diagnostics is limited to 8 selected turns per run")
-    if not args.fixture_smoke:
+    if real_model:
         load_local_model_env()
     jar = ROOT / "hrchat-server/hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar"
     if not jar.is_file():
         parser.error("Build the Java JAR first")
-    if not args.fixture_smoke and not os.getenv("OPENAI_API_KEY"):
+    if real_model and not os.getenv("OPENAI_API_KEY"):
         parser.error("Set OPENAI_API_KEY in hrchat-ai/.env.local or this PowerShell session before a real model run")
     for port in (args.java_port, args.python_port):
         with socket.socket() as probe:
@@ -81,10 +93,12 @@ def main():
     env = dict(os.environ, QUERY_BACKEND="java_mcp", JAVA_MCP_BASE_URL=java_url + "/mcp",
                HRCHAT_MCP_SERVICE_TOKEN="isolated-s2-service-token", LLM_PROFILE="openai",
                HRCHAT_DEMO_NOW="2026-09-28", PYTHONIOENCODING="utf-8")
-    env["HRCHAT_QUERY_REPAIR_ENABLED"] = "1" if (args.repair == "on" or args.repair is None and args.stage == "s4") else "0"
+    env["HRCHAT_QUERY_REPAIR_ENABLED"] = "1" if args.runtime == "remote" and (args.repair == "on" or args.repair is None and args.stage == "s4") else "0"
     if args.model:
         env["OPENAI_MODEL"] = args.model
     module = "evals.fixture_gateway:app" if args.fixture_smoke else "agent_gateway.app:app"
+    if args.memory == "off":
+        module = "evals.memory_ablation_gateway:app"
     if args.fixture_smoke and args.memory_smoke:
         module = "evals.memory_fixture_gateway:app"
     if args.repair_smoke:
@@ -100,28 +114,32 @@ def main():
                 "--spring.datasource.url=jdbc:h2:mem:hrchat_eval;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1",
                 "--spring.datasource.driver-class-name=org.h2.Driver", "--spring.datasource.username=sa",
                 "--spring.datasource.password=", "--spring.flyway.locations=classpath:db/migration/h2",
-                f"--server.port={args.java_port}", "--hrchat.ai.runtime=remote", f"--hrchat.ai.remote-base-url={python_url}",
+                f"--server.port={args.java_port}", f"--hrchat.ai.runtime={args.runtime}", f"--hrchat.ai.remote-base-url={python_url}",
                 "--hrchat.demo.now=2026-09-28", f"--hrchat.ai.planning.org-catalog-scope={args.org_catalog_scope}",
                 "--logging.level.root=WARN", "--logging.level.com.hrchat=INFO"]
     procs = []
     logs = []
     try:
-        for name, cmd, cwd, health in [("python", python_cmd, ROOT / "hrchat-ai", python_url + "/health"),
-                                       ("java", java_cmd, ROOT / "hrchat-server", java_url + "/actuator/health")]:
+        services = [("java", java_cmd, ROOT / "hrchat-server", java_url + "/actuator/health")]
+        if args.runtime == "remote":
+            services.insert(0, ("python", python_cmd, ROOT / "hrchat-ai", python_url + "/health"))
+        for name, cmd, cwd, health in services:
             log = (run_dir / (name + ".log")).open("wb"); logs.append(log)
             proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             procs.append(proc)
             wait_for(health, proc)
-        evidence = {"runtime": "remote", "as_of_date": "2026-09-28", "data_version": "h2-v6",
-                    "timezone": "Asia/Shanghai", "query_backend": "java_mcp", "jar_sha256": sha(jar),
-                    "model_kind": "injected_first_real_repair" if args.repair_real_smoke else "fixture" if args.fixture_smoke else "real",
+        evidence = {"runtime": args.runtime, "as_of_date": "2026-09-28", "data_version": "h2-v6",
+                    "source_sha256": source_fingerprint(),
+                    "timezone": "Asia/Shanghai", "query_backend": "java_local" if args.runtime == "local" else "java_mcp", "jar_sha256": sha(jar),
+                    "model_kind": "rule_based" if args.runtime == "local" else "injected_first_real_repair" if args.repair_real_smoke else "fixture" if args.fixture_smoke else "real",
                     "planner_diagnostics": args.planner_diagnostics,
                     "planner_variant": args.planner_variant,
-                    "requested_model": env.get("OPENAI_MODEL"),
+                    "requested_model": env.get("OPENAI_MODEL") if real_model else None,
+                    "memory_enabled": args.memory == "on" if args.runtime == "remote" else None,
                     "repair_enabled": env["HRCHAT_QUERY_REPAIR_ENABLED"] == "1",
                     "org_catalog_scope": args.org_catalog_scope,
-                    "java_launch_command": java_cmd, "python_launch_command": python_cmd}
+                    "java_launch_command": java_cmd, "python_launch_command": python_cmd if args.runtime == "remote" else None}
         path = run_dir / "server-evidence.json"
         path.write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
         if args.repair_smoke or args.repair_real_smoke:
@@ -168,9 +186,10 @@ def main():
             print(json.dumps({"smoke_passed": True, "evidence": str(run_dir / "smoke.json")}, ensure_ascii=False))
             return 0
         case_args = [arg for case_id in (args.case_id or []) for arg in ("--case-id", case_id)]
+        pointer_args = ["--report-pointer", args.report_pointer] if args.report_pointer else []
         return subprocess.run([sys.executable, "-m", "evals.run", "--base-url", java_url,
-            "--runtime", "remote", "--model-kind", "real", "--split", args.split,
-            "--timeout", "100", "--stage", args.stage, "--server-evidence", str(path), *case_args], cwd=ROOT / "hrchat-ai").returncode
+            "--runtime", args.runtime, "--model-kind", evidence["model_kind"], "--split", args.split,
+            "--timeout", "100", "--stage", args.stage, "--server-evidence", str(path), *case_args, *pointer_args], cwd=ROOT / "hrchat-ai").returncode
     finally:
         for proc in reversed(procs):
             proc.terminate()
