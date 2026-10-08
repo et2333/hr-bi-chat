@@ -10,7 +10,7 @@ POLICY = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
 
 
 def load_policy(stage="s2"):
-    path = Path(__file__).parent / "policies" / ("s3-v1.json" if stage == "s3" else "s2-v2.json")
+    path = Path(__file__).parent / "policies" / {"s2": "s2-v2.json", "s3": "s3-v1.json", "s4": "s4-v1.json"}[stage]
     return json.loads(path.read_text(encoding="utf-8"))
 
 
