@@ -88,7 +88,8 @@ def main():
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
     parser.add_argument("--case-id", action="append", help="Repeat to select complete cases for a focused run")
     parser.add_argument("--runtime", choices=["local", "remote"], default="local")
-    parser.add_argument("--model-kind", choices=["real", "fixture", "unknown"], default="unknown")
+    parser.add_argument("--model-kind", choices=["real", "fixture", "rule_based", "unknown"], default="unknown")
+    parser.add_argument("--report-pointer", type=Path)
     parser.add_argument("--stage", choices=["s2", "s3", "s4"], default="s2")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--server-evidence", type=Path, required=True,
@@ -125,6 +126,8 @@ def main():
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output = parent / run_id
     output.mkdir()
+    if args.report_pointer:
+        args.report_pointer.write_text(str(output / "report.json"), encoding="utf-8")
     report = {"run_id": run_id, "started_at": datetime.now(timezone.utc).isoformat(),
               "dataset": manifest, "split": args.split, "scope": "java_user_api",
               "selection": "subset" if args.case_id else "full_split",
