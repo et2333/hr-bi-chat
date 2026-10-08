@@ -1,7 +1,8 @@
-"""S2 retrieve -> plan_query -> validate -> tool -> present. No semantic retry or demo fallback."""
+"""Constrained planning with one bounded S4 repair before authorized execution."""
 from __future__ import annotations
 
 from datetime import date, timedelta
+import asyncio
 import os
 import re
 import time
@@ -9,7 +10,8 @@ import uuid
 
 from pydantic import ValidationError
 from adapters.mcp_client import McpBusinessError
-from adapters.model_usage import ModelCallError, load_prices, summarize_calls
+from adapters.model_usage import ModelCallError, ModelResult, load_prices, summarize_calls
+from adapters.query_budget import QueryBudget, QueryBudgetExceeded, ACTIVE_QUERY_BUDGET
 from adapters.semantic_tool_client import metric_view
 from langgraph_flows.query_plan import QueryPlan, OrgScope, PlanRejected, planning_prompt, validate_plan
 from langgraph_flows.query_draft import (ModelQueryDraft, draft_messages, compile_draft, DRAFT_VERSION,
@@ -17,6 +19,7 @@ from langgraph_flows.query_draft import (ModelQueryDraft, draft_messages, compil
 from langgraph_flows.demo_data import Window, resolve_window
 from langgraph_flows.query_memory import (ContextQueryDraft, memory_messages, compile_contextual,
     context_candidate, selection_draft, task_action, PERIOD_OPTIONS, MEMORY_PROMPT_VERSION)
+from langgraph_flows.query_repair import REPAIR_VERSION, repair_contract, repair_messages, check_repair
 
 
 MESSAGES = {
@@ -75,11 +78,13 @@ def guard_request(plan, question, metadata, context, selected):
 async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                            context_override=None, forced_metric_code=None, tool_context_token=None,
                            invocation_id=None, trace_id=None, use_langgraph=True, runtime_evidence=None,
-                           query_context=None, **unused):
+                           query_context=None, repair_enabled=None, query_timeout_seconds=75.0, **unused):
     from langgraph_flows.ask_flow import _build_payload, _window_to_dict
     started = time.perf_counter()
     uses_draft = getattr(adapter, "supports_query_draft", False)
     uses_memory = uses_draft and query_context is not None
+    repair_enabled = (os.getenv("HRCHAT_QUERY_REPAIR_ENABLED", "1") == "1" if repair_enabled is None else repair_enabled) and uses_draft
+    budget = QueryBudget(timeout_seconds=query_timeout_seconds, max_model_calls=2 if repair_enabled else 1)
     evidence = {"schema_version": "1", "planner": "model", "prompt_version": MEMORY_PROMPT_VERSION if uses_memory else DRAFT_VERSION if uses_draft else "query-plan-v1",
                 "runtime": "remote", "query_backend": tools.backend,
                 "runtime_config": runtime_evidence or {}, "trace": [], "model_calls": [],
@@ -92,6 +97,8 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
     evidence["java_ask_id"] = evidence["runtime_config"].pop("java_ask_id", None)
     state = {"ask_id": ask_id, "events": [], "evidence": evidence, "error": None,
              "clarify_questions": [], "answer_payload": None}
+    evidence["repair"] = {"version": REPAIR_VERSION, "enabled": repair_enabled, "max_attempts": 1,
+                          "attempts": 0, "eligible": False, "status": "not_needed"}
     prices = []
     price_error = False
     try:
@@ -125,6 +132,106 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         return {"tool_context_token": tool_context_token, "invocation_id": invocation_id,
                 "trace_id": trace_id, "tool_call_id": tool_id}
 
+    async def call_model(s, trace, messages=None, prompt=None, phase="initial"):
+        budget.consume("model")
+        call_started = time.perf_counter()
+        if phase == "repair":
+            s["evidence"]["repair"]["attempts"] = 1
+        try:
+            result = await adapter.complete_query_draft(*messages) if messages else await adapter.complete(prompt)
+        except ModelCallError as exc:
+            record = exc.result.evidence(ask_id=ask_id, invocation_id=invocation_id, prices=prices)
+            s["evidence"]["model_calls"].append({**record, "phase": phase})
+            raise
+        except asyncio.CancelledError:
+            # Cancellation after dispatch may still incur provider usage; never record zero cost.
+            result = ModelResult("", getattr(adapter, "name", "unknown"), getattr(adapter, "model", "unknown"),
+                "llm_" + uuid.uuid4().hex, int((time.perf_counter() - call_started) * 1000),
+                status="failed", failure_kind="task_deadline_exceeded")
+            s["evidence"]["model_calls"].append({**result.evidence(ask_id=ask_id,
+                invocation_id=invocation_id, prices=prices), "phase": phase})
+            raise
+        except Exception as exc:
+            result = ModelResult("", getattr(adapter, "name", "unknown"), getattr(adapter, "model", "unknown"),
+                "llm_" + uuid.uuid4().hex, int((time.perf_counter() - call_started) * 1000),
+                status="failed", failure_kind="adapter_error", exception_type=type(exc).__name__)
+            s["evidence"]["model_calls"].append({**result.evidence(ask_id=ask_id,
+                invocation_id=invocation_id, prices=prices), "phase": phase})
+            raise
+        s["evidence"]["model_calls"].append({**result.evidence(ask_id=ask_id,
+            invocation_id=invocation_id, prices=prices), "phase": phase})
+        trace["call_id"] = result.call_id
+        if phase == "initial" and uses_draft:
+            s["_raw_draft_text"] = result.text
+        if result.finish_reason not in (None, "stop"):
+            raise PlanRejected("incomplete_model_output", "模型未完成查询计划，请重试", "failed")
+        return result
+
+    def compile_model_draft(draft, s):
+        if uses_memory:
+            return compile_contextual(draft, question, s["catalog"], context_override, query_context, ask_id)
+        plan, compilation = compile_draft(draft, question, s["catalog"], context_override, ask_id, forced_metric_code)
+        return plan, compilation, context_override
+
+    def stop_original(s):
+        reason, message, decision = s["_planning_failure"]
+        stop(s, "invalid_plan" if reason == "schema_validation" else reason, message, decision)
+
+    async def observe_result(s, trace):
+        reason, message, _ = s["_planning_failure"]
+        repair = s["evidence"]["repair"]
+        repair.update(original_error=s["evidence"].get("validation_error"),
+                      original_query_plan=s["evidence"].get("query_plan"), status="skipped")
+        contract = repair_contract(s.get("_raw_draft_text"), reason, question, s["catalog"], memory=uses_memory)
+        if contract is None:
+            repair["skip_reason"] = "not_unambiguous_or_not_repairable"
+            stop_original(s)
+            return
+        try:
+            schema = ContextQueryDraft if uses_memory else ModelQueryDraft
+            candidate = schema.model_validate(contract["expected_draft"])
+            plan, _, effective = compile_model_draft(candidate, s)
+            validate_plan(plan, s["catalog"], turn_id=ask_id)
+            guard_request(plan, question, s["catalog"], effective, forced_metric_code)
+            if plan.decision != "execute" or (plan.org_scope and plan.org_scope.requested_name):
+                raise ValueError("unconfirmed conditions")
+        except (PlanRejected, ValidationError, McpBusinessError, ValueError):
+            repair["skip_reason"] = "conditions_not_fully_confirmed"
+            stop_original(s)
+            return
+        repair.update(eligible=True, allowed_fields=contract["allowed_fields"],
+                      original_draft=contract["original_draft"], original_text_sha256=contract["original_text_sha256"],
+                      format_only=contract["format_only"])
+        if not repair_enabled:
+            repair["skip_reason"] = "disabled"
+            stop_original(s)
+            return
+        s["_repair_contract"] = contract
+        s["_repair_target_plan"] = plan.model_dump()
+
+    async def repair_query(s, trace):
+        repair, contract = s["evidence"]["repair"], s["_repair_contract"]
+        previous_versions = s["evidence"]["metric_versions"]
+        # Re-read current metadata and scope before the one repair attempt.
+        await retrieve(s, trace)
+        intended = contract["expected_draft"]["metric_codes"]
+        if any(previous_versions.get(code) != s["evidence"]["metric_versions"].get(code) for code in intended):
+            raise PlanRejected("metric_version_changed", "指标口径已更新，请重新明确指标", "clarify")
+        schema = ContextQueryDraft if uses_memory else ModelQueryDraft
+        preflight, _, effective = compile_model_draft(schema.model_validate(contract["expected_draft"]), s)
+        validate_plan(preflight, s["catalog"], turn_id=ask_id)
+        guard_request(preflight, question, s["catalog"], effective, forced_metric_code)
+        if preflight.model_dump() != s["_repair_target_plan"]:
+            raise PlanRejected("repair_context_changed", "查询口径或时间基准已变化，请重新确认条件", "clarify")
+        base = memory_messages(question, s["catalog"], context_override, query_context) if uses_memory else draft_messages(
+            question, s["catalog"], context_override, forced_metric_code)
+        result = await call_model(s, trace, messages=repair_messages(base, contract, repair["original_error"]), phase="repair")
+        draft, changes = check_repair(result.text, contract, memory=uses_memory)
+        s["plan"], s["evidence"]["compilation"], s["effective_context"] = compile_model_draft(draft, s)
+        repair.update(status="validated", field_changes=changes, repaired_draft=draft.model_dump(exclude_none=True),
+                      repaired_query_plan=s["plan"].model_dump(exclude_none=True))
+        s["evidence"]["query_plan"] = s["plan"].model_dump(exclude_none=True)
+
     async def retrieve(s, trace):
         if tools.backend != "java_mcp":
             raise PlanRejected("backend_unavailable", "模型规划需要连接权威业务数据服务", "failed")
@@ -151,11 +258,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                 return
             else:
                 guard_known_capabilities(question)
-                result = await adapter.complete_query_draft(*memory_messages(question, s["catalog"], context_override, query_context))
-                s["evidence"]["model_calls"].append(result.evidence(ask_id=ask_id, invocation_id=invocation_id, prices=prices))
-                trace["call_id"] = result.call_id
-                if result.finish_reason not in (None, "stop"):
-                    raise PlanRejected("incomplete_model_output", "模型未完成查询计划，请重试", "failed")
+                result = await call_model(s, trace, messages=memory_messages(question, s["catalog"], context_override, query_context))
                 draft = ContextQueryDraft.model_validate_json(result.text)
             s["evidence"]["model_query_draft"] = draft.model_dump(exclude_none=True)
             s["plan"], s["evidence"]["compilation"], s["effective_context"] = compile_contextual(
@@ -169,16 +272,11 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             if is_slot_only_question(question, s["catalog"], context_override, forced_metric_code):
                 raise PlanRejected("missing_slots", "请补充希望查询的指标；入职或离职人数还需提供统计期间。", "clarify")
             messages = draft_messages(question, s["catalog"], context_override, forced_metric_code)
-            result = await adapter.complete_query_draft(*messages)
+            result = await call_model(s, trace, messages=messages)
         else:
-            result = await adapter.complete(planning_prompt(question, s["catalog"], context_override,
+            result = await call_model(s, trace, prompt=planning_prompt(question, s["catalog"], context_override,
                                                            ask_id, forced_metric_code))
-        record = result.evidence(ask_id=ask_id, invocation_id=invocation_id, prices=prices)
-        s["evidence"]["model_calls"].append(record)
-        trace["call_id"] = result.call_id
-        if result.finish_reason not in (None, "stop"):
-            raise PlanRejected("incomplete_model_output", "模型未完成查询计划，请重试", "failed")
-        # Strict JSON only, no automatic text repair and no extra model attempt.
+        # The initial parse stays strict; S4 explicitly observes eligible failures.
         if uses_draft:
             draft = ModelQueryDraft.model_validate_json(result.text)
             s["evidence"]["model_query_draft"] = draft.model_dump(exclude_none=True)
@@ -269,16 +367,22 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             t = time.perf_counter()
             trace = {"stage": name, "ask_id": ask_id, "invocation_id": invocation_id, "trace_id": trace_id}
             try:
-                await fn(s, trace)
+                remaining = budget.remaining()
+                await asyncio.wait_for(fn(s, trace), timeout=remaining)
                 trace["status"] = "stopped" if stopped(s) and name != "present" else "ok"
             except ModelCallError as exc:
-                s["evidence"]["model_calls"].append(exc.result.evidence(ask_id=ask_id, invocation_id=invocation_id, prices=prices))
                 trace["status"] = "failed"
                 stop(s, "model_service_error", "模型服务暂不可用，请稍后重试", code="HRS-3002")
             except PlanRejected as exc:
                 trace["status"] = "rejected"
                 s["evidence"]["validation_error"] = {"stage": name, "code": exc.reason, "message": exc.message}
-                stop(s, exc.reason, exc.message, exc.decision)
+                if name == "plan_query" and uses_draft and s.get("_raw_draft_text"):
+                    s["_planning_failure"] = (exc.reason, exc.message, exc.decision)
+                elif name == "repair_query" and exc.reason == "repair_scope_violation":
+                    s["evidence"]["repair"]["failure_reason"] = exc.reason
+                    stop_original(s)
+                else:
+                    stop(s, exc.reason, exc.message, exc.decision)
             except ValidationError as exc:
                 trace["status"] = "failed"
                 safe_fields = {"organization", "kind", "org_id", "source_text", "name", "decision",
@@ -287,7 +391,17 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                 s["evidence"]["validation_error"] = {"stage": name, "code": "schema_validation",
                     "errors": [{"type": e["type"], "path": [v if isinstance(v, int) or v in safe_fields else "<field>"
                                for v in e["loc"]]} for e in exc.errors(include_input=False, include_context=False, include_url=False)[:10]]}
-                stop(s, "invalid_plan", "模型返回的查询计划不合法，请重试")
+                if name == "plan_query" and uses_draft:
+                    s["_planning_failure"] = ("schema_validation", "模型返回的查询计划不合法，请重试", "failed")
+                elif name == "repair_query":
+                    s["evidence"]["repair"]["failure_reason"] = "schema_validation"
+                    stop_original(s)
+                else:
+                    stop(s, "invalid_plan", "模型返回的查询计划不合法，请重试")
+            except (QueryBudgetExceeded, asyncio.TimeoutError) as exc:
+                trace["status"] = "budget_exhausted"
+                stop(s, getattr(exc, "reason", "task_deadline_exceeded"),
+                     "本次查询已达到调用或等待上限，请稍后重试", code="HRS-3002")
             except McpBusinessError as exc:
                 trace["status"] = "failed"
                 reason = "permission_denied" if exc.code.startswith("HRC-2") else "metadata_service_error" if name == "retrieve" else "tool_error"
@@ -302,25 +416,47 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         return node
 
     nodes = {name: wrapped(name, fn) for name, fn in
-             [("retrieve", retrieve), ("plan_query", plan_query), ("validate", validate), ("tool", tool), ("present", present)]}
-    if use_langgraph:
-        from langgraph.graph import StateGraph, START, END
-        graph = StateGraph(dict)
-        for name, node in nodes.items():
-            graph.add_node(name, node)
-        graph.add_edge(START, "retrieve")
-        names = list(nodes)
-        for index, name in enumerate(names[:-1]):
-            next_node = names[index + 1]
-            graph.add_conditional_edges(name, lambda s, target=next_node: END if stopped(s) else target,
-                                        {END: END, next_node: next_node})
-        graph.add_edge("present", END)
-        state = await graph.compile().ainvoke(state)
-    else:
-        for node in nodes.values():
-            state = await node(state)
-            if stopped(state):
-                break
+             [("retrieve", retrieve), ("plan_query", plan_query), ("observe_result", observe_result),
+              ("repair_query", repair_query), ("validate", validate), ("tool", tool), ("present", present)]}
+
+    def next_node(name, s):
+        if stopped(s) or name == "present":
+            return "__end__"
+        if name == "plan_query":
+            return "observe_result" if s.get("_planning_failure") else "validate"
+        return {"retrieve": "plan_query", "observe_result": "repair_query", "repair_query": "validate",
+                "validate": "tool", "tool": "present"}[name]
+
+    async def execute_nodes():
+        nonlocal state
+        if use_langgraph:
+            from langgraph.graph import StateGraph, START, END
+            graph = StateGraph(dict)
+            for name, node in nodes.items():
+                graph.add_node(name, node)
+            graph.add_edge(START, "retrieve")
+            for name in nodes:
+                graph.add_conditional_edges(name, lambda s, current=name: next_node(current, s),
+                                            {END: END, **{n: n for n in nodes}})
+            state = await graph.compile().ainvoke(state)
+        else:
+            current = "retrieve"
+            while current != "__end__":
+                state = await nodes[current](state)
+                current = next_node(current, state)
+
+    budget_token = ACTIVE_QUERY_BUDGET.set(budget)
+    try:
+        await execute_nodes()
+    finally:
+        ACTIVE_QUERY_BUDGET.reset(budget_token)
+    evidence = state["evidence"]
+    evidence["budget"] = budget.evidence()
+    repair = evidence["repair"]
+    if repair["attempts"]:
+        repair["status"] = "completed" if state.get("answer_payload") and evidence.get("execution") and not state.get("error") else "failed"
+    repair["added_elapsed_ms"] = sum(t["elapsed_ms"] for t in evidence["trace"] if t["stage"] in {"observe_result", "repair_query"})
+    repair["cost_summary"] = summarize_calls([c for c in evidence["model_calls"] if c.get("phase") == "repair"])
     state["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
     if uses_memory:
         candidate = context_candidate(state, query_context, question)

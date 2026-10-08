@@ -595,6 +595,7 @@ async def run_ask_flow(
     trace_id: Optional[str] = None,
     runtime_evidence: Optional[dict[str, Any]] = None,
     query_context: Optional[dict[str, Any]] = None,
+    repair_enabled: Optional[bool] = None,
     executor: Any = None,
 ) -> dict[str, Any]:
     """执行一次问数（SYNC/STREAM 共用）。
@@ -614,7 +615,7 @@ async def run_ask_flow(
             adapter=adapter, tools=tools, context_override=context_override,
             forced_metric_code=forced_metric_code, tool_context_token=tool_context_token,
             invocation_id=invocation_id, trace_id=trace_id, runtime_evidence=runtime_evidence,
-            query_context=query_context,
+            query_context=query_context, repair_enabled=repair_enabled,
             use_langgraph=LANGGRAPH_AVAILABLE if use_langgraph is None else use_langgraph)
 
     start_ts = time.perf_counter()
