@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 import httpx
 
+from adapters.query_budget import ACTIVE_QUERY_BUDGET
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_SECONDS = 8.0
@@ -80,9 +82,13 @@ class McpClient:
 
         last_exc: Exception | None = None
         for attempt in range(2):
+            budget = ACTIVE_QUERY_BUDGET.get()
+            if budget is not None:
+                budget.consume("mcp", retry=attempt > 0)
             try:
                 async with self._client() as client:
-                    resp = await client.post(self.base_url, json=body, headers=headers)
+                    kwargs = {"timeout": min(self.timeout_seconds, budget.remaining())} if budget else {}
+                    resp = await client.post(self.base_url, json=body, headers=headers, **kwargs)
                 if resp.status_code >= 500 and attempt == 0:
                     last_exc = httpx.HTTPStatusError(
                         f"MCP HTTP {resp.status_code}",

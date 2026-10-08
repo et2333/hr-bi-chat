@@ -18,6 +18,7 @@ from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
 from evals.stage_policy import POLICY, load_policy, score_stage, stage_report
 from adapters.model_usage import summarize_calls
+from evals.repair_metrics import summarize_repair
 
 
 def git(*args):
@@ -88,7 +89,7 @@ def main():
     parser.add_argument("--case-id", action="append", help="Repeat to select complete cases for a focused run")
     parser.add_argument("--runtime", choices=["local", "remote"], default="local")
     parser.add_argument("--model-kind", choices=["real", "fixture", "unknown"], default="unknown")
-    parser.add_argument("--stage", choices=["s2", "s3"], default="s2")
+    parser.add_argument("--stage", choices=["s2", "s3", "s4"], default="s2")
     parser.add_argument("--timeout", type=float, default=30)
     parser.add_argument("--server-evidence", type=Path, required=True,
                         help="JSON of the isolated server launch/configuration (no secrets)")
@@ -140,6 +141,7 @@ def main():
     def save(results):
         report.update(summary=summarize(cases, results), results=results)
         report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
+        report["repair_evaluation"] = summarize_repair(cases, results)
         turns = [t for r in results for t in r["turns"]]
         evidence = [(t.get("actual") or {}).get("evidence") or {} for t in turns]
         calls = [c for e in evidence for c in e.get("model_calls", [])]
