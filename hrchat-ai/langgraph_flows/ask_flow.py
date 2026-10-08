@@ -380,6 +380,31 @@ def _make_nodes(adapter: ModelAdapter, tools: SemanticToolClient):
             from langgraph_flows.demo_data import last_n_months
 
             window = last_n_months(3, as_of)
+        # java_mcp：事件类指标缺期间先澄清，避免直打 MCP 得到 HRX-1001；demo 仍可无期间取数
+        if (tools.backend == "java_mcp" and window is None and query_mode == "scalar"
+                and code != "headcount"):
+            ask_id = state["ask_id"]
+            options = [
+                {"option_id": "THIS_MONTH", "label": "本月"},
+                {"option_id": "LAST_MONTH", "label": "上月"},
+                {"option_id": "LAST_30D", "label": "近30天"},
+            ]
+            message = f"「{meta.name or code}」需要明确统计期间，请选择或直接输入期间。"
+            clarify = [{"question_id": f"{ask_id}-q1", "question": message, "options": options}]
+            return {
+                "events": [{
+                    "event": EVENT_INTERRUPT,
+                    "payload": {
+                        "interrupt_type": "CLARIFY",
+                        "ask_id": ask_id,
+                        "questions": clarify,
+                    },
+                }],
+                "clarify_questions": clarify,
+                "metric_code": code,
+                "metric_name": meta.name or code,
+                "query_mode": query_mode,
+            }
         label = {"detail": "明细", "org": "组织对比", "trend": "趋势"}.get(query_mode, "查询")
         events = [_tool_start("sql_exec", f"正在{label}「{meta.name or code}」…")]
         return {
@@ -531,11 +556,15 @@ def build_graph(adapter: ModelAdapter, tools: SemanticToolClient):
         {"nl2sql": "nl2sql", "end": END},
     )
     graph.add_conditional_edges(
+        "nl2sql",
+        lambda s: "end" if s.get("clarify_questions") else "execute",
+        {"execute": "execute", "end": END},
+    )
+    graph.add_conditional_edges(
         "execute",
         lambda s: "end" if s.get("error") else "present",
         {"present": "present", "end": END},
     )
-    graph.add_edge("nl2sql", "execute")
     graph.add_edge("present", END)
     graph.add_edge("present_chitchat", END)
     return graph.compile()
@@ -619,9 +648,10 @@ async def run_ask_flow(
             _apply(result, await nodes["retrieve"](result))
             if not result.get("error") and not result.get("clarify_questions"):
                 _apply(result, await nodes["nl2sql"](result))
-                _apply(result, await nodes["execute"](result))
-                if not result.get("error"):
-                    _apply(result, await nodes["present"](result))
+                if not result.get("clarify_questions"):
+                    _apply(result, await nodes["execute"](result))
+                    if not result.get("error"):
+                        _apply(result, await nodes["present"](result))
 
     result["elapsed_ms"] = int((time.perf_counter() - start_ts) * 1000)
     if result.get("answer_payload"):

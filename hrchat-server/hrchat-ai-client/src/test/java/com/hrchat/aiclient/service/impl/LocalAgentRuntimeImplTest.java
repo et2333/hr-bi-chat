@@ -229,6 +229,81 @@ class LocalAgentRuntimeImplTest {
         assertEquals("2026-07-01/2026-07-31", result.payload().conclusion().compare().period());
     }
 
+    // ---------------- 用例 3b：上个月 / 日历月 / 缺期间澄清 ----------------
+
+    @Test
+    void lastMonthAlias_andOrg_resolveWindow() {
+        stubSynonyms();
+        stubMetrics();
+        when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
+                new QueryResult(List.of(new QueryResult.ColumnMeta("leave_count", "leave_count", "int", false)),
+                        List.of(Map.of("leave_count", 1L)), 1));
+
+        AgentResult result = runtime.ask(new AskRequest("上个月研发一部离职人数", "STREAM", null), hr01);
+
+        assertFalse(result.isClarifying());
+        assertEquals(SseEvents.ASK_COMPLETED, result.payload().status());
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.atLeast(1)).executeReadonly(sqlCaptor.capture());
+        List<String> sqls = sqlCaptor.getAllValues().stream().map(AuthorizedQuery::sql).toList();
+        assertTrue(sqls.stream().anyMatch(s -> s.contains("change_date >= '2026-08-01' AND change_date < '2026-09-01'")),
+                "上个月应映射演示时钟的上月 2026-08: " + sqls);
+        assertTrue(sqls.stream().anyMatch(s -> s.contains("org_key IN (3)") || s.contains("org_key in (3)")
+                        || s.contains("ORG_KEY IN (3)")),
+                "应带上研发一部组织过滤: " + sqls);
+    }
+
+    @Test
+    void calendarMonth_july_resolvesDemoYearWindow() {
+        stubSynonyms();
+        stubMetrics();
+        when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
+                new QueryResult(List.of(new QueryResult.ColumnMeta("leave_count", "leave_count", "int", false)),
+                        List.of(Map.of("leave_count", 0L)), 1));
+
+        AgentResult result = runtime.ask(new AskRequest("7月离职人数", "STREAM", null), hr01);
+
+        assertFalse(result.isClarifying());
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.atLeast(1)).executeReadonly(sqlCaptor.capture());
+        List<String> sqls = sqlCaptor.getAllValues().stream().map(AuthorizedQuery::sql).toList();
+        assertTrue(sqls.stream().anyMatch(s -> s.contains("change_date >= '2026-07-01' AND change_date < '2026-08-01'")),
+                "7月应映射演示年 2026-07: " + sqls);
+    }
+
+    @Test
+    void missingPeriod_emitsClarifyOptions_insteadOfHrx1001() {
+        stubSynonyms();
+        stubMetrics();
+        when(hybridRetriever.hybridSearch(anyString(), any(), anyInt(), anyInt(), anyInt())).thenReturn(List.of());
+
+        AgentResult first = runtime.ask(new AskRequest("离职人数", "STREAM", null), hr01);
+
+        assertTrue(first.isClarifying());
+        assertFalse(first.events().stream().anyMatch(e -> SseEvents.ERROR.equals(e.event())));
+        ClarifyQuestion q = first.clarifyQuestions().get(0);
+        assertEquals(3, q.options().size());
+        assertTrue(q.options().stream().anyMatch(o -> "THIS_MONTH".equals(o.optionId())));
+        assertTrue(q.options().stream().anyMatch(o -> "LAST_MONTH".equals(o.optionId())));
+        assertTrue(q.options().stream().anyMatch(o -> "LAST_30D".equals(o.optionId())));
+
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(
+                new QueryResult(List.of(new QueryResult.ColumnMeta("leave_count", "leave_count", "int", false)),
+                        List.of(Map.of("leave_count", 2L)), 1));
+        AgentResult second = runtime.clarify(first.askId(), "离职人数",
+                new ClarifyAnswerRequest.Answer(q.questionId(), List.of("LAST_MONTH")), hr01);
+
+        assertFalse(second.isClarifying());
+        assertEquals(SseEvents.ASK_COMPLETED, second.payload().status());
+        ArgumentCaptor<AuthorizedQuery> sqlCaptor = ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.atLeast(1)).executeReadonly(sqlCaptor.capture());
+        List<String> sqls = sqlCaptor.getAllValues().stream().map(AuthorizedQuery::sql).toList();
+        assertTrue(sqls.stream().anyMatch(s -> s.contains("change_date >= '2026-08-01' AND change_date < '2026-09-01'")),
+                "选择上月后续跑应带 2026-08 窗口: " + sqls);
+    }
+
     // ---------------- 用例 4：歧义澄清（BR-07） + 澄清续答 ----------------
 
     @Test

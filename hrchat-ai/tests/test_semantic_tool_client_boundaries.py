@@ -57,3 +57,7 @@ def test_relative_and_custom_windows_are_exclusive():
     assert (custom.start, custom.end) == (date(2026, 8, 1), date(2026, 9, 1))
     this_month = resolve_window("本月离职人数", None, date(2026, 9, 28))
     assert (this_month.start, this_month.end) == (date(2026, 9, 1), date(2026, 9, 29))
+    last_month = resolve_window("上个月离职人数", None, date(2026, 9, 28))
+    assert (last_month.start, last_month.end) == (date(2026, 8, 1), date(2026, 9, 1))
+    july = resolve_window("7月离职人数", None, date(2026, 9, 28))
+    assert (july.start, july.end) == (date(2026, 7, 1), date(2026, 8, 1))

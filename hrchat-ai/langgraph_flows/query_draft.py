@@ -153,12 +153,19 @@ def compile_draft(draft, question, catalog, context, turn_id, selected_metric=No
         compilation["time_source"] = "question"
         compilation["time_expression"] = expression
     else:
-        if time_mentions(question, today) or has_time_cue(question):
+        mentions = time_mentions(question, today)
+        # 模型漏填 time_expression 时，若问句仅含唯一可解析期间则直接采用（如「7月离职人数」）
+        if len(mentions) == 1:
+            expression, (start, end) = mentions[0]
+            compilation["time_source"] = "question"
+            compilation["time_expression"] = expression
+        elif mentions or has_time_cue(question):
             raise PlanRejected("time_condition_omitted", "问题中的时间条件未被完整识别，请明确统计期间", "clarify")
-        if metric["requires_period"] or p.query_mode == "trend":
+        elif metric["requires_period"] or p.query_mode == "trend":
             p.decision, p.reason, p.missing_slots = "clarify", "missing_slots", ["time_range"]
             return p, compilation
-        start = end = None  # headcount without time means the authoritative current as-of date.
+        else:
+            start = end = None  # headcount without time means the authoritative current as-of date.
     if start is not None:
         p.time_range = TimeRange(start=start.isoformat(), end=end.isoformat(),
                                  time_type=metric["time_type"], timezone=catalog["timezone"],

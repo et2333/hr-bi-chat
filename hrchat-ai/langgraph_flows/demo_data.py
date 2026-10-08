@@ -140,6 +140,30 @@ def _preset_window(preset: str, as_of: date = DEMO_NOW) -> Window | None:
     return None
 
 
+_DIGIT_MONTH = re.compile(r"(?<![近去今本上下\d])(0?[1-9]|1[0-2])\s*月份?(?!个)")
+_CN_MONTH_NAMES = (
+    ("十一月", 11), ("十二月", 12), ("一月", 1), ("二月", 2), ("三月", 3), ("四月", 4),
+    ("五月", 5), ("六月", 6), ("七月", 7), ("八月", 8), ("九月", 9), ("十月", 10),
+)
+
+
+def _calendar_month_window(question: str, as_of: date) -> Window | None:
+    """演示年内的日历月：7月 / 07月份 / 七月（相对 as_of 的年份）。"""
+    digit = _DIGIT_MONTH.search(question)
+    if digit:
+        start = date(as_of.year, int(digit.group(1)), 1)
+        return Window(start, _add_months(start, 1))
+    for name, month in _CN_MONTH_NAMES:
+        idx = question.find(name)
+        if idx < 0:
+            continue
+        if idx > 0 and question[idx - 1] in "近去今本上下":
+            continue
+        start = date(as_of.year, month, 1)
+        return Window(start, _add_months(start, 1))
+    return None
+
+
 def resolve_window(question: str, context_override: dict | None, as_of: date = DEMO_NOW) -> Window | None:
     """时间范围：context_override 显式覆盖 > 问句关键词（与 Java resolveWindow 一致）。"""
     co = context_override or {}
@@ -150,7 +174,8 @@ def resolve_window(question: str, context_override: dict | None, as_of: date = D
             end = date.fromisoformat(time_range["end"][:10])
             return Window(start, end)
         return _preset_window(time_range["preset"], as_of)
-    if "上月" in question:
+    # 「上个月」须先于「上月」匹配
+    if "上个月" in question or "上一个月" in question or "上月" in question:
         return _preset_window("LAST_MONTH", as_of)
     if "本月" in question or "这个月" in question:
         return _preset_window("THIS_MONTH", as_of)
@@ -168,7 +193,7 @@ def resolve_window(question: str, context_override: dict | None, as_of: date = D
         return last_n_months(3, as_of)
     if "近一年" in question or "近1年" in question or "最近一年" in question:
         return last_n_months(12, as_of)
-    return None
+    return _calendar_month_window(question, as_of)
 
 
 def last_n_months(n: int, as_of: date = DEMO_NOW) -> Window:
