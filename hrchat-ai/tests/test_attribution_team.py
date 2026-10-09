@@ -55,7 +55,9 @@ NEED = {"claim_id": "timing", "reason": "verify_timing_concentration",
 TIMING_CLAIMS = {"claims": [*CLAIMS["claims"], TIMING_CLAIM]}
 REQUEST_DAILY = {"decision": "request_evidence", "checked_claim_ids": ["c1", "timing"],
                  "evidence_request": "daily_counts", "supplement_need": NEED}
-ACCEPT_TIMING = {"decision": "accept", "checked_claim_ids": ["c1", "timing"]}
+ASSESSMENT = {"fact_ids": ["daily_peak:current"], "conclusion": "descriptive_only"}
+ACCEPT_TIMING = {"decision": "accept", "checked_claim_ids": ["c1", "timing"],
+                 "supplement_assessment": ASSESSMENT}
 
 
 class ScriptedAdapter(ModelAdapter):
