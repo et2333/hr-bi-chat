@@ -133,18 +133,14 @@ def test_no_permission_stream_error():
     assert err["payload"]["recoverable"] is False
 
 
-def test_attribution_sse_final():
+def test_legacy_attribution_cannot_bypass_java_authorisation():
     # 先完成一次问数，取得 ask_id
     frames = _frames(_ask("s5", "研发中心在职人数").text)
     done = frames[-1]["payload"]
     ask_id = done["ask_id"]
     resp = client.post(f"/v1/chat/asks/{ask_id}/attribution")
-    assert resp.status_code == 200
-    att_frames = _frames(resp.text)
-    assert att_frames[-1]["event"] == EVENT_FINAL
-    final = att_frames[-1]["payload"]
-    assert final["disclaimer"] == "辅助分析，仅供参考"
-    assert final["confidence"] == 0.92
+    assert resp.status_code == 410
+    assert "Java" in resp.json()["detail"]
 
 
 def test_feedback_204_and_dedupe():

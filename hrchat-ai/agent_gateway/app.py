@@ -36,7 +36,7 @@ from agent_gateway.schemas import (
 )
 from agent_gateway.sse import EventBuffer, SseFramer
 from langgraph_flows.ask_flow import run_ask_flow
-from agentscope_teams.attribution_team import AttributionTeam
+from agent_gateway.analysis_tasks import install_analysis_routes
 
 # 环境变量：LLM_PROFILE=mock|openai；HEARTBEAT_INTERVAL=15
 # QUERY_BACKEND=java_mcp（默认）|demo；java_mcp 需 JAVA_MCP_BASE_URL + HRCHAT_MCP_SERVICE_TOKEN
@@ -274,6 +274,7 @@ def build_insight(report_name: str, metric_name: str, categories: list, series: 
 def create_app(
     *,
     semantic_tools: Optional[SemanticToolClient] = None,
+    analysis_tools=None,
 ) -> FastAPI:
     """创建 FastAPI 应用实例。
 
@@ -283,6 +284,8 @@ def create_app(
     tools = semantic_tools if semantic_tools is not None else resolve_semantic_tools()
     app = FastAPI(title="HR Chat AI Gateway", version="0.1.0")
     app.state.semantic_tools = tools
+    install_analysis_routes(app, adapter_resolver=get_current_adapter,
+                            tool_client=analysis_tools if analysis_tools is not None else getattr(tools, "_mcp", None))
 
     app.add_middleware(
         CORSMiddleware,
@@ -499,35 +502,8 @@ def create_app(
 
     @app.post("/v1/chat/asks/{ask_id}/attribution")
     async def attribution(ask_id: str):
-        """归因分析 SSE：PLAN_UPDATE → TOOL_CALL_START/END → FINAL（2.2.10）。"""
-        stored = store.get_ask(ask_id)
-        if not stored:
-            raise HTTPException(404, f"ask {ask_id} 不存在")
-        payload = stored.get("answer_payload") or {}
-        conclusion = payload.get("conclusion") or {}
-        code = _infer_metric_code(payload)
-        context = {
-            "metric_code": code,
-            "current": conclusion.get("value"),
-            "compare": (conclusion.get("compare") or {}).get("value"),
-            "prev_period": (conclusion.get("compare") or {}).get("period"),
-            "question": stored["question"],
-        }
-        team = AttributionTeam(get_current_adapter(stored.get("tenant_no")))
-
-        framer = store.framer(stored["session_id"])
-        buffer = store.buffer(stored["session_id"])
-
-        async def team_events() -> AsyncGenerator[dict[str, Any], None]:
-            inputs = UserMsgJson(json.dumps(context, ensure_ascii=False))
-            async for evt in team.reply_stream(inputs):
-                yield evt
-
-        async def stream_gen() -> AsyncGenerator[str, None]:
-            async for frame in _with_heartbeat(team_events(), framer, buffer):
-                yield frame
-
-        return StreamingResponse(stream_gen(), media_type="text/event-stream")
+        """The legacy unauthenticated demo route must not bypass Java task authorisation."""
+        raise HTTPException(410, "请通过 Java 已完成答案的分析入口创建授权任务")
 
     @app.post("/v1/chat/asks/{ask_id}/feedback")
     async def feedback(ask_id: str, body: FeedbackRequest):
