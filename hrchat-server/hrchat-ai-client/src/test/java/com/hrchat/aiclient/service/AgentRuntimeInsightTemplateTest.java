@@ -29,8 +29,8 @@ class AgentRuntimeInsightTemplateTest {
         Map<String, Object> view = render(summary);
 
         assertThat(view.get("report_name")).isEqualTo("人力编制报表");
-        assertThat(String.valueOf(view.get("summary"))).contains("3 个周期");
-        assertThat((List<?>) view.get("points")).hasSize(3);
+        assertThat(String.valueOf(view.get("summary"))).contains("3 个观测值");
+        assertThat((List<?>) view.get("points")).hasSize(2); // departments are not a time trend
     }
 
     @Test
@@ -41,5 +41,23 @@ class AgentRuntimeInsightTemplateTest {
 
         assertThat(String.valueOf(view.get("summary"))).contains("暂无可用数据");
         assertThat((List<?>) view.get("points")).isEmpty();
+    }
+
+    @Test
+    void missingMisalignedAndInvalidValuesAreNotZeroFilled() {
+        for (List<?> values : List.of(java.util.Arrays.asList(1, null), List.of(1, "bad"),
+                List.of(1, Double.POSITIVE_INFINITY), List.of(1))) {
+            var result = render(Map.of("categories", List.of("2026-08", "2026-09"),
+                    "series", List.of(Map.of("data", values))));
+            assertThat((List<?>) result.get("points")).isEmpty();
+        }
+    }
+
+    @Test
+    void negativeExtremaAndRatesDoNotUseAggregateMean() {
+        var result = render(Map.of("categories", List.of("2026-08", "2026-09"),
+                "series", List.of(Map.of("data", List.of(-2, -1)))));
+        assertThat(String.valueOf(result.get("points"))).contains("2026-09（-1.0）");
+        assertThat(String.valueOf(result.get("summary"))).doesNotContain("均值");
     }
 }
