@@ -80,6 +80,11 @@ public class McpController {
             return McpEnvelope.Response.fail(id, McpEnvelope.ERR_INVALID_PARAMS, "缺少工具名",
                     new McpEnvelope.ErrorData(ErrorCode.PARAM_MISSING.getCode(), "name", false));
         }
+        // Analysis credentials are purpose-bound and must never open the generic query tools.
+        if (invocationId != null && invocationId.startsWith("analysis:")
+                && !McpEnvelope.TOOL_ANALYSIS_EVIDENCE.equals(name)) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN, "analysis tool scope");
+        }
         if (!isKnownTool(name)) {
             return McpEnvelope.Response.fail(id, McpEnvelope.ERR_METHOD_NOT_FOUND, "未知工具: " + name,
                     new McpEnvelope.ErrorData(ErrorCode.PARAM_INVALID.getCode(), name, false));
@@ -102,14 +107,17 @@ public class McpController {
                 new McpToolDtos.ToolDescriptor(McpEnvelope.TOOL_PERMISSION_CHECK,
                         "按最新 UserContext 预检查询/导出权限", Map.of("type", "object")),
                 new McpToolDtos.ToolDescriptor(McpEnvelope.TOOL_SEMANTIC_QUERY,
-                        "语义取数唯一入口", Map.of("type", "object"))
+                        "语义取数唯一入口", Map.of("type", "object")),
+                new McpToolDtos.ToolDescriptor(McpEnvelope.TOOL_ANALYSIS_EVIDENCE,
+                        "读取已授权分析任务的冻结聚合证据", Map.of("type", "object"))
         ));
     }
 
     private static boolean isKnownTool(String name) {
         return McpEnvelope.TOOL_GET_SEMANTIC_META.equals(name)
                 || McpEnvelope.TOOL_PERMISSION_CHECK.equals(name)
-                || McpEnvelope.TOOL_SEMANTIC_QUERY.equals(name);
+                || McpEnvelope.TOOL_SEMANTIC_QUERY.equals(name)
+                || McpEnvelope.TOOL_ANALYSIS_EVIDENCE.equals(name);
     }
 
     private static McpEnvelope.Response businessError(Object id, BizException e) {
