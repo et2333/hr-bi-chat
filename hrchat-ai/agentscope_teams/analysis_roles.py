@@ -80,6 +80,8 @@ async def role_reply(adapter, budget, records, request, role, schema, data):
                 "本轮是补查后的收尾阶段，daily证据已返回，补查额度已耗尽。不要照抄上一轮请求。"
                 "Analyst必须输出request_evidence=null、supplement_need=null；Reviewer必须输出evidence_request=null、"
                 "supplement_need=null，decision只能accept或insufficient。用新证据更新结论，仍未知则明确保留待核查项。"
+                "同时必须填写supplement_assessment，引用ev_daily中的fact_ids并覆盖requested_supplement_need.required_fact_ids。"
+                "每日事实只可作descriptive_only描述；缺事实或仍无法核查则insufficient。不能仅说accept而不引用新事实。"
             )
     system = (
         f"你是离职人数统计贡献分析的{role}。只输出符合所附schema的JSON对象。"

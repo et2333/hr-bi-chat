@@ -34,6 +34,9 @@ class AttributionTeam:
         self.plan = None
         self.supplemented = False
         self.supplement_decisions = []
+        self.requested_supplement_need = None
+        self.assessment_candidate = None
+        self.verified_assessment = None
         self.unresolved = []
         self.status = "COMPLETED"
         self.emit = None
@@ -84,6 +87,7 @@ class AttributionTeam:
                 "plan": self.plan.model_dump(), "evidence": self.evidence,
                 "facts": self.computed["facts"] if self.computed else {},
                 "claims": self.claims.model_dump() if self.claims else None,
+                "requested_supplement_need": self.requested_supplement_need.model_dump() if self.requested_supplement_need else None,
                 "invalid_claim_ids": self.invalid_claims(), "supplement_available": not self.supplemented,
                 "allowed_supplement": "daily_counts" if not self.supplemented else None}
 
@@ -106,6 +110,8 @@ class AttributionTeam:
         if reason:
             self.status = "PARTIAL"
             self.unresolved.append(reason)
+        else:
+            self.requested_supplement_need = need
         return reason is None
 
     def invalid_claims(self):
@@ -130,6 +136,7 @@ class AttributionTeam:
             self.claims = Claims(claims=[Claim(claim_id="overall", kind="fact", fact_id="overall", evidence_ids=["ev_department"])])
             return {"route": "render"}
         self.claims = await self.role("Analyst", Claims, self.handoff())
+        self.assessment_candidate = self.claims.supplement_assessment
         if self.request.mode == "dual":
             return {"route": "review"}
         if self.invalid_claims():
@@ -148,6 +155,7 @@ class AttributionTeam:
         if set(review.checked_claim_ids) != ids or not set(review.drop_claim_ids) <= ids:
             raise EvidenceError("review_did_not_cover_claims")
         self.reviews.append(review.model_dump(mode="json"))
+        self.assessment_candidate = review.supplement_assessment
         self.claims.claims = [c for c in self.claims.claims if c.claim_id not in review.drop_claim_ids]
         if self.invalid_claims():
             self.status = "PARTIAL"
@@ -171,6 +179,32 @@ class AttributionTeam:
         return {"route": "review" if self.request.mode == "dual" else "draft"}
 
     async def render_node(self, state):
+        if not self.supplemented:
+            if self.assessment_candidate is not None:
+                self.status = "PARTIAL"
+                self.unresolved.append("supplement_assessment_invalid")
+            return {}
+        assessment = self.assessment_candidate
+        reason = None
+        daily = next((e for e in self.evidence if e["evidence_id"] == "ev_daily"), None)
+        if assessment is None:
+            reason = "supplement_not_assessed"
+        elif daily is None or any(f not in daily["result"]["facts"] for f in assessment.fact_ids):
+            reason = "supplement_assessment_invalid"
+        elif assessment.conclusion == "insufficient":
+            reason = "supplement_evidence_insufficient"
+            self.verified_assessment = {**assessment.model_dump(mode="json"), "evidence_id": "ev_daily",
+                                        "claim_id": self.requested_supplement_need.claim_id}
+        elif not set(self.requested_supplement_need.required_fact_ids) <= set(assessment.fact_ids):
+            reason = "supplement_not_assessed"
+        else:
+            self.verified_assessment = {**assessment.model_dump(mode="json"), "evidence_id": "ev_daily",
+                                        "claim_id": self.requested_supplement_need.claim_id}
+        if reason:
+            self.status = "PARTIAL"
+            # Existing execution failures already explain why closing was impossible.
+            if not self.unresolved:
+                self.unresolved.append(reason)
         return {}
 
     def result(self):
@@ -185,6 +219,7 @@ class AttributionTeam:
                 "contributions": c["departments"] if c else [], "facts": c["facts"] if c else {},
                 "claims": safe_claims, "review": self.reviews, "evidence": self.evidence,
                 "supplement_decisions": self.supplement_decisions,
+                "supplement_assessment": self.verified_assessment,
                 "data_quality": ["按离职事件所属部门拆解；不包含完整历史组织关系。", "统计贡献不等于真实离职原因。"],
                 "unresolved": list(dict.fromkeys(self.unresolved)), "disclaimer": "辅助分析，仅供参考",
                 "usage": {**self.budget.evidence(), **summarize_calls(self.records), "calls": self.records},

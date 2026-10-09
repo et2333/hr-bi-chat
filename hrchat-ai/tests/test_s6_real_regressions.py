@@ -10,8 +10,9 @@ from agentscope_teams.attribution_team import AttributionTeam
 from evals.s6_dataset import load_dataset
 from evals.s6_run import FixtureTools, behavior_observations, make_request
 from tests.test_attribution_team import (
-    ACCEPT, ACCEPT_TIMING, CLAIMS, NEED, PLAN, REQUEST_DAILY, TIMING_CLAIMS,
+    ACCEPT, ACCEPT_TIMING, ASSESSMENT, CLAIMS, NEED, PLAN, REQUEST_DAILY, TIMING_CLAIMS,
     ScriptedAdapter, run,
+    evidence,
 )
 
 
@@ -56,7 +57,7 @@ async def test_only_a_supported_timing_gap_can_use_the_one_supplement(mode):
     request = {**TIMING_CLAIMS, "request_evidence": "daily_counts", "supplement_need": NEED}
     final = {"claims": [*CLAIMS["claims"], {"claim_id": "peak", "kind": "fact",
              "fact_id": "daily_peak:current", "evidence_ids": ["ev_daily"]}],
-             "request_evidence": None, "supplement_need": None}
+             "request_evidence": None, "supplement_need": None, "supplement_assessment": ASSESSMENT}
     outputs = [PLAN, request, final] if mode == "single" else [PLAN, TIMING_CLAIMS, REQUEST_DAILY, ACCEPT_TIMING]
     result, _, adapter, tools = await run(outputs, mode=mode)
     assert result["status"] == "COMPLETED", result
@@ -113,3 +114,48 @@ async def test_department_question_finishes_without_supplement(mode):
     assert result["status"] == "COMPLETED" and len(tools.calls) == 1
     assert result["supplement_decisions"] == []
     assert "不默认查每日数据" in adapter.calls[1][0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["single", "dual"])
+@pytest.mark.parametrize("assessment,issue", [
+    (None, "supplement_not_assessed"),
+    ({"fact_ids": [], "conclusion": "descriptive_only"}, "supplement_not_assessed"),
+    ({"fact_ids": ["daily_peak:baseline"], "conclusion": "descriptive_only"}, "supplement_not_assessed"),
+    ({"fact_ids": [], "conclusion": "insufficient"}, "supplement_evidence_insufficient"),
+])
+async def test_supplement_must_be_assessed_before_success(mode, assessment, issue):
+    first = {**TIMING_CLAIMS, "request_evidence": "daily_counts", "supplement_need": NEED}
+    final = {**CLAIMS, "supplement_assessment": assessment}
+    review = {"decision": "accept", "checked_claim_ids": ["c1", "timing"], "supplement_assessment": assessment}
+    outputs = [PLAN, first, final] if mode == "single" else [PLAN, TIMING_CLAIMS, REQUEST_DAILY, review]
+    result, events, adapter, tools = await run(outputs, mode=mode)
+    assert result["status"] == "PARTIAL" and result["unresolved"] == [issue]
+    assert result["summary"]["closure_verified"] and events[-1]["event"] == "ERROR"
+    assert len(tools.calls) == 2 and len(adapter.calls) == (3 if mode == "single" else 4)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["single", "dual"])
+async def test_missing_daily_fact_cannot_be_confirmed_by_an_accept_vote(mode):
+    raw = evidence()
+    raw.update(current_total=0, baseline_total=0, daily=[])
+    for row in raw["departments"]:
+        row.update(current_count=0, baseline_count=0)
+    first = {**TIMING_CLAIMS, "request_evidence": "daily_counts", "supplement_need": NEED}
+    final = {**CLAIMS, "supplement_assessment": ASSESSMENT}
+    outputs = [PLAN, first, final] if mode == "single" else [PLAN, TIMING_CLAIMS, REQUEST_DAILY, ACCEPT_TIMING]
+    result, _, _, _ = await run(outputs, mode=mode, raw=raw)
+    assert result["status"] == "PARTIAL"
+    assert result["unresolved"] == ["supplement_assessment_invalid"]
+    assert result["supplement_assessment"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["single", "dual"])
+async def test_no_supplement_means_no_claim_of_having_assessed_daily_facts(mode):
+    outputs = ([PLAN, {**CLAIMS, "supplement_assessment": ASSESSMENT}] if mode == "single"
+               else [PLAN, CLAIMS, {**ACCEPT, "supplement_assessment": ASSESSMENT}])
+    result, _, _, tools = await run(outputs, mode=mode)
+    assert result["status"] == "PARTIAL" and result["supplement_assessment"] is None
+    assert result["unresolved"] == ["supplement_assessment_invalid"] and len(tools.calls) == 1

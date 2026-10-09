@@ -66,6 +66,8 @@ class FixtureAdapter:
                     reply["supplement_need"] = {"claim_id": "timing", "reason": "verify_timing_concentration",
                                                 "required_fact_ids": ["daily_peak:current", "daily_peak:baseline"]}
                 elif self.injection == "conditional_daily_query":
+                    reply["supplement_assessment"] = {"fact_ids": ["daily_peak:current", "daily_peak:baseline"],
+                                                       "conclusion": "descriptive_only"}
                     for fact_id in ("daily_peak:current", "daily_peak:baseline"):
                         if fact_id in data["facts"]:
                             claims.append({"claim_id": fact_id, "kind": "fact", "fact_id": fact_id,
@@ -79,6 +81,9 @@ class FixtureAdapter:
                                  issues=["missing_daily_evidence"],
                                  supplement_need={"claim_id": "timing", "reason": "verify_timing_concentration",
                                                   "required_fact_ids": ["daily_peak:current", "daily_peak:baseline"]})
+                elif self.injection == "conditional_daily_query":
+                    reply["supplement_assessment"] = {"fact_ids": ["daily_peak:current", "daily_peak:baseline"],
+                                                       "conclusion": "descriptive_only"}
             else:
                 raise AssertionError("Fixture does not recognize this role contract")
             text = json.dumps(reply, ensure_ascii=False)
@@ -147,25 +152,59 @@ def make_request(case, mode):
     })
 
 
+def grounded_fact_ids(result):
+    """Independent reference checking for evaluation, including evidence contents."""
+    evidence = {e["evidence_id"]: e.get("result", {}).get("facts", {}) for e in result.get("evidence", [])}
+    facts = result.get("facts", {})
+    return {c["fact_id"] for c in result.get("claims", [])
+            if c.get("kind") in {"fact", "statistical_contribution"}
+            and c.get("fact_id") in facts and c.get("evidence_ids")
+            and all(e in evidence for e in c["evidence_ids"])
+            and any(c["fact_id"] in evidence[e] and evidence[e][c["fact_id"]] == facts[c["fact_id"]]
+                    for e in c["evidence_ids"])}
+
+
+def assessed_daily_fact_ids(result):
+    assessment = result.get("supplement_assessment") or {}
+    evidence = next((e for e in result.get("evidence", []) if e["evidence_id"] == "ev_daily"), {})
+    daily = evidence.get("result", {}).get("facts", {})
+    if assessment.get("evidence_id") != "ev_daily":
+        return set()
+    return {f for f in assessment.get("fact_ids", []) if f.startswith("daily_peak:")
+            and f in daily and daily[f] == result.get("facts", {}).get(f)}
+
+
 def behavior_observations(result, tool_calls):
     """Descriptive signals, not a model-quality score or a claim of review gain."""
-    known_drops, other_drops = [], []
+    known_drops, other_drops, unknown_origin_drops = [], [], []
     for turn in result.get("trace", []):
         if turn.get("role") != "Reviewer":
             continue
         known = set(turn.get("input_invalid_claim_ids", []))
         for claim_id in turn["output"].get("drop_claim_ids", []):
-            (known_drops if claim_id in known else other_drops).append(claim_id)
+            if "input_invalid_claim_ids" not in turn:
+                unknown_origin_drops.append(claim_id)
+            else:
+                (known_drops if claim_id in known else other_drops).append(claim_id)
     decisions = result.get("supplement_decisions", [])
-    return {"daily_queries": sum(call["detail"] == "daily" for call in tool_calls),
+    grounded = grounded_fact_ids(result)
+    assessed = assessed_daily_fact_ids(result)
+    daily_queries = sum(call["detail"] == "daily" for call in tool_calls)
+    changed_departments = {f"department:{r['org_id']}" for r in result.get("contributions", []) if r["delta"] != 0}
+    return {"daily_queries": daily_queries,
             "denied_supplements": sum(not d["allowed"] for d in decisions),
             "repeated_requests": sum(d["reason"] == "supplement_limit_reached" for d in decisions),
             "requests_without_supported_gap": sum(d["reason"] == "supplement_not_justified" for d in decisions),
-            "final_daily_fact_ids": sorted({c["fact_id"] for c in result.get("claims", [])
-                                            if str(c.get("fact_id", "")).startswith("daily_peak:")}),
+            "final_daily_fact_ids": sorted(f for f in grounded if f.startswith("daily_peak:")),
+            "assessed_daily_fact_ids": sorted(assessed),
+            "daily_query_without_cited_facts": daily_queries if not assessed and not any(f.startswith("daily_peak:") for f in grounded) else 0,
+            "overall_fact_cited": "overall" in grounded,
+            "changed_departments_cited": len(changed_departments & grounded),
+            "changed_departments_available": len(changed_departments),
             "reviewer_removed_program_flagged": known_drops,
             "reviewer_other_removed_unverified": other_drops,
-            "note": "A justified gap is not proof of business value; other review removals need independent adjudication."}
+            "reviewer_removed_unknown_origin": unknown_origin_drops,
+            "note": "Citation coverage concerns AI interpretation, not the contribution table. Citations/gaps do not prove business value; review removals need independent adjudication."}
 
 
 def score_result(case, mode, result, tool_calls):
@@ -193,16 +232,31 @@ def score_result(case, mode, result, tool_calls):
         failures.append("unverified_data_returned")
     evidence_ids = {row["evidence_id"] for row in result.get("evidence", [])}
     facts = result.get("facts", {})
+    grounded = grounded_fact_ids(result)
     for claim in result.get("claims", []):
         if not claim["evidence_ids"] or not set(claim["evidence_ids"]) <= evidence_ids:
             failures.append("unsupported_evidence_reference")
         if claim["kind"] in {"fact", "statistical_contribution"} and claim["fact_id"] not in facts:
             failures.append("unsupported_fact_reference")
+        elif claim["kind"] in {"fact", "statistical_contribution"} and claim["fact_id"] not in grounded:
+            failures.append("unsupported_evidence_reference")
+        if ((claim["kind"] in {"fact", "statistical_contribution"} and (claim.get("hypothesis") or claim.get("next_check")))
+                or (claim["kind"] == "statistical_contribution" and not str(claim.get("fact_id")).startswith("department:"))
+                or (claim["kind"] == "unverified_hypothesis" and (not claim.get("hypothesis") or claim.get("fact_id") or claim.get("next_check")))
+                or (claim["kind"] == "next_check" and (not claim.get("next_check") or claim.get("fact_id") or claim.get("hypothesis")))):
+            failures.append("invalid_claim_shape")
     supplements = sum(call["detail"] == "daily" for call in tool_calls)
     if supplements > 1:
         failures.append("supplement_limit_exceeded")
     if expected.get("conditional_supplement") and supplements != (0 if mode == "deterministic" else 1):
         failures.append("conditional_supplement_not_followed")
+    if supplements and result["status"] == "COMPLETED":
+        need = next((d.get("need") for d in result.get("supplement_decisions", []) if d["allowed"]), None)
+        assessment = result.get("supplement_assessment") or {}
+        if (not need or assessment.get("conclusion") != "descriptive_only"
+                or assessment.get("claim_id") != need["claim_id"]
+                or not set(need["required_fact_ids"]) <= assessed_daily_fact_ids(result)):
+            failures.append("unassessed_supplement")
     usage = result.get("usage", {})
     if usage.get("model_calls", 0) > 4 or usage.get("mcp_attempts", 0) > 6:
         failures.append("budget_limit_exceeded")

@@ -69,4 +69,20 @@ describe('AttributionPanel', () => {
     expect(wrapper.text()).not.toContain('92%')
     wrapper.unmount()
   })
+  it('shows the verified daily facts used in supplement review with their limits', async () => {
+    vi.mocked(api.startAnalysis).mockResolvedValue(response({ taskId: 'task1', sourceAskId: 'ask1', status: 'COMPLETED',
+      context: { ...context, baselinePeriod: context.suggestedBaselinePeriod! }, events: [],
+      result: { ...result, status: 'COMPLETED', unresolved: [],
+        facts: { 'daily_peak:current': { date: '2026-09-02', count: 4, total: 4 } },
+        supplement_assessment: { claim_id: 'h1', evidence_id: 'ev_daily', fact_ids: ['daily_peak:current'], conclusion: 'descriptive_only' },
+      } }))
+    const wrapper = render()
+    await wrapper.get('[data-testid="open-analysis"]').trigger('click'); await flushPromises()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    const supplement = wrapper.get('[data-testid="supplement-facts"]').text()
+    expect(supplement).toContain('2026-09-02 的 4 人')
+    expect(supplement).toContain('ev_daily')
+    expect(supplement).toContain('尚不能据此确认日期集中或真实离职原因')
+    wrapper.unmount()
+  })
 })

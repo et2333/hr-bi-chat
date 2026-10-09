@@ -55,7 +55,13 @@ async def run(model, case_ids):
         await adapter.aclose()
     print(json.dumps({"report": str(run_dir / "report.json"),
                       "model_calls": sum(r["result"]["usage"]["model_calls"] for r in rows),
-                      "passed": sum(r["score"]["passed"] for r in rows), "total": len(rows)}, ensure_ascii=False))
+                      "passed": sum(r["score"]["passed"] for r in rows), "total": len(rows),
+                      "cases": [{"case_id": r["case_id"], "mode": r["mode"], "status": r["result"]["status"],
+                                 "passed": r["score"]["passed"], "failures": r["score"]["failures"],
+                                 "model_calls": r["result"]["usage"]["model_calls"],
+                                 "daily_queries": r["behavior"]["daily_queries"],
+                                 "unresolved": r["result"]["unresolved"]} for r in rows]}, ensure_ascii=False))
+    return 0 if len(rows) == len(cases) * len(MODES) and all(r["score"]["passed"] for r in rows) else 1
 
 
 def main():
@@ -67,8 +73,8 @@ def main():
     args = parser.parse_args()
     if not args.confirm_real_calls:
         parser.error("This run sends mock department aggregates to a model API; explicitly confirm up to 14 calls")
-    asyncio.run(run(args.model, args.case_id or ["S6-01", "S6-03"]))
+    return asyncio.run(run(args.model, args.case_id or ["S6-01", "S6-03"]))
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -57,6 +57,11 @@
           <ul v-if="claimTexts.length" class="analysis-claims">
             <li v-for="claim in claimTexts" :key="claim.id">{{ claim.text }} <span class="muted">[{{ claim.refs.join('、') }}]</span></li>
           </ul>
+          <div v-if="supplementTexts.length" data-testid="supplement-facts">
+            <h4>补查得到的事实</h4>
+            <ul><li v-for="item in supplementTexts" :key="item.id">{{ item.text }} <span class="muted">[{{ result.supplement_assessment?.evidence_id }}]</span></li></ul>
+            <p class="muted">这些每日统计用于辅助核查，尚不能据此确认日期集中或真实离职原因。</p>
+          </div>
           <details v-if="result.evidence.length" class="analysis-evidence">
             <summary>查看证据来源（{{ result.evidence.length }} 项）</summary>
             <div v-for="item in result.evidence" :key="item.evidence_id" class="evidence-item">
@@ -101,6 +106,9 @@ const statusLabel = computed(() => ({ RUNNING: '分析中', COMPLETED: '分析�
 const claimTexts = computed(() => (result.value?.claims ?? []).map(claim => ({ id: claim.claim_id,
   text: analysisClaimText(claim, result.value!.facts), refs: claim.evidence_ids,
 })).filter(claim => claim.text))
+const supplementTexts = computed(() => (result.value?.supplement_assessment?.fact_ids ?? []).map(id => ({ id,
+  text: analysisClaimText({ claim_id: id, kind: 'fact', fact_id: id, evidence_ids: ['ev_daily'] }, result.value!.facts),
+})).filter(item => item.text))
 watch(context, next => {
   baselineStart.value = next?.suggestedBaselinePeriod?.start ?? ''
   baselineEnd.value = shiftDate(next?.suggestedBaselinePeriod?.end ?? '', -1)

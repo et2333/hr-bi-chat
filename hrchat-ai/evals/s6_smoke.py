@@ -92,6 +92,11 @@ def main():
         assert output["summary"]["current_total"] == output["summary"]["baseline_total"] == 1
         assert {r["org_id"]: r["delta"] for r in output["contributions"]} == {2: 0, 3: -1, 4: 1}
         assert output["usage"]["model_calls"] == 4 and output["usage"]["mcp_attempts"] == 2
+        assessment = output["supplement_assessment"]
+        assert assessment["evidence_id"] == "ev_daily" and assessment["conclusion"] == "descriptive_only"
+        assert set(assessment["fact_ids"]) == {"daily_peak:current", "daily_peak:baseline"}
+        assert all(f in output["facts"] for f in assessment["fact_ids"])
+        results["checks"]["supplement_assessment_reaches_public_api"] = True
         assert first_at is not None and final_at - first_at > .2
         results["checks"]["live_progress_before_completion"] = True
         results["checks"]["actual_h2_contributions_and_supplement"] = True
