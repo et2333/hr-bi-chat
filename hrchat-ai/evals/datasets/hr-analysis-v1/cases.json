@@ -1,0 +1,987 @@
+[
+  {
+    "case_id": "S6-01",
+    "group_id": "group_growth",
+    "split": "dev",
+    "scene": "group_growth",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 3,
+        "baseline_total": 1,
+        "delta": 2,
+        "current_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "baseline_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "department_deltas": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-02",
+    "group_id": "group_decline",
+    "split": "frozen",
+    "scene": "group_decline",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "baseline_period": {
+      "start": "2026-07-01",
+      "end": "2026-08-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 1,
+        "baseline_total": 2,
+        "delta": -1,
+        "current_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "baseline_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 1,
+          "8": 0
+        },
+        "department_deltas": {
+          "1": 0,
+          "2": 0,
+          "3": -1,
+          "4": 1,
+          "5": 0,
+          "6": 0,
+          "7": -1,
+          "8": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-03",
+    "group_id": "department_offset",
+    "split": "dev",
+    "scene": "department_offset",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      2,
+      3,
+      4
+    ],
+    "current_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "baseline_period": {
+      "start": "2026-07-01",
+      "end": "2026-08-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 1,
+        "baseline_total": 1,
+        "delta": 0,
+        "current_counts": {
+          "2": 0,
+          "3": 0,
+          "4": 1
+        },
+        "baseline_counts": {
+          "2": 0,
+          "3": 1,
+          "4": 0
+        },
+        "department_deltas": {
+          "2": 0,
+          "3": -1,
+          "4": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-04",
+    "group_id": "empty_both_periods",
+    "split": "frozen",
+    "scene": "empty_both_periods",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 0,
+        "baseline_total": 0,
+        "delta": 0,
+        "current_counts": {
+          "8": 0
+        },
+        "baseline_counts": {
+          "8": 0
+        },
+        "department_deltas": {
+          "8": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-05",
+    "group_id": "start_boundary",
+    "split": "dev",
+    "scene": "start_boundary",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      3
+    ],
+    "current_period": {
+      "start": "2026-09-18",
+      "end": "2026-09-19"
+    },
+    "baseline_period": {
+      "start": "2026-09-17",
+      "end": "2026-09-18"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 1,
+        "baseline_total": 0,
+        "delta": 1,
+        "current_counts": {
+          "3": 1
+        },
+        "baseline_counts": {
+          "3": 0
+        },
+        "department_deltas": {
+          "3": 1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-06",
+    "group_id": "end_boundary",
+    "split": "frozen",
+    "scene": "end_boundary",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      4
+    ],
+    "current_period": {
+      "start": "2026-08-21",
+      "end": "2026-08-22"
+    },
+    "baseline_period": {
+      "start": "2026-08-20",
+      "end": "2026-08-21"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 0,
+        "baseline_total": 1,
+        "delta": -1,
+        "current_counts": {
+          "4": 0
+        },
+        "baseline_counts": {
+          "4": 1
+        },
+        "department_deltas": {
+          "4": -1
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-07",
+    "group_id": "unchanged_nonzero",
+    "split": "dev",
+    "scene": "unchanged_nonzero",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      4
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 1,
+        "baseline_total": 1,
+        "delta": 0,
+        "current_counts": {
+          "4": 1
+        },
+        "baseline_counts": {
+          "4": 1
+        },
+        "department_deltas": {
+          "4": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-08",
+    "group_id": "zero_baseline",
+    "split": "frozen",
+    "scene": "zero_baseline",
+    "origin": "seed",
+    "injection": null,
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-07-01",
+      "end": "2026-08-01"
+    },
+    "baseline_period": {
+      "start": "2026-06-01",
+      "end": "2026-07-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 2,
+        "baseline_total": 0,
+        "delta": 2,
+        "current_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 1,
+          "8": 0
+        },
+        "baseline_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "department_deltas": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 1,
+          "8": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-09",
+    "group_id": "missing_department",
+    "split": "dev",
+    "scene": "missing_department",
+    "origin": "injected",
+    "injection": "missing_department",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-10",
+    "group_id": "missing_total",
+    "split": "frozen",
+    "scene": "missing_total",
+    "origin": "injected",
+    "injection": "missing_total",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-11",
+    "group_id": "snapshot_mismatch",
+    "split": "dev",
+    "scene": "snapshot_mismatch",
+    "origin": "injected",
+    "injection": "snapshot_mismatch",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-12",
+    "group_id": "metric_version_mismatch",
+    "split": "frozen",
+    "scene": "metric_version_mismatch",
+    "origin": "injected",
+    "injection": "metric_version_mismatch",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-13",
+    "group_id": "scope_mismatch",
+    "split": "dev",
+    "scene": "scope_mismatch",
+    "origin": "injected",
+    "injection": "scope_mismatch",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-14",
+    "group_id": "duplicate_department",
+    "split": "frozen",
+    "scene": "duplicate_department",
+    "origin": "injected",
+    "injection": "duplicate_department",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-15",
+    "group_id": "nonclosing_total",
+    "split": "dev",
+    "scene": "nonclosing_total",
+    "origin": "injected",
+    "injection": "nonclosing_total",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-16",
+    "group_id": "organization_history_gap",
+    "split": "frozen",
+    "scene": "organization_history_gap",
+    "origin": "injected",
+    "injection": "organization_history_gap",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-17",
+    "group_id": "unsupported_metric",
+    "split": "dev",
+    "scene": "unsupported_metric",
+    "origin": "injected",
+    "injection": "unsupported_metric",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-18",
+    "group_id": "permission_denied",
+    "split": "frozen",
+    "scene": "permission_denied",
+    "origin": "injected",
+    "injection": "permission_denied",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-19",
+    "group_id": "tool_budget_exhausted",
+    "split": "dev",
+    "scene": "tool_budget_exhausted",
+    "origin": "injected",
+    "injection": "tool_budget_exhausted",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-20",
+    "group_id": "deadline_exhausted",
+    "split": "frozen",
+    "scene": "deadline_exhausted",
+    "origin": "injected",
+    "injection": "deadline_exhausted",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-21",
+    "group_id": "cancel_during_tool",
+    "split": "dev",
+    "scene": "cancel_during_tool",
+    "origin": "injected",
+    "injection": "cancel_during_tool",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "CANCELLED"
+      ],
+      "no_unverified_data": true
+    }
+  },
+  {
+    "case_id": "S6-22",
+    "group_id": "conditional_daily_query",
+    "split": "frozen",
+    "scene": "conditional_daily_query",
+    "origin": "injected",
+    "injection": "conditional_daily_query",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED"
+      ],
+      "numbers": {
+        "current_total": 3,
+        "baseline_total": 1,
+        "delta": 2,
+        "current_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "baseline_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "department_deltas": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        }
+      },
+      "conditional_supplement": true
+    }
+  },
+  {
+    "case_id": "S6-23",
+    "group_id": "unknown_claim_reference",
+    "split": "dev",
+    "scene": "unknown_claim_reference",
+    "origin": "injected",
+    "injection": "unknown_claim_reference",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "COMPLETED",
+        "PARTIAL"
+      ],
+      "no_unsupported_claims": true,
+      "numbers": {
+        "current_total": 3,
+        "baseline_total": 1,
+        "delta": 2,
+        "current_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "baseline_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        },
+        "department_deltas": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 1,
+          "6": 0,
+          "7": 0,
+          "8": 0
+        }
+      }
+    }
+  },
+  {
+    "case_id": "S6-24",
+    "group_id": "invalid_model_json",
+    "split": "frozen",
+    "scene": "invalid_model_json",
+    "origin": "injected",
+    "injection": "invalid_model_json",
+    "org_ids": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+    ],
+    "current_period": {
+      "start": "2026-09-01",
+      "end": "2026-10-01"
+    },
+    "baseline_period": {
+      "start": "2026-08-01",
+      "end": "2026-09-01"
+    },
+    "expected": {
+      "statuses": [
+        "FAILED",
+        "PARTIAL"
+      ],
+      "mode_statuses": {
+        "deterministic": [
+          "COMPLETED"
+        ]
+      },
+      "no_unsupported_claims": true
+    }
+  }
+]
