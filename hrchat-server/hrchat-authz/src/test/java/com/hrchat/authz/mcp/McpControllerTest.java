@@ -37,7 +37,7 @@ class McpControllerTest {
     }
 
     @Test
-    void toolsList_withServiceToken_returnsThreeTools() throws Exception {
+    void toolsList_withServiceToken_returnsFourTools() throws Exception {
         mockMvc.perform(post("/mcp")
                         .header(McpAuthService.SERVICE_TOKEN_HEADER, "svc")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -46,8 +46,9 @@ class McpControllerTest {
                                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.jsonrpc").value("2.0"))
-                .andExpect(jsonPath("$.result.tools.length()").value(3))
-                .andExpect(jsonPath("$.result.tools[0].name").value("get_semantic_meta"));
+                .andExpect(jsonPath("$.result.tools.length()").value(4))
+                .andExpect(jsonPath("$.result.tools[0].name").value("get_semantic_meta"))
+                .andExpect(jsonPath("$.result.tools[3].name").value("analysis_evidence"));
         verify(mcpAuthService).verifyServiceToken("svc");
     }
 
