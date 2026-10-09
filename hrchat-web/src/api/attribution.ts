@@ -30,6 +30,7 @@ export interface AnalysisResult {
   claims: Array<{ claim_id: string; kind: string; fact_id?: string; hypothesis?: string; next_check?: string; evidence_ids: string[] }>
   evidence: Array<{ evidence_id: string; status: string; metric_version: string; data_version: string; query: { detail: string }; daily?: Array<{ period: string; date: string; count: number }> }>
   data_quality: string[]
+  supplement_assessment?: { claim_id: string; evidence_id: string; fact_ids: string[]; conclusion: 'descriptive_only' | 'insufficient' } | null
   unresolved: string[]
   disclaimer: string
   usage: { elapsed_ms?: number; [key: string]: unknown }
@@ -51,7 +52,7 @@ export interface AnalysisTask {
 export function getAnalysisContext(askId: string) {
   return get<ApiResponse<AnalysisContext>>(`/chat/asks/${encodeURIComponent(askId)}/attribution/context`)
 }
-export function startAnalysis(askId: string, baselinePeriod: AnalysisPeriod, idempotencyKey: string, mode: AnalysisMode = 'deterministic') {
+export function startAnalysis(askId: string, baselinePeriod: AnalysisPeriod, idempotencyKey: string, mode: AnalysisMode = 'dual') {
   return post<ApiResponse<AnalysisTask>>(`/chat/asks/${encodeURIComponent(askId)}/attribution`,
     { baselinePeriod, mode }, { headers: { 'X-Idempotency-Key': idempotencyKey } })
 }

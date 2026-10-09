@@ -94,12 +94,28 @@ class SupplementNeed(Contract):
         return self
 
 
+class SupplementAssessment(Contract):
+    """Cite checked daily facts without inventing a causal/concentration threshold."""
+    fact_ids: list[Literal["daily_peak:current", "daily_peak:baseline"]] = Field(
+        max_length=2, description="引用ev_daily实际包含的每日事实；descriptive_only须覆盖本次请求的required_fact_ids。")
+    conclusion: Literal["descriptive_only", "insufficient"] = Field(
+        description="descriptive_only仅表示得到可描述的每日统计，不代表已证明日期集中或真实原因；仍缺证据用insufficient。")
+
+    @model_validator(mode="after")
+    def distinct_facts(self):
+        if len(set(self.fact_ids)) != len(self.fact_ids):
+            raise ValueError("duplicate assessed fact")
+        return self
+
+
 class Claims(Contract):
     claims: list[Claim] = Field(min_length=1, max_length=20)
     request_evidence: Literal["daily_counts"] | None = Field(default=None,
         description="默认null。仅确有时间分布待核查项且supplement_available=true时请求daily_counts；补查后必须null。")
     supplement_need: SupplementNeed | None = Field(default=None,
         description="请求补查时填写具体证据缺口；不请求时为null。部门贡献可由已有部门证据回答，不默认补查。")
+    supplement_assessment: SupplementAssessment | None = Field(default=None,
+        description="初次分析为null；补查后必须明确引用已取得的每日事实，或声明证据不足。")
 
     @model_validator(mode="after")
     def unique_ids(self):
@@ -116,6 +132,8 @@ class ReviewResult(Contract):
         description="仅request_evidence决策填写；补查后必须null，证据足够则accept，仍不足则insufficient。")
     supplement_need: SupplementNeed | None = Field(default=None,
         description="请求时关联未被删除的时间分布假设和缺失事实；其余决策为null。不能仅因Analyst请求就批准。")
+    supplement_assessment: SupplementAssessment | None = Field(default=None,
+        description="补查后复核须引用新每日事实或声明不足，不能仅输出accept；初次复核为null。")
     issues: list[Literal["unsupported_claim", "missing_daily_evidence", "cause_unverified", "evidence_insufficient"]] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")
