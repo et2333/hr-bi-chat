@@ -60,14 +60,25 @@ class FixtureAdapter:
                                    "fact_id": "department:99999", "evidence_ids": ["ev_department"]})
                 reply = {"claims": claims}
                 if self.injection == "conditional_daily_query" and data["supplement_available"]:
+                    claims.append({"claim_id": "timing", "kind": "unverified_hypothesis",
+                                   "hypothesis": "timing_concentration", "evidence_ids": ["ev_department"]})
                     reply["request_evidence"] = "daily_counts"
+                    reply["supplement_need"] = {"claim_id": "timing", "reason": "verify_timing_concentration",
+                                                "required_fact_ids": ["daily_peak:current", "daily_peak:baseline"]}
+                elif self.injection == "conditional_daily_query":
+                    for fact_id in ("daily_peak:current", "daily_peak:baseline"):
+                        if fact_id in data["facts"]:
+                            claims.append({"claim_id": fact_id, "kind": "fact", "fact_id": fact_id,
+                                           "evidence_ids": ["ev_daily"]})
             elif schema["title"] == "ReviewResult":
                 reply = {"decision": "accept",
                          "checked_claim_ids": [c["claim_id"] for c in data["claims"]["claims"]],
                          "drop_claim_ids": data["invalid_claim_ids"], "issues": []}
                 if self.injection == "conditional_daily_query" and data["supplement_available"]:
                     reply.update(decision="request_evidence", evidence_request="daily_counts",
-                                 issues=["missing_daily_evidence"])
+                                 issues=["missing_daily_evidence"],
+                                 supplement_need={"claim_id": "timing", "reason": "verify_timing_concentration",
+                                                  "required_fact_ids": ["daily_peak:current", "daily_peak:baseline"]})
             else:
                 raise AssertionError("Fixture does not recognize this role contract")
             text = json.dumps(reply, ensure_ascii=False)
@@ -134,6 +145,27 @@ def make_request(case, mode):
             "data_version": "s6-literal-seed-v1", "scope_ref": "fixture-scope",
         }, "invocation_id": "fixture-invocation", "tool_context_token": "fixture-token", "mode": mode,
     })
+
+
+def behavior_observations(result, tool_calls):
+    """Descriptive signals, not a model-quality score or a claim of review gain."""
+    known_drops, other_drops = [], []
+    for turn in result.get("trace", []):
+        if turn.get("role") != "Reviewer":
+            continue
+        known = set(turn.get("input_invalid_claim_ids", []))
+        for claim_id in turn["output"].get("drop_claim_ids", []):
+            (known_drops if claim_id in known else other_drops).append(claim_id)
+    decisions = result.get("supplement_decisions", [])
+    return {"daily_queries": sum(call["detail"] == "daily" for call in tool_calls),
+            "denied_supplements": sum(not d["allowed"] for d in decisions),
+            "repeated_requests": sum(d["reason"] == "supplement_limit_reached" for d in decisions),
+            "requests_without_supported_gap": sum(d["reason"] == "supplement_not_justified" for d in decisions),
+            "final_daily_fact_ids": sorted({c["fact_id"] for c in result.get("claims", [])
+                                            if str(c.get("fact_id", "")).startswith("daily_peak:")}),
+            "reviewer_removed_program_flagged": known_drops,
+            "reviewer_other_removed_unverified": other_drops,
+            "note": "A justified gap is not proof of business value; other review removals need independent adjudication."}
 
 
 def score_result(case, mode, result, tool_calls):
@@ -206,6 +238,7 @@ async def run_case(case, mode):
     return {"case_id": case["case_id"], "group_id": case["group_id"], "split": case["split"],
             "origin": case["origin"], "injection": case["injection"], "mode": mode,
             "score": score_result(case, mode, result, tools.calls), "result": result,
+            "behavior": behavior_observations(result, tools.calls),
             "tool_calls": tools.calls, "event_sequence": events}
 
 

@@ -11,7 +11,7 @@ import uuid
 from typing import TypedDict
 
 from adapters.mcp_client import McpBusinessError
-from adapters.model_usage import summarize_calls
+from adapters.model_usage import summarize_calls, ModelCallError
 from adapters.query_budget import ACTIVE_QUERY_BUDGET, QueryBudget, QueryBudgetExceeded
 from agentscope_teams.analysis_contract import (
     AnalysisPlan, AnalysisRequest, Claim, Claims, EvidenceError, ReviewResult,
@@ -33,6 +33,7 @@ class AttributionTeam:
         self.claims = None
         self.plan = None
         self.supplemented = False
+        self.supplement_decisions = []
         self.unresolved = []
         self.status = "COMPLETED"
         self.emit = None
@@ -47,7 +48,9 @@ class AttributionTeam:
             "Reviewer": "核对证据与结论边界"}[name]})
         role_name = "Analyst" if name == "AnalystPlan" else name
         result = await role_reply(self.adapter, self.budget, self.records, self.request, role_name, schema, data)
-        self.trace.append({"role": role_name, "stage": name, "schema": schema.__name__, "output": result.model_dump(mode="json")})
+        self.trace.append({"role": role_name, "stage": name, "schema": schema.__name__,
+                           "input_invalid_claim_ids": data.get("invalid_claim_ids", []),
+                           "output": result.model_dump(mode="json")})
         return result
 
     async def fetch(self, detail):
@@ -77,11 +80,33 @@ class AttributionTeam:
                                           "evidence_id": evidence_id, "status": "verified"})
 
     def handoff(self):
-        return {"plan": self.plan.model_dump(), "evidence": self.evidence,
+        return {"task_goal": "explain_department_delta", "phase": "post_supplement" if self.supplemented else "initial",
+                "plan": self.plan.model_dump(), "evidence": self.evidence,
                 "facts": self.computed["facts"] if self.computed else {},
                 "claims": self.claims.model_dump() if self.claims else None,
                 "invalid_claim_ids": self.invalid_claims(), "supplement_available": not self.supplemented,
                 "allowed_supplement": "daily_counts" if not self.supplemented else None}
+
+    def allow_supplement(self, need, role):
+        """Apply the same evidence-gap and one-query boundary in both arms."""
+        reason = None
+        if self.supplemented:
+            reason = "supplement_limit_reached"
+        elif need is None:
+            reason = "supplement_not_justified"
+        else:
+            claim = next((c for c in self.claims.claims if c.claim_id == need.claim_id), None)
+            if (claim is None or claim.kind != "unverified_hypothesis"
+                    or claim.hypothesis != "timing_concentration" or claim.claim_id in self.invalid_claims()):
+                reason = "supplement_not_justified"
+            elif all(fact in self.computed["facts"] for fact in need.required_fact_ids):
+                reason = "supplement_already_satisfied"
+        self.supplement_decisions.append({"role": role, "allowed": reason is None, "reason": reason,
+                                          "need": need.model_dump(mode="json") if need else None})
+        if reason:
+            self.status = "PARTIAL"
+            self.unresolved.append(reason)
+        return reason is None
 
     def invalid_claims(self):
         if not self.claims:
@@ -113,10 +138,7 @@ class AttributionTeam:
             invalid = set(self.invalid_claims())
             self.claims.claims = [c for c in self.claims.claims if c.claim_id not in invalid]
         if self.claims.request_evidence:
-            if self.supplemented:
-                self.status = "PARTIAL"
-                self.unresolved.append("supplement_limit_reached")
-            else:
+            if self.allow_supplement(self.claims.supplement_need, "Analyst"):
                 return {"route": "supplement"}
         return {"route": "render"}
 
@@ -133,10 +155,8 @@ class AttributionTeam:
             invalid = set(self.invalid_claims())
             self.claims.claims = [c for c in self.claims.claims if c.claim_id not in invalid]
         if review.decision == "request_evidence":
-            if not self.supplemented:
+            if self.allow_supplement(review.supplement_need, "Reviewer"):
                 return {"route": "supplement"}
-            self.status = "PARTIAL"
-            self.unresolved.append("supplement_limit_reached")
         elif review.decision == "insufficient":
             self.status = "PARTIAL"
             self.unresolved.append("review_evidence_insufficient")
@@ -164,6 +184,7 @@ class AttributionTeam:
                 "summary": {k: c[k] for k in ("current_total", "baseline_total", "delta", "closure_verified")} if c else None,
                 "contributions": c["departments"] if c else [], "facts": c["facts"] if c else {},
                 "claims": safe_claims, "review": self.reviews, "evidence": self.evidence,
+                "supplement_decisions": self.supplement_decisions,
                 "data_quality": ["按离职事件所属部门拆解；不包含完整历史组织关系。", "统计贡献不等于真实离职原因。"],
                 "unresolved": list(dict.fromkeys(self.unresolved)), "disclaimer": "辅助分析，仅供参考",
                 "usage": {**self.budget.evidence(), **summarize_calls(self.records), "calls": self.records},
@@ -198,6 +219,9 @@ class AttributionTeam:
         except (QueryBudgetExceeded, TimeoutError) as exc:
             self.status = "PARTIAL" if self.computed else "FAILED"
             self.unresolved.append(getattr(exc, "reason", "task_deadline_exceeded"))
+        except ModelCallError as exc:
+            self.status = "PARTIAL" if self.computed else "FAILED"
+            self.unresolved.append("model_connection_failed" if exc.result.failure_kind == "network_error" else "model_request_failed")
         except Exception as exc:
             self.status = "PARTIAL" if self.computed else "FAILED"
             self.unresolved.append(str(exc) if isinstance(exc, EvidenceError) else "analysis_execution_failed")

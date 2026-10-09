@@ -1,0 +1,452 @@
+{
+    "source_run":  "s6-real-20261009T052414522743Z",
+    "source_kind":  "real_model_outputs_on_mock_aggregates",
+    "note":  "Exact structured role outputs only. Offline replay is not a new real-model run; no credentials, usage records or employee data.",
+    "cases":  [
+                  {
+                      "case_id":  "S6-01",
+                      "mode":  "single",
+                      "outputs":  [
+                                      {
+                                          "method":  "department_contribution",
+                                          "steps":  [
+                                                        "compare_totals",
+                                                        "department_delta",
+                                                        "check_closure"
+                                                    ]
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_overall_delta",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "overall",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept5_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:5",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_no_contribution",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_timing_concentration",
+                                                             "kind":  "unverified_hypothesis",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  null,
+                                                             "hypothesis":  "timing_concentration",
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_business_cause_unknown",
+                                                             "kind":  "unverified_hypothesis",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  null,
+                                                             "hypothesis":  "business_cause_unknown",
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_overall_delta",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "overall",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept5_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:5",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_no_contribution",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_timing_concentration",
+                                                             "kind":  "unverified_hypothesis",
+                                                             "evidence_ids":  [
+                                                                                  "ev_daily"
+                                                                              ],
+                                                             "fact_id":  null,
+                                                             "hypothesis":  "timing_concentration",
+                                                             "next_check":  "daily_counts"
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_business_cause_unknown",
+                                                             "kind":  "unverified_hypothesis",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  null,
+                                                             "hypothesis":  "business_cause_unknown",
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      }
+                                  ]
+                  },
+                  {
+                      "case_id":  "S6-01",
+                      "mode":  "dual",
+                      "outputs":  [
+                                      {
+                                          "method":  "department_contribution",
+                                          "steps":  [
+                                                        "compare_totals",
+                                                        "department_delta",
+                                                        "check_closure"
+                                                    ]
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_overall_delta",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "overall",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept5_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:5",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_no_contribution",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      },
+                                      {
+                                          "decision":  "request_evidence",
+                                          "checked_claim_ids":  [
+                                                                    "c_overall_delta",
+                                                                    "c_dept3_contribution",
+                                                                    "c_dept5_contribution",
+                                                                    "c_dept4_no_contribution"
+                                                                ],
+                                          "drop_claim_ids":  [
+                                                                 "c_overall_delta"
+                                                             ],
+                                          "evidence_request":  "daily_counts",
+                                          "issues":  [
+                                                         "unsupported_claim"
+                                                     ]
+                                      },
+                                      {
+                                          "decision":  "accept",
+                                          "checked_claim_ids":  [
+                                                                    "c_dept3_contribution",
+                                                                    "c_dept5_contribution",
+                                                                    "c_dept4_no_contribution"
+                                                                ],
+                                          "drop_claim_ids":  [
+
+                                                             ],
+                                          "evidence_request":  null,
+                                          "issues":  [
+
+                                                     ]
+                                      }
+                                  ]
+                  },
+                  {
+                      "case_id":  "S6-03",
+                      "mode":  "single",
+                      "outputs":  [
+                                      {
+                                          "method":  "department_contribution",
+                                          "steps":  [
+                                                        "compare_totals",
+                                                        "department_delta",
+                                                        "check_closure"
+                                                    ]
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_overall_delta_zero",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "overall",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_baseline_one",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_current_one",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept2_no_change",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:2",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_contribution_neg1",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_contribution_pos1",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_overall_delta_zero",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "overall",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_baseline_one",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_current_one",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept2_no_change",
+                                                             "kind":  "fact",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:2",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept3_contribution_neg1",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept4_contribution_pos1",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      }
+                                  ]
+                  },
+                  {
+                      "case_id":  "S6-03",
+                      "mode":  "dual",
+                      "outputs":  [
+                                      {
+                                          "method":  "department_contribution",
+                                          "steps":  [
+                                                        "compare_totals",
+                                                        "department_delta",
+                                                        "check_closure"
+                                                    ]
+                                      },
+                                      {
+                                          "claims":  [
+                                                         {
+                                                             "claim_id":  "c_dept_3_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:3",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         },
+                                                         {
+                                                             "claim_id":  "c_dept_4_contribution",
+                                                             "kind":  "statistical_contribution",
+                                                             "evidence_ids":  [
+                                                                                  "ev_department"
+                                                                              ],
+                                                             "fact_id":  "department:4",
+                                                             "hypothesis":  null,
+                                                             "next_check":  null
+                                                         }
+                                                     ],
+                                          "request_evidence":  "daily_counts"
+                                      },
+                                      {
+                                          "decision":  "request_evidence",
+                                          "checked_claim_ids":  [
+                                                                    "c_dept_3_contribution",
+                                                                    "c_dept_4_contribution"
+                                                                ],
+                                          "drop_claim_ids":  [
+
+                                                             ],
+                                          "evidence_request":  "daily_counts",
+                                          "issues":  [
+                                                         "missing_daily_evidence"
+                                                     ]
+                                      },
+                                      {
+                                          "decision":  "accept",
+                                          "checked_claim_ids":  [
+                                                                    "c_dept_3_contribution",
+                                                                    "c_dept_4_contribution"
+                                                                ],
+                                          "drop_claim_ids":  [
+
+                                                             ],
+                                          "evidence_request":  null,
+                                          "issues":  [
+
+                                                     ]
+                                      }
+                                  ]
+                  }
+              ]
+}
