@@ -77,6 +77,11 @@ class OpenAIClientImpl(ModelAdapter):
         return await self._complete([{"role": "system", "content": system_prompt},
                                      {"role": "user", "content": user_prompt}], self.planning_options())
 
+    async def complete_analysis(self, system_prompt: str, user_prompt: str) -> ModelResult:
+        return await self._complete([{"role": "system", "content": system_prompt},
+                                     {"role": "user", "content": user_prompt}],
+                                    {**self.planning_options(), "max_tokens": 1536})
+
     async def _complete(self, messages, options=None) -> ModelResult:
         started = time.perf_counter()
         result = ModelResult("", urlparse(self.base_url).hostname or self.name, self.model,

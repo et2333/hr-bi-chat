@@ -31,6 +31,10 @@ class ModelAdapter(ABC):
         """根据 prompt 生成回复文本。"""
         raise NotImplementedError
 
+    async def complete_analysis(self, system_prompt: str, user_prompt: str) -> ModelResult:
+        """Structured analysis hook; local adapters retain unknown API usage."""
+        return await self.complete(system_prompt + "\n" + user_prompt)
+
     def estimate_tokens(self, text: str) -> int:
         """粗粒度 token 估算（中英文混合按字符计，供预算熔断使用）。"""
         # 中文按 1 字符 ≈ 1 token 粗略估算，保证确定性即可
