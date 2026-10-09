@@ -144,7 +144,8 @@ class AttributionServiceTest {
     @Test
     void cancel_marksCancelled() throws Exception {
         seedCompletedAsk("ask1");
-        doAnswer(invocation -> {
+        // stream() may lose the race to cancel() on fast CI runners; keep stub lenient.
+        lenient().doAnswer(invocation -> {
             Thread.sleep(200);
             @SuppressWarnings("unchecked")
             BiConsumer<String, Map<String, Object>> consumer = invocation.getArgument(2);
