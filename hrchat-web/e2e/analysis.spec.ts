@@ -1,0 +1,30 @@
+import { expect, test } from '@playwright/test'
+
+// Run through evals.s6_smoke --browser: fresh H2 + scripted SDK, no paid API.
+test('HRD confirms periods and receives evidence-grounded department contributions', async ({ page }) => {
+  test.skip(process.env.S6_FIXTURE_E2E !== '1', 'Requires isolated S6 fixture services')
+  await page.addInitScript(() => {
+    localStorage.setItem('hrchat_user_no', 'hr04')
+    localStorage.setItem('hrchat_tenant_no', 't01')
+  })
+  await page.goto('/chat')
+  await page.locator('.session-head button').click()
+  await page.locator('textarea[placeholder^="输入您的问题"]').fill('上月研发中心人员流失人数')
+  await page.locator('.input-actions button').click()
+  const open = page.getByTestId('open-analysis').last()
+  await expect(open).toBeVisible({ timeout: 30_000 })
+  await open.click()
+  await expect(page.getByTestId('current-period').last()).toContainText('2026-08-01 至 2026-08-31')
+  await expect(page.getByTestId('baseline-start').last()).toHaveValue('2026-07-01')
+  await expect(page.getByTestId('baseline-end').last()).toHaveValue('2026-07-31')
+  await page.getByTestId('confirm-analysis').last().click()
+  await expect(page.locator('.analysis-stages').last()).toBeVisible()
+  await expect(page.getByTestId('analysis-summary').last()).toContainText('本期 1 人，基期 1 人，变化 0 人', { timeout: 30_000 })
+  const table = page.locator('.contribution-table').last()
+  await expect(table).toContainText('研发一部')
+  await expect(table).toContainText('-1')
+  await expect(table).toContainText('研发二部')
+  await expect(table).toContainText('+1')
+  await expect(page.locator('.analysis-evidence').last()).toContainText('2 项')
+  await expect(page.locator('.analysis-limitations').last()).toContainText('统计贡献不等于真实离职原因')
+})

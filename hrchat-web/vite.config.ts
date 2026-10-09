@@ -15,7 +15,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        target: process.env.HRCHAT_API_TARGET ?? 'http://localhost:8080',
         changeOrigin: true,
         // 不 rewrite 前缀：后端所有 API 前缀为 /api/v1
       },

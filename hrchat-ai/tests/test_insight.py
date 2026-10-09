@@ -20,8 +20,8 @@ def test_insight_returns_template_points():
     assert resp.status_code == 200
     body = resp.json()
     assert body["report_name"] == "人力成本月度报表"
-    assert "均值" in body["summary"]
-    assert "走势" in body["summary"]
+    assert "观测值" in body["summary"]
+    assert "均值" not in body["summary"]
     types = [p["type"] for p in body["points"]]
     assert types == ["value", "trend", "extreme"]
     # 峰值 120 出现在 2026-02
@@ -47,3 +47,20 @@ def test_insight_missing_payload_ok():
     resp = client.post("/v1/insight", json={})
     assert resp.status_code == 200
     assert resp.json()["points"] == []
+
+
+def test_insight_never_zero_fills_or_misaligns_periods():
+    from agent_gateway.app import build_insight
+    for data in ([1, None], [1, "invalid"], [1, float("inf")], [1], [1, 2, 3]):
+        result = build_insight("report", "离职率", ["8月", "9月"], [{"data": data}])
+        assert result["points"] == []
+    result = build_insight("report", "离职率", ["8月", "9月"], [{"data": [1, 3]}])
+    assert "均值" not in result["summary"]
+
+
+def test_insight_negative_values_and_single_point():
+    from agent_gateway.app import build_insight
+    result = build_insight("report", "变化", ["8月", "9月"], [{"data": [-2, -1]}])
+    assert "9月（-1.0）" in result["points"][-1]["label"]
+    result = build_insight("report", "变化", ["8月"], [{"data": [0]}])
+    assert not any(p["type"] == "trend" for p in result["points"])

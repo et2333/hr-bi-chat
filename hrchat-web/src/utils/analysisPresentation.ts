@@ -21,6 +21,8 @@ export function analysisIssueLabel(issue: string): string {
   const labels: Record<string, string> = {
     unsupported_claim: '部分结论缺少有效证据，已移除。',
     supplement_limit_reached: '已达到补查次数上限，仍有问题待核查。',
+    supplement_not_justified: '补查请求未说明有效的待核查项，已停止额外查询；已核验的统计结果仍可参考。',
+    supplement_already_satisfied: '所需证据已经提供，已停止重复查询。',
     review_evidence_insufficient: '复核认为现有证据不足。',
     no_supported_claims: '尚无得到充分证据支持的解读。',
     task_deadline_exceeded: '分析达到时间上限。',
@@ -28,6 +30,10 @@ export function analysisIssueLabel(issue: string): string {
     mcp_attempt_limit: '已达到数据查询次数上限。',
     tool_access_or_execution_failed: '数据读取失败或当前权限不允许读取。',
     analysis_execution_failed: '分析过程未完成。',
+    model_connection_failed: '无法连接模型服务，请检查网络连接后重试。',
+    model_request_failed: '模型请求未成功，请检查模型配置或服务状态。',
+    model_budget_exceeded: '已达到模型调用次数上限。',
+    mcp_budget_exceeded: '已达到数据查询次数上限。',
     cancelled: '分析已取消。',
   }
   return labels[issue] ?? '部分证据尚未通过完整性或一致性校验，请重新问数后核查。'

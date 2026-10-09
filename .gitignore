@@ -27,6 +27,8 @@ Desktop.ini
 **/dist/
 **/dist-ssr/
 **/coverage/
+/hrchat-web/test-results/
+/hrchat-web/playwright-report/
 *.log
 *.tsbuildinfo
 

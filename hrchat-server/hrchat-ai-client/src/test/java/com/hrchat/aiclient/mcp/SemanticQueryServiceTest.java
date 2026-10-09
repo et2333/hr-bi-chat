@@ -87,9 +87,30 @@ class SemanticQueryServiceTest {
     }
 
     @Mock private SemanticMetaService semanticMetaService;
+
+    @Test
+    void grantedAncestorStillIncludesRequestedDepartmentsChildren() {
+        UserContext manager = UserContext.builder().tenantId("t01").grantedOrgs(List.of(
+                UserContext.GrantedOrg.builder().orgNodeId(1L).scope(1).orgPath("/1/")
+                        .subtreeOrgKeys(List.of(1L, 2L, 3L, 4L, 5L)).build())).build();
+        when(orgNodeMapper.selectList(any())).thenReturn(List.of(orgNode(2L, "/1/2/"),
+                orgNode(3L, "/1/2/3/"), orgNode(4L, "/1/2/4/"), orgNode(5L, "/1/5/"),
+                orgNode(9L, "/1/2/9/"))); // catalogue alone cannot grant org 9
+        var scoped = service.narrowForOrgContext(manager, Map.of("org_id", "2", "include_children", true));
+        assertEquals(List.of(2L, 3L, 4L), scoped.getGrantedOrgs().get(0).getSubtreeOrgKeys());
+        var selfOnly = service.narrowForOrgContext(manager, Map.of("org_id", "2", "include_children", false));
+        assertEquals(List.of(2L), selfOnly.getGrantedOrgs().get(0).getSubtreeOrgKeys());
+    }
+
+    private static com.hrchat.authz.entity.SecOrgNode orgNode(Long id, String path) {
+        var node = new com.hrchat.authz.entity.SecOrgNode();
+        node.setId(id); node.setOrgPath(path); node.setTenantId("t01"); node.setStatus(1);
+        return node;
+    }
     @Mock private SqlRewriteService sqlRewriteService;
     @Mock private QueryExecService queryExecService;
     @Mock private AuthzService authzService;
+    @Mock private com.hrchat.authz.mapper.SecOrgNodeMapper orgNodeMapper;
 
     private SemanticQueryService service;
     private UserContext hr01;
@@ -98,6 +119,7 @@ class SemanticQueryServiceTest {
     void setUp() {
         service = new SemanticQueryService(semanticMetaService, sqlRewriteService, queryExecService,
                 authzService, new ObjectMapper(), LocalDate.of(2026, 9, 28), null);
+        org.springframework.test.util.ReflectionTestUtils.setField(service, "orgNodeMapper", orgNodeMapper);
         hr01 = UserContext.builder()
                 .empNo("hr01").tenantId("t01")
                 .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
@@ -260,6 +282,7 @@ class SemanticQueryServiceTest {
 
     @Test
     void execute_orgInScope_narrowsGrants() {
+        when(orgNodeMapper.selectList(any())).thenReturn(List.of(orgNode(3L, "/1/2/3/")));
         UserContext narrowed = service.narrowForOrgContext(hr01, Map.of("org_id", "3"));
         assertEquals(1, narrowed.getGrantedOrgs().size());
         assertTrue(narrowed.getGrantedOrgs().get(0).getSubtreeOrgKeys().contains(3L));

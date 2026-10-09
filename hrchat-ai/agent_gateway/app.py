@@ -15,6 +15,8 @@ import asyncio
 import json
 import os
 import hmac
+import math
+import re
 import uuid
 from typing import Any, AsyncGenerator, Optional
 
@@ -244,30 +246,34 @@ def _insight_label(categories: list, index: int) -> str:
 
 
 def build_insight(report_name: str, metric_name: str, categories: list, series: list) -> dict:
-    """报表模板化解读（P3 AI 洞察）：均值 / 首末趋势 / 极值点；缺数据返回空解读。"""
+    """描述已展示的单序列；缺失不作零，不把比率均值当整体口径。"""
     data: list = []
     if series and isinstance(series[0], dict):
         data = series[0].get("data") or []
     if not categories or not data:
         return {"report_name": report_name, "metric_name": metric_name,
                 "summary": f"报告「{report_name}」暂无可用数据，无法生成洞察。", "points": []}
-    values = [float(v) if v is not None else 0.0 for v in data]
-    avg = sum(values) / len(values)
-    max_v, min_v = max(values), min(values)
-    max_i, min_i = values.index(max_v), values.index(min_v)
-    trend = "持平"
-    if len(values) >= 2:
-        trend = "上升" if values[-1] > values[0] else "下降" if values[-1] < values[0] else "持平"
+    if len(series) != 1 or len(categories) != len(data):
+        return {"report_name": report_name, "metric_name": metric_name,
+                "summary": "序列与期间未对齐或包含多个指标，请分别核对后解读。", "points": []}
+    if any(type(v) not in (int, float) or not math.isfinite(v) for v in data):
+        return {"report_name": report_name, "metric_name": metric_name,
+                "summary": "存在缺失或无效数值，无法完整比较；缺失数据未按零处理。", "points": []}
+    values = [float(v) for v in data]
+    max_i = max(range(len(values)), key=values.__getitem__)
+    min_i = min(range(len(values)), key=values.__getitem__)
     label = metric_name or "本指标"
     points = [
-        {"type": "value", "label": f"指标{label}期间均值约 {avg:.1f}"},
-        {"type": "trend", "label": f"对比首末周期整体呈{trend}趋势"},
+        {"type": "value", "label": f"指标{label}共 {len(values)} 个期间观测值；未跨期求和或汇总比率。"},
         {"type": "extreme",
-         "label": f"峰值出现在{_insight_label(categories, max_i)}（{max_v:.1f}），"
-                  f"低点在{_insight_label(categories, min_i)}（{min_v:.1f}）"},
+         "label": f"峰值出现在{_insight_label(categories, max_i)}（{values[max_i]:.1f}），"
+                  f"低点在{_insight_label(categories, min_i)}（{values[min_i]:.1f}）"},
     ]
+    if len(values) >= 2 and all(re.fullmatch(r"\d{4}-\d{2}(?:-\d{2})?", str(c)) for c in categories):
+        trend = "上升" if values[-1] > values[0] else "下降" if values[-1] < values[0] else "持平"
+        points.insert(1, {"type": "trend", "label": f"末期较首期{trend}；不代表期间持续变化趋势。"})
     return {"report_name": report_name, "metric_name": metric_name,
-            "summary": f"报告「{report_name}」共 {len(categories)} 个周期，指标{label}均值为 {avg:.1f}，整体呈{trend}走势。",
+            "summary": f"报告「{report_name}」展示指标{label}的 {len(categories)} 个观测值，仅作描述性比较。",
             "points": points}
 
 

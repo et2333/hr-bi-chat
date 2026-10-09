@@ -72,14 +72,34 @@ class Claim(Contract):
     claim_id: str = Field(min_length=1, max_length=64)
     kind: Literal["fact", "statistical_contribution", "unverified_hypothesis", "next_check"]
     evidence_ids: list[str] = Field(max_length=4)
-    fact_id: str | None = None
-    hypothesis: Literal["timing_concentration", "business_cause_unknown"] | None = None
-    next_check: Literal["daily_counts", "consult_hr_records"] | None = None
+    fact_id: str | None = Field(default=None, description="仅fact/statistical_contribution填写；贡献仅用department:ID，overall用fact。其他类型为null。")
+    hypothesis: Literal["timing_concentration", "business_cause_unknown"] | None = Field(
+        default=None, description="仅unverified_hypothesis填写，此时fact_id和next_check必须为null。")
+    next_check: Literal["daily_counts", "consult_hr_records"] | None = Field(
+        default=None, description="仅next_check类型填写，此时fact_id和hypothesis必须为null。建议与假设须拆成两条claim。")
+
+
+class SupplementNeed(Contract):
+    """A checkable evidence gap, not unrestricted model-generated justification."""
+    claim_id: str = Field(min_length=1, max_length=64,
+                          description="需核查的timing_concentration假设claim_id；不能引用总数或部门贡献冒充每日证据缺口。")
+    reason: Literal["verify_timing_concentration"]
+    required_fact_ids: list[Literal["daily_peak:current", "daily_peak:baseline"]] = Field(
+        min_length=1, max_length=2, description="补查后用于核查日期集中假设的每日事实；不用于证明真实离职原因。")
+
+    @model_validator(mode="after")
+    def distinct_facts(self):
+        if len(set(self.required_fact_ids)) != len(self.required_fact_ids):
+            raise ValueError("duplicate required fact")
+        return self
 
 
 class Claims(Contract):
     claims: list[Claim] = Field(min_length=1, max_length=20)
-    request_evidence: Literal["daily_counts"] | None = None
+    request_evidence: Literal["daily_counts"] | None = Field(default=None,
+        description="默认null。仅确有时间分布待核查项且supplement_available=true时请求daily_counts；补查后必须null。")
+    supplement_need: SupplementNeed | None = Field(default=None,
+        description="请求补查时填写具体证据缺口；不请求时为null。部门贡献可由已有部门证据回答，不默认补查。")
 
     @model_validator(mode="after")
     def unique_ids(self):
@@ -92,7 +112,10 @@ class ReviewResult(Contract):
     decision: Literal["accept", "request_evidence", "insufficient"]
     checked_claim_ids: list[str] = Field(max_length=20)
     drop_claim_ids: list[str] = Field(default_factory=list, max_length=20)
-    evidence_request: Literal["daily_counts"] | None = None
+    evidence_request: Literal["daily_counts"] | None = Field(default=None,
+        description="仅request_evidence决策填写；补查后必须null，证据足够则accept，仍不足则insufficient。")
+    supplement_need: SupplementNeed | None = Field(default=None,
+        description="请求时关联未被删除的时间分布假设和缺失事实；其余决策为null。不能仅因Analyst请求就批准。")
     issues: list[Literal["unsupported_claim", "missing_daily_evidence", "cause_unverified", "evidence_insufficient"]] = Field(default_factory=list, max_length=4)
 
     @model_validator(mode="after")

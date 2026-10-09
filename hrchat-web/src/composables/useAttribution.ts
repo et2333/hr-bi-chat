@@ -109,7 +109,7 @@ export function useAttribution(sourceAskId: string) {
     } finally { if (isCurrent()) busy.value = false }
   }
 
-  async function start(baseline: AnalysisPeriod, mode: AnalysisMode = 'deterministic') {
+  async function start(baseline: AnalysisPeriod, mode: AnalysisMode = 'dual') {
     if (busy.value || task.value?.status === 'RUNNING' || !context.value) return
     busy.value = true
     error.value = ''

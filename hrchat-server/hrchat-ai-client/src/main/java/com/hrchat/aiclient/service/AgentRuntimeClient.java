@@ -72,26 +72,29 @@ public interface AgentRuntimeClient {
         List<Map<String, Object>> series = summary.get("series") instanceof List<?> list
                 ? (List<Map<String, Object>>) list : List.of();
 
-        List<Number> data = new ArrayList<>();
+        List<Double> data = new ArrayList<>();
         if (!series.isEmpty() && series.get(0).get("data") instanceof List<?> dl) {
             for (Object v : dl) {
-                data.add(v instanceof Number n ? n : 0.0);
+                data.add(v instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : null);
             }
         }
         if (categories.isEmpty() || data.isEmpty()) {
             return Map.of("report_name", reportName, "metric_name", metricName,
                     "summary", "报告「" + reportName + "」暂无可用数据，无法生成洞察。", "points", List.of());
         }
-        double avg = 0;
-        double maxV = Double.MIN_VALUE, minV = Double.MAX_VALUE;
+        if (series.size() != 1 || categories.size() != data.size())
+            return Map.of("report_name", reportName, "metric_name", metricName,
+                    "summary", "序列与期间未对齐或包含多个指标，请分别核对后解读。", "points", List.of());
+        if (data.contains(null))
+            return Map.of("report_name", reportName, "metric_name", metricName,
+                    "summary", "存在缺失或无效数值，无法完整比较；缺失数据未按零处理。", "points", List.of());
+        double maxV = Double.NEGATIVE_INFINITY, minV = Double.POSITIVE_INFINITY;
         int maxI = 0, minI = 0;
         for (int i = 0; i < data.size(); i++) {
             double v = data.get(i).doubleValue();
-            avg += v;
             if (v > maxV) { maxV = v; maxI = i; }
             if (v < minV) { minV = v; minI = i; }
         }
-        avg /= data.size();
         String trend = "持平";
         if (data.size() >= 2) {
             double first = data.get(0).doubleValue(), last = data.get(data.size() - 1).doubleValue();
@@ -99,14 +102,15 @@ public interface AgentRuntimeClient {
         }
         String label = metricName.isBlank() ? "本指标" : metricName;
         List<Map<String, String>> points = new ArrayList<>();
-        points.add(Map.of("type", "value", "label", String.format("指标%s期间均值约 %.1f", label, avg)));
-        points.add(Map.of("type", "trend", "label", "对比首末周期整体呈" + trend + "趋势"));
+        points.add(Map.of("type", "value", "label", String.format("指标%s共 %d 个期间观测值；未跨期求和或汇总比率。", label, data.size())));
+        if (data.size() >= 2 && categories.stream().allMatch(c -> c.matches("\\d{4}-\\d{2}(-\\d{2})?")))
+            points.add(Map.of("type", "trend", "label", "末期较首期" + trend + "；不代表期间持续变化趋势。"));
         points.add(Map.of("type", "extreme", "label", "峰值出现在" + catLabel(categories, maxI) + "（" + fmt(maxV) + "），低点在" + catLabel(categories, minI) + "（" + fmt(minV) + "）"));
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("report_name", reportName);
         view.put("metric_name", metricName);
-        view.put("summary", String.format("报告「%s」共 %d 个周期，指标%s均值为 %.1f，整体呈%s走势。",
-                reportName, categories.size(), label, avg, trend));
+        view.put("summary", String.format("报告「%s」展示指标%s的 %d 个观测值，仅作描述性比较。",
+                reportName, label, categories.size()));
         view.put("points", points);
         return view;
     }

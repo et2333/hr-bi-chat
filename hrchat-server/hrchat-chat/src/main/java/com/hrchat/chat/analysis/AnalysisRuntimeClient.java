@@ -22,7 +22,9 @@ public class AnalysisRuntimeClient {
     private final ObjectMapper mapper;
     private final String baseUrl;
     private final String serviceToken;
-    private final HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    // Uvicorn's SSE endpoint speaks HTTP/1.1; avoid the JDK h2c upgrade on POST.
+    private final HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
+            .connectTimeout(Duration.ofSeconds(5)).build();
 
     public AnalysisRuntimeClient(ObjectMapper mapper,
             @Value("${hrchat.ai.remote-base-url:http://localhost:8000}") String baseUrl,

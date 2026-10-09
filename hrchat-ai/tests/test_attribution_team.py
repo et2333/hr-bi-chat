@@ -6,7 +6,7 @@ import json
 import pytest
 
 from adapters.llm_adapter import ModelAdapter
-from adapters.model_usage import ModelResult
+from adapters.model_usage import ModelResult, ModelCallError
 from adapters.query_budget import ACTIVE_QUERY_BUDGET, QueryBudget
 from agentscope_teams.analysis_contract import AnalysisRequest, Claims, validate_evidence, EvidenceError
 from agentscope_teams.attribution_team import AttributionTeam
@@ -48,6 +48,14 @@ class ToolFixture:
 PLAN = {"method": "department_contribution", "steps": ["compare_totals", "department_delta", "check_closure"]}
 CLAIMS = {"claims": [{"claim_id": "c1", "kind": "fact", "evidence_ids": ["ev_department"], "fact_id": "overall"}]}
 ACCEPT = {"decision": "accept", "checked_claim_ids": ["c1"]}
+TIMING_CLAIM = {"claim_id": "timing", "kind": "unverified_hypothesis",
+                "hypothesis": "timing_concentration", "evidence_ids": ["ev_department"]}
+NEED = {"claim_id": "timing", "reason": "verify_timing_concentration",
+        "required_fact_ids": ["daily_peak:current"]}
+TIMING_CLAIMS = {"claims": [*CLAIMS["claims"], TIMING_CLAIM]}
+REQUEST_DAILY = {"decision": "request_evidence", "checked_claim_ids": ["c1", "timing"],
+                 "evidence_request": "daily_counts", "supplement_need": NEED}
+ACCEPT_TIMING = {"decision": "accept", "checked_claim_ids": ["c1", "timing"]}
 
 
 class ScriptedAdapter(ModelAdapter):
@@ -100,8 +108,7 @@ async def test_dual_roles_accept_without_unnecessary_supplement():
 
 @pytest.mark.asyncio
 async def test_reviewer_changes_execution_by_requesting_daily_evidence():
-    ask = {"decision": "request_evidence", "checked_claim_ids": ["c1"], "evidence_request": "daily_counts"}
-    result, events, adapter, tools = await run([PLAN, CLAIMS, ask, ACCEPT])
+    result, events, adapter, tools = await run([PLAN, TIMING_CLAIMS, REQUEST_DAILY, ACCEPT_TIMING])
     assert result["status"] == "COMPLETED", result
     assert [c["detail"] for c in tools.calls] == ["department", "daily"]
     assert len(adapter.calls) == 4
@@ -122,8 +129,7 @@ async def test_reviewer_can_delete_invalid_claim_but_cannot_vote_it_true():
 
 @pytest.mark.asyncio
 async def test_one_supplement_limit_returns_partial_without_success_final():
-    ask = {"decision": "request_evidence", "checked_claim_ids": ["c1"], "evidence_request": "daily_counts"}
-    result, events, adapter, tools = await run([PLAN, CLAIMS, ask, ask])
+    result, events, adapter, tools = await run([PLAN, TIMING_CLAIMS, REQUEST_DAILY, REQUEST_DAILY])
     assert result["status"] == "PARTIAL"
     assert "supplement_limit_reached" in result["unresolved"]
     assert len(tools.calls) == 2 and len(adapter.calls) == 4
@@ -136,6 +142,16 @@ async def test_budget_stops_before_next_model_and_reports_actual_attempts():
     assert result["status"] == "PARTIAL", result
     assert result["usage"]["model_calls"] == len(adapter.calls) == 2
     assert events[-1]["event"] == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_network_failure_is_reported_as_connectivity_not_reasoning_failure():
+    failed = ModelResult("", "fixture", "fixture", "connection-test", 1,
+                         status="failed", failure_kind="network_error", exception_type="ConnectError")
+    result, _, _, tools = await run([ModelCallError(failed)])
+    assert result["status"] == "FAILED" and not tools.calls
+    assert result["unresolved"] == ["model_connection_failed"]
+    assert result["usage"]["calls"][0]["http_status"] is None
 
 
 @pytest.mark.parametrize("mutation", [
