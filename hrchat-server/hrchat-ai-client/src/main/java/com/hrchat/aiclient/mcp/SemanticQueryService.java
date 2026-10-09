@@ -10,6 +10,9 @@ import com.hrchat.authz.model.AuthorizedQuery;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
 import com.hrchat.authz.service.SqlRewriteService;
+import com.hrchat.authz.mapper.SecOrgNodeMapper;
+import com.hrchat.authz.entity.SecOrgNode;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.queryexec.model.QueryResult;
@@ -46,6 +49,8 @@ public class SemanticQueryService {
     private final ObjectMapper objectMapper;
     private final LocalDate demoNow;
     private final AuditCollector auditCollector;
+    @Autowired(required = false)
+    private SecOrgNodeMapper orgNodeMapper;
 
     public SemanticQueryService(SemanticMetaService semanticMetaService,
                                 SqlRewriteService sqlRewriteService,
@@ -352,11 +357,23 @@ public class SemanticQueryService {
             if (g.getSubtreeOrgKeys() == null || !g.getSubtreeOrgKeys().contains(orgId)) {
                 continue;
             }
-            // 命中授权根：可按 include_children 使用整棵授权子树；命中子节点：仅该 org_key（无完整树不便展开）
+            // A granted ancestor does not change the meaning of "include children".
             boolean hitGrantRoot = Long.valueOf(orgId).equals(g.getOrgNodeId());
-            List<Long> keys = hitGrantRoot && includeChildren
-                    ? List.copyOf(g.getSubtreeOrgKeys())
-                    : List.of(orgId);
+            List<Long> keys = List.of(orgId);
+            if (includeChildren && hitGrantRoot) {
+                keys = List.copyOf(g.getSubtreeOrgKeys());
+            } else if (includeChildren) {
+                if (orgNodeMapper == null)
+                    throw new BizException(ErrorCode.PARAM_INVALID, "组织层级不可用，无法查询含下级范围");
+                List<SecOrgNode> nodes = orgNodeMapper.selectList(new LambdaQueryWrapper<SecOrgNode>()
+                        .eq(SecOrgNode::getTenantId, ctx.getTenantId()).eq(SecOrgNode::getStatus, 1));
+                SecOrgNode selected = nodes.stream().filter(n -> Long.valueOf(orgId).equals(n.getId()))
+                        .findFirst().orElseThrow(() -> new BizException(ErrorCode.DATA_RANGE_FORBIDDEN, "org:" + orgId));
+                if (selected.getOrgPath() == null || !selected.getOrgPath().endsWith("/"))
+                    throw new BizException(ErrorCode.PARAM_INVALID, "组织层级不完整");
+                keys = nodes.stream().filter(n -> n.getOrgPath() != null && n.getOrgPath().startsWith(selected.getOrgPath()))
+                        .map(SecOrgNode::getId).filter(g.getSubtreeOrgKeys()::contains).distinct().sorted().toList();
+            }
             narrowed.add(UserContext.GrantedOrg.builder()
                     .orgNodeId(orgId)
                     .orgCode(g.getOrgCode())
