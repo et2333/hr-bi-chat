@@ -142,6 +142,24 @@ class AttributionServiceTest {
     }
 
     @Test
+    void completedResultIsWithheldAfterPermissionFingerprintChanges() throws Exception {
+        seedCompletedAsk("ask1");
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            BiConsumer<String, Map<String, Object>> consumer = invocation.getArgument(2);
+            consumer.accept("FINAL", Map.of("status", "COMPLETED", "summary", Map.of("current_total", 3)));
+            return null;
+        }).when(runtime).stream(anyString(), any(), any());
+        var start = service.start(hr01, "ask1", new AttributionService.StartRequest(
+                new AttributionService.Period("2026-08-01", "2026-09-01"), "dual"), "revoke-after-result");
+        String id = String.valueOf(start.get("taskId"));
+        assertEquals("COMPLETED", waitTerminal(id).get("status"));
+        when(users.resolve(eq("hr01"), eq("t01"), any())).thenReturn(user("permissions-changed"));
+        assertThrows(BizException.class, () -> service.read(hr01, id));
+        assertThrows(BizException.class, () -> service.read(hr01, id)); // no stale-result fallback
+    }
+
+    @Test
     void cancel_marksCancelled() throws Exception {
         seedCompletedAsk("ask1");
         // stream() may lose the race to cancel() on fast CI runners; keep stub lenient.
