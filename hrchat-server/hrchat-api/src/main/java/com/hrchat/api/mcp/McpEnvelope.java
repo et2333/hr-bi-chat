@@ -17,6 +17,7 @@ public final class McpEnvelope {
     public static final String TOOL_GET_SEMANTIC_META = "get_semantic_meta";
     public static final String TOOL_PERMISSION_CHECK = "permission_check";
     public static final String TOOL_SEMANTIC_QUERY = "semantic_query";
+    public static final String TOOL_ANALYSIS_EVIDENCE = "analysis_evidence";
 
     public static final int ERR_BUSINESS = -32000;
     public static final int ERR_INVALID_REQUEST = -32600;

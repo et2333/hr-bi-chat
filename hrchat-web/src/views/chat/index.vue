@@ -54,6 +54,7 @@
               :error-title="t.errorTitle"
               :error-message="t.errorMessage"
               :can-view-sql="true"
+              :can-analyze="hasPerm(auth.functionPerms, 'chat:attribution')"
               :saving-report="savingAskId === t.payload?.askId"
               @retry="retry(t)"
               @clarify-submit="(answers) => submitClarify(t, answers)"
@@ -133,9 +134,12 @@ import { chatApi, reportApi } from '@/api'
 import type { ComponentSpec } from '@/api/reports'
 import type { AnswerPayload, ClarifyQuestions, SqlView, TableData } from '@/api/types'
 import { useChatStore, type ChatTurn } from '@/stores/chat'
+import { useAuthStore } from '@/stores/auth'
+import { hasPerm } from '@/layouts/adminMenu'
 import { deriveReportName } from '@/utils/reportName'
 
 const chat = useChatStore()
+const auth = useAuthStore()
 const router = useRouter()
 const input = ref('')
 const messageArea = ref<HTMLElement>()

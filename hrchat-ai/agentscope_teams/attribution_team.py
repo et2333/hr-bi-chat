@@ -1,319 +1,209 @@
-"""AgentScope 归因 Team：Leader / DataWorker / AnalystWorker / Writer + 预算熔断。
+"""Bounded Analyst/Reviewer handoff over trusted, versioned Java evidence.
 
-- 基于真实 AgentScope 2.0 ``Agent`` 构建四个角色，模型统一走 ``AdapterChatModel``
-  （包装本项目 ``ModelAdapter``，MockLLMImpl 下确定性可复现，OpenAIClientImpl 下真实调用）。
-- ``AttributionTeam.reply_stream`` 实现 ``PipelineProtocol`` 接口（可替换任意 Agent），
-  产出标准化语义事件：PLAN_UPDATE → TOOL_CALL_START/END（并行取数）→ FINAL；
-  超预算（步数/token）熔断发 ERROR（HRA-4005）并附基础对比数据（接口文档 2.2.10）。
-- BR-10 免责声明随 FINAL 载荷返回「辅助分析，仅供参考」。
+LangGraph owns branches; AgentScope owns role turns. Code validates all facts.
+No demo-number fallback, arbitrary generated prose, or confidence percentage.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from types import SimpleNamespace
-from typing import Any, AsyncGenerator, Optional
+import uuid
+from typing import TypedDict
 
-from pydantic import BaseModel
-
-from agentscope.agent import Agent
-from agentscope.credential import CredentialBase
-from agentscope.message import UserMsg
-from agentscope.message._block import TextBlock
-from agentscope.model import ChatModelBase, ChatResponse
-
-from agent_gateway.schemas import (
-    ERR_ATTRIBUTION_BUDGET,
-    EVENT_ERROR,
-    EVENT_FINAL,
-    EVENT_PLAN_UPDATE,
-    EVENT_TOOL_CALL_END,
-    EVENT_TOOL_CALL_START,
+from adapters.mcp_client import McpBusinessError
+from adapters.model_usage import summarize_calls
+from adapters.query_budget import ACTIVE_QUERY_BUDGET, QueryBudget, QueryBudgetExceeded
+from agentscope_teams.analysis_contract import (
+    AnalysisPlan, AnalysisRequest, Claim, Claims, EvidenceError, ReviewResult,
+    check_claims, validate_evidence,
 )
-from adapters.llm_adapter import ModelAdapter
-from langgraph_flows.demo_data import DEMO_VALUES, METRICS
 
 
-# =====================================================================
-# AgentScope 模型适配（包装 ModelAdapter 为 ChatModelBase）
-# =====================================================================
-class _AdapterCredential(CredentialBase):
-    """Mock/本地演示凭据（无真实密钥）。"""
-
-    name: str = "adapter"
+class FlowState(TypedDict, total=False):
+    route: str
 
 
-class AdapterChatModel(ChatModelBase):
-    """将本项目 ModelAdapter 包装为 AgentScope ChatModelBase。
-
-    仅需实现 ``_call_api``（AgentScope 唯一抽象方法）：把多轮 Msg 拼为 prompt
-    交给 ModelAdapter，再封装为 ``ChatResponse`` 返回。
-    """
-
-    class Parameters(BaseModel):
-        temperature: float = 0.2
-        max_tokens: int = 1024
-
-    def __init__(self, adapter: ModelAdapter, model: str = "adapter-llm") -> None:
-        super().__init__(
-            credential=_AdapterCredential(),
-            model=model,
-            parameters=self.Parameters(),
-        )
-        self.adapter = adapter
-        # Agent 仅读取 supported_input_media_types（文本模型为空集）
-        self.formatter = SimpleNamespace(supported_input_media_types=())
-
-    @staticmethod
-    def _messages_to_prompt(messages: list) -> str:
-        parts = []
-        for m in messages:
-            role = getattr(m, "role", "user")
-            blocks = getattr(m, "content", m)
-            if isinstance(blocks, list):
-                texts = [b.text for b in blocks if hasattr(b, "text")]
-                parts.append(f"[{role}] " + " ".join(texts))
-            else:
-                parts.append(f"[{role}] {blocks}")
-        return "\n".join(parts)
-
-    async def _call_api(self, model: str, messages: list, tools=None, tool_choice=None, **kwargs):
-        prompt = self._messages_to_prompt(messages)
-        text = await self.adapter.generate(prompt)
-        return ChatResponse(content=[TextBlock(text=text)], is_last=True)
-
-
-# =====================================================================
-# 贡献瀑布（确定性拆解，数据源=演示目录）
-# =====================================================================
-def build_waterfall(code: str) -> list[dict[str, Any]]:
-    """构建贡献瀑布：dimension + value（净变动=瀑布合计=本期值）。"""
-    cur = DEMO_VALUES[code]["current"]
-    prev = DEMO_VALUES[code]["prev"]
-    if code == "headcount":
-        hire = DEMO_VALUES["hire_count"]["current"]
-        leave = DEMO_VALUES["leave_count"]["current"]
-        items = [
-            {"dimension": "上期末在职人数", "value": prev},
-            {"dimension": "期内入职", "value": hire},
-            {"dimension": "期内离职", "value": -leave},
-        ]
-    elif code == "turnover_rate":
-        items = [
-            {"dimension": "期内离职人数", "value": DEMO_VALUES["leave_count"]["current"]},
-            {"dimension": "期末在职人数", "value": DEMO_VALUES["headcount"]["current"]},
-        ]
-    elif code == "attendance_rate":
-        items = [
-            {"dimension": "期内出勤人数", "value": round(cur * DEMO_VALUES["headcount"]["current"], 2)},
-            {"dimension": "期末在职人数", "value": DEMO_VALUES["headcount"]["current"]},
-        ]
-    else:
-        items = [
-            {"dimension": "上期基数", "value": prev},
-            {"dimension": "本期变动", "value": round(cur - prev, 2)},
-        ]
-    return items
-
-
-# =====================================================================
-# 归因团队
-# =====================================================================
 class AttributionTeam:
-    """归因分析四人组（Leader 规划 → 并行取数 → 贡献拆解 → 撰写结论）。"""
+    def __init__(self, adapter, tool_client, request: AnalysisRequest, *, budget=None):
+        self.adapter, self.tools, self.request = adapter, tool_client, request
+        self.context = request.analysis_context
+        self.budget = budget or QueryBudget(timeout_seconds=60, max_model_calls=4, max_mcp_attempts=6)
+        self.records, self.evidence, self.reviews, self.trace = [], [], [], []
+        self.computed = None
+        self.claims = None
+        self.plan = None
+        self.supplemented = False
+        self.unresolved = []
+        self.status = "COMPLETED"
+        self.emit = None
 
-    DEFAULT_MAX_STEPS = 6
-    DEFAULT_MAX_TOKENS = 2000
+    async def event(self, name, payload):
+        await self.emit({"event": name, "payload": {"task_id": self.context.task_id, **payload}})
 
-    def __init__(
-        self,
-        adapter: ModelAdapter,
-        *,
-        max_steps: int = DEFAULT_MAX_STEPS,
-        max_tokens: int = DEFAULT_MAX_TOKENS,
-        model_name: str = "adapter-llm",
-    ) -> None:
-        self.adapter = adapter
-        self.max_steps = max_steps
-        self.max_tokens = max_tokens
-        self._steps = 0
-        self._tokens = 0
-        chat_model = AdapterChatModel(adapter, model=model_name)
-        self.leader = Agent(
-            name="Leader",
-            system_prompt="你是归因团队 Leader，负责制定分析计划并以 JSON 输出计划步骤。",
-            model=chat_model,
-        )
-        self.data_worker = Agent(
-            name="DataWorker",
-            system_prompt="你是 DataWorker，负责并行取数并以 JSON 输出数据块。",
-            model=chat_model,
-        )
-        self.analyst = Agent(
-            name="AnalystWorker",
-            system_prompt="你是 AnalystWorker，负责贡献拆解与置信度评估并以 JSON 输出。",
-            model=chat_model,
-        )
-        self.writer = Agent(
-            name="Writer",
-            system_prompt="你是 Writer，负责把拆解结果撰写为自然语言结论文案。",
-            model=chat_model,
-        )
+    async def role(self, name, schema, data):
+        from agentscope_teams.analysis_roles import role_reply
+        await self.event("PLAN_UPDATE", {"stage": name, "message": {
+            "AnalystPlan": "制定部门贡献分析计划", "Analyst": "整理统计事实和待核查项",
+            "Reviewer": "核对证据与结论边界"}[name]})
+        role_name = "Analyst" if name == "AnalystPlan" else name
+        result = await role_reply(self.adapter, self.budget, self.records, self.request, role_name, schema, data)
+        self.trace.append({"role": role_name, "stage": name, "schema": schema.__name__, "output": result.model_dump(mode="json")})
+        return result
 
-    # ---- 预算熔断 ----
-    def _charge(self, text: str) -> bool:
-        """步数/token 记账；超预算返回 True（触发熔断）。"""
-        self._steps += 1
-        self._tokens += self.adapter.estimate_tokens(text)
-        return self._steps > self.max_steps or self._tokens > self.max_tokens
+    async def fetch(self, detail):
+        self.budget.remaining()
+        tool_id = "tc_" + uuid.uuid4().hex[:16]
+        await self.event("TOOL_CALL_START", {"tool": "analysis_evidence", "tool_call_id": tool_id,
+                                            "detail": detail, "message": "读取两期部门聚合" if detail == "department" else "补查两期每日聚合"})
+        raw = await self.tools.tools_call("analysis_evidence", {"task_id": self.context.task_id, "detail": detail},
+                                         {"tool_context_token": self.request.tool_context_token,
+                                          "invocation_id": self.request.invocation_id, "tool_call_id": tool_id})
+        computed = validate_evidence(self.context, raw, detail=detail)
+        if self.computed and any(computed[k] != self.computed[k] for k in ("current_total", "baseline_total", "departments")):
+            raise EvidenceError("supplement_changed_snapshot")
+        evidence_id = "ev_department" if detail == "department" else "ev_daily"
+        item = {"evidence_id": evidence_id, "tool_call_id": tool_id, "status": "verified",
+                "metric_code": self.context.metric_code, "metric_version": self.context.metric_version,
+                "data_version": self.context.data_version, "unit": self.context.unit,
+                "scope_ref": self.context.scope_ref, "effective_org_ids": self.context.effective_org_ids,
+                "query": {"detail": detail, "current_period": self.context.current_period.model_dump(mode="json"),
+                          "baseline_period": self.context.baseline_period.model_dump(mode="json")},
+                "result": computed}
+        if detail == "daily":
+            item["daily"] = [{k: r[k] for k in ("period", "date", "count")} for r in raw["daily"]]
+        self.evidence.append(item)
+        self.computed = computed
+        await self.event("TOOL_CALL_END", {"tool": "analysis_evidence", "tool_call_id": tool_id,
+                                          "evidence_id": evidence_id, "status": "verified"})
 
-    @property
-    def usage(self) -> dict[str, int]:
-        return {"steps": self._steps, "tokens": self._tokens}
+    def handoff(self):
+        return {"plan": self.plan.model_dump(), "evidence": self.evidence,
+                "facts": self.computed["facts"] if self.computed else {},
+                "claims": self.claims.model_dump() if self.claims else None,
+                "invalid_claim_ids": self.invalid_claims(), "supplement_available": not self.supplemented,
+                "allowed_supplement": "daily_counts" if not self.supplemented else None}
 
-    def _budget_error(self, context: dict[str, Any]) -> dict[str, Any]:
-        """HRA-4005 熔断 ERROR + 基础对比数据兜底（2.2.10）。"""
-        payload = {
-            "code": ERR_ATTRIBUTION_BUDGET,
-            "message": "归因分析超出预算已熔断，已返回基础对比数据",
-            "recoverable": False,
-            "base": {
-                "metric": METRICS[context["metric_code"]].name,
-                "current": context.get("current"),
-                "prev": context.get("compare"),
-                "prev_period": context.get("prev_period"),
-            },
-        }
-        return {"event": EVENT_ERROR, "payload": payload}
+    def invalid_claims(self):
+        if not self.claims:
+            return []
+        return check_claims(self.claims, self.computed["facts"], {e["evidence_id"] for e in self.evidence},
+                            {e["evidence_id"]: e["result"]["facts"] for e in self.evidence})
 
-    # ---- 主编排 ----
-    async def reply_stream(self, inputs) -> AsyncGenerator[dict[str, Any], None]:
-        """执行归因：yield 标准化语义事件（PipelineProtocol 兼容）。
+    async def plan_node(self, state):
+        data = {k: v for k, v in self.context.model_dump(mode="json").items()
+                if k not in {"tenant_no", "scope_ref", "source_ask_id", "source_turn_id", "task_id"}}
+        self.plan = (AnalysisPlan(method="department_contribution", steps=["compare_totals", "department_delta", "check_closure"])
+                     if self.request.mode == "deterministic" else await self.role("AnalystPlan", AnalysisPlan, data))
+        return {}
 
-        Args:
-            inputs: 携带归因上下文，内容为 JSON：
-                {"metric_code","current","compare","prev_period","question"}
-        """
-        context = self._parse_inputs(inputs)
-        code = context["metric_code"]
-        metric = METRICS[code]
+    async def collect_node(self, state):
+        await self.fetch("department")
+        return {}
 
-        plan_steps = [
-            {"step_id": "s1", "title": "确认指标口径与时间范围", "status": "PENDING"},
-            {"step_id": "s2", "title": f"并行取数：{metric.name} 当期/上期", "status": "PENDING"},
-            {"step_id": "s3", "title": "贡献拆解与置信度评估", "status": "PENDING"},
-            {"step_id": "s4", "title": "撰写归因结论", "status": "PENDING"},
-        ]
-        yield {"event": EVENT_PLAN_UPDATE, "payload": {"steps": plan_steps}}
+    async def draft_node(self, state):
+        if self.request.mode == "deterministic":
+            self.claims = Claims(claims=[Claim(claim_id="overall", kind="fact", fact_id="overall", evidence_ids=["ev_department"])])
+            return {"route": "render"}
+        self.claims = await self.role("Analyst", Claims, self.handoff())
+        if self.request.mode == "dual":
+            return {"route": "review"}
+        if self.invalid_claims():
+            self.status = "PARTIAL"
+            self.unresolved.append("unsupported_claim")
+            invalid = set(self.invalid_claims())
+            self.claims.claims = [c for c in self.claims.claims if c.claim_id not in invalid]
+        if self.claims.request_evidence:
+            if self.supplemented:
+                self.status = "PARTIAL"
+                self.unresolved.append("supplement_limit_reached")
+            else:
+                return {"route": "supplement"}
+        return {"route": "render"}
 
-        # 1) Leader 制定计划（AgentScope Agent）
-        if self._charge(f"【归因-LEADER】metric={metric.name}"):
-            yield self._budget_error(context)
-            return
-        plan_text = await self.leader.reply(UserMsg(name="user", content=f"【归因-LEADER】metric={metric.name}"))
-        yield self._plan_done(plan_steps, "s1")
+    async def review_node(self, state):
+        review = await self.role("Reviewer", ReviewResult, self.handoff())
+        ids = {c.claim_id for c in self.claims.claims}
+        if set(review.checked_claim_ids) != ids or not set(review.drop_claim_ids) <= ids:
+            raise EvidenceError("review_did_not_cover_claims")
+        self.reviews.append(review.model_dump(mode="json"))
+        self.claims.claims = [c for c in self.claims.claims if c.claim_id not in review.drop_claim_ids]
+        if self.invalid_claims():
+            self.status = "PARTIAL"
+            self.unresolved.append("unsupported_claim")
+            invalid = set(self.invalid_claims())
+            self.claims.claims = [c for c in self.claims.claims if c.claim_id not in invalid]
+        if review.decision == "request_evidence":
+            if not self.supplemented:
+                return {"route": "supplement"}
+            self.status = "PARTIAL"
+            self.unresolved.append("supplement_limit_reached")
+        elif review.decision == "insufficient":
+            self.status = "PARTIAL"
+            self.unresolved.append("review_evidence_insufficient")
+        if not self.claims.claims:
+            self.status = "PARTIAL"
+            self.unresolved.append("no_supported_claims")
+        return {"route": "render"}
 
-        # 2) DataWorker 并行取数
-        if self._charge(f"【归因-DATA】metric={code}"):
-            yield self._budget_error(context)
-            return
-        data = json.dumps(build_waterfall(code), ensure_ascii=False)
-        yield {"event": EVENT_TOOL_CALL_START, "payload": {"tool": "attribution_fetch", "summary": f"正在并行取数（{metric.name}）…"}}
-        t0 = time.perf_counter()
-        data_text = await self.data_worker.reply(UserMsg(name="user", content=f"【归因-DATA】data={data}"))
-        yield {
-            "event": EVENT_TOOL_CALL_END,
-            "payload": {"tool": "attribution_fetch", "ms": int((time.perf_counter() - t0) * 1000), "rows": len(build_waterfall(code))},
-        }
-        yield self._plan_done(plan_steps, "s2")
+    async def supplement_node(self, state):
+        self.supplemented = True
+        await self.fetch("daily")
+        return {"route": "review" if self.request.mode == "dual" else "draft"}
 
-        # 3) AnalystWorker 贡献拆解
-        if self._charge(f"【归因-ANALYST】metric={code}"):
-            yield self._budget_error(context)
-            return
-        analyst_text = _text_of(await self.analyst.reply(UserMsg(name="user", content=f"【归因-ANALYST】waterfall={data}")))
+    async def render_node(self, state):
+        return {}
+
+    def result(self):
+        c = self.computed
+        safe_claims = [x.model_dump(mode="json") for x in self.claims.claims] if self.claims else []
+        invalid = set(self.invalid_claims()) if self.claims and c else set()
+        safe_claims = [x for x in safe_claims if x["claim_id"] not in invalid]
+        return {"schema_version": "1", "task_id": self.context.task_id, "source_ask_id": self.context.source_ask_id,
+                "status": self.status, "mode": self.request.mode,
+                "scope": self.context.model_dump(mode="json", exclude={"tenant_no"}),
+                "summary": {k: c[k] for k in ("current_total", "baseline_total", "delta", "closure_verified")} if c else None,
+                "contributions": c["departments"] if c else [], "facts": c["facts"] if c else {},
+                "claims": safe_claims, "review": self.reviews, "evidence": self.evidence,
+                "data_quality": ["按离职事件所属部门拆解；不包含完整历史组织关系。", "统计贡献不等于真实离职原因。"],
+                "unresolved": list(dict.fromkeys(self.unresolved)), "disclaimer": "辅助分析，仅供参考",
+                "usage": {**self.budget.evidence(), **summarize_calls(self.records), "calls": self.records},
+                "trace": self.trace}
+
+    async def run(self, emit):
+        self.emit = emit
+        started = time.perf_counter()
+        token = ACTIVE_QUERY_BUDGET.set(self.budget)
         try:
-            analysis = json.loads(_extract_json(analyst_text))
-        except json.JSONDecodeError:
-            analysis = {"waterfall": build_waterfall(code), "net_change": sum(i["value"] for i in build_waterfall(code)), "confidence": 0.92}
-        yield self._plan_done(plan_steps, "s3")
-
-        # 4) Writer 撰写结论
-        if self._charge(f"【归因-WRITER】metric={metric.name}"):
-            yield self._budget_error(context)
-            return
-        current_display = _display(code, context.get("current"))
-        prev_display = _display(code, context.get("compare"))
-        summary = _text_of(await self.writer.reply(UserMsg(
-            name="user",
-            content=f"【归因-WRITER】metric={metric.name}|current={current_display}|prev={prev_display}",
-        )))
-        yield self._plan_done(plan_steps, "s4")
-
-        # 5) FINAL 归因卡
-        waterfall = analysis.get("waterfall", build_waterfall(code))
-        yield {
-            "event": EVENT_FINAL,
-            "payload": {
-                "metric": metric.name,
-                "current": current_display,
-                "prev": prev_display,
-                "delta": _delta_display(code, context),
-                "waterfall": waterfall,
-                "confidence": float(analysis.get("confidence", 0.92)),
-                "summary": _text_of(summary),
-                "disclaimer": "辅助分析，仅供参考",
-            },
-        }
-
-    # ---- 工具 ----
-    @staticmethod
-    def _parse_inputs(inputs) -> dict[str, Any]:
-        content = getattr(inputs, "content", inputs)
-        if isinstance(content, list):
-            content = " ".join(b.text for b in content if hasattr(b, "text"))
-        if isinstance(content, str) and content.strip().startswith("{"):
-            return json.loads(content)
-        return {
-            "metric_code": "headcount",
-            "current": DEMO_VALUES["headcount"]["current"],
-            "compare": DEMO_VALUES["headcount"]["prev"],
-            "prev_period": "上期",
-            "question": "",
-        }
-
-    @staticmethod
-    def _plan_done(steps: list[dict], step_id: str) -> dict[str, Any]:
-        """将指定步骤标记 DONE（原地更新，累积已完成的步骤状态）。"""
-        for s in steps:
-            if s["step_id"] == step_id:
-                s["status"] = "DONE"
-        return {"event": EVENT_PLAN_UPDATE, "payload": {"steps": steps}}
-
-
-def _extract_json(text: str) -> str:
-    start, end = text.find("{"), text.rfind("}")
-    if start >= 0 and end > start:
-        return text[start:end + 1]
-    raise json.JSONDecodeError("no json", text, 0)
-
-
-def _display(code: str, value: Optional[float]) -> Any:
-    if value is None:
-        return None
-    return round(value * 100, 2) if METRICS[code].percent else int(value)
-
-
-def _delta_display(code: str, context: dict[str, Any]) -> Any:
-    cur, prev = context.get("current"), context.get("compare")
-    if cur is None or prev is None:
-        return None
-    return round(cur - prev, 2) if not METRICS[code].percent else round((cur - prev) * 100, 2)
-
-
-def _text_of(msg) -> str:
-    blocks = getattr(msg, "content", msg)
-    if isinstance(blocks, list):
-        return " ".join(b.text for b in blocks if hasattr(b, "text"))
-    return str(blocks)
+            from langgraph.graph import StateGraph, START, END
+            graph = StateGraph(FlowState)
+            for name in ("plan", "collect", "draft", "review", "supplement", "render"):
+                graph.add_node(name, getattr(self, name + "_node"))
+            graph.add_edge(START, "plan")
+            graph.add_edge("plan", "collect")
+            graph.add_edge("collect", "draft")
+            for name in ("draft", "review", "supplement"):
+                graph.add_conditional_edges(name, lambda state: state["route"])
+            graph.add_edge("render", END)
+            await self.event("PLAN_UPDATE", {"stage": "START", "message": "开始分析已确认的两期离职人数"})
+            remaining = self.budget.remaining()
+            await asyncio.wait_for(graph.compile().ainvoke({}), remaining)
+        except asyncio.CancelledError:
+            self.status = "CANCELLED"
+            self.unresolved.append("cancelled")
+        except McpBusinessError:
+            # A tool denial can invalidate previously authorised evidence as well.
+            self.computed, self.evidence, self.claims = None, [], None
+            self.status = "FAILED"
+            self.unresolved.append("tool_access_or_execution_failed")
+        except (QueryBudgetExceeded, TimeoutError) as exc:
+            self.status = "PARTIAL" if self.computed else "FAILED"
+            self.unresolved.append(getattr(exc, "reason", "task_deadline_exceeded"))
+        except Exception as exc:
+            self.status = "PARTIAL" if self.computed else "FAILED"
+            self.unresolved.append(str(exc) if isinstance(exc, EvidenceError) else "analysis_execution_failed")
+        finally:
+            ACTIVE_QUERY_BUDGET.reset(token)
+        output = self.result()
+        output["usage"]["elapsed_ms"] = int((time.perf_counter() - started) * 1000)
+        await self.event("FINAL" if self.status == "COMPLETED" else "ERROR", output)
+        return output

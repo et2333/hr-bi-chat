@@ -1,0 +1,22 @@
+{
+  "schema_version": "1",
+  "version": "hr-analysis-v1",
+  "case_count": 24,
+  "cases_sha256": "af947e7feefb818217d3d75a1d7ac1992372e4f8e8db355cebc56cc47a37e155",
+  "seed_sha256": "4d7d01c80b9e8fc11e9bc963b42d50a46eb66e105b0b0f6bd6d93fae365c1e40",
+  "splits": {
+    "dev": 12,
+    "frozen": 12
+  },
+  "seed_case_count": 8,
+  "injected_case_count": 16,
+  "scope": "leave_count COUNT(*) by event org_key; change_date half-open; no causal inference",
+  "limits": {
+    "max_model_calls": 4,
+    "max_mcp_attempts": 6,
+    "timeout_seconds": 60,
+    "max_supplements": 1
+  },
+  "split_note": "Canonical scenario groups are disjoint. Frozen engineering regressions are not independent real-user generalization evidence.",
+  "comparison_note": "Same seed, tools and ceilings for all modes; fixture-role scripts only test orchestration. Report model-dependent/injected cases separately."
+}

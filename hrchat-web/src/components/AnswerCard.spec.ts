@@ -26,6 +26,17 @@ const COMPLETED: AnswerPayload = {
 }
 
 describe('components/AnswerCard', () => {
+  it('only offers analysis for completed leave_count answers with the function permission', () => {
+    const payload = { ...COMPLETED, caliber: { ...COMPLETED.caliber!, metricCode: 'leave_count' } }
+    const options = { global: { plugins: [Antd], stubs: { AttributionPanel: true } } }
+    const allowed = mount(AnswerCard, { props: { state: 'completed', payload, canAnalyze: true }, ...options })
+    expect(allowed.findComponent({ name: 'AttributionPanel' }).exists()).toBe(true)
+    const denied = mount(AnswerCard, { props: { state: 'completed', payload }, ...options })
+    expect(denied.findComponent({ name: 'AttributionPanel' }).exists()).toBe(false)
+    const other = mount(AnswerCard, { props: { state: 'completed', payload: COMPLETED, canAnalyze: true }, ...options })
+    expect(other.findComponent({ name: 'AttributionPanel' }).exists()).toBe(false)
+    allowed.unmount(); denied.unmount(); other.unmount()
+  })
   it('shows actual adopted conditions including inherited organization and period', () => {
     const wrapper = mount(AnswerCard, { props: { state: 'completed', payload: { ...COMPLETED,
       caliber: { ...COMPLETED.caliber!, organization: '研发中心（含下级）', timeRange: '2026-08-01/2026-08-31', queryMode: '趋势' },

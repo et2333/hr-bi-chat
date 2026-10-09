@@ -95,6 +95,12 @@
         </a-space>
       </div>
 
+      <AttributionPanel
+        v-if="canAnalyze && payload.askId && payload.caliber?.metricCode === 'leave_count'"
+        :key="payload.askId"
+        :source-ask-id="payload.askId"
+      />
+
       <!-- 反馈 + 存为报表 -->
       <div class="feedback-bar">
         <a-space>
@@ -131,6 +137,7 @@ import DegradedTip from './DegradedTip.vue'
 import EChart from './EChart.vue'
 import MetricCard from './MetricCard.vue'
 import StateEmpty from './StateEmpty.vue'
+import AttributionPanel from './AttributionPanel.vue'
 
 const props = defineProps<{
   /** loading / streaming / clarifying / completed / failed / forbidden / timeout */
@@ -144,6 +151,7 @@ const props = defineProps<{
   errorTitle?: string
   errorMessage?: string
   canViewSql?: boolean
+  canAnalyze?: boolean
   savingReport?: boolean
 }>()
 
