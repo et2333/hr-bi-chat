@@ -39,6 +39,8 @@ def main():
     parser.add_argument("--stage", choices=["s2", "s3", "s4"], default="s3")
     parser.add_argument("--runtime", choices=["remote", "local"], default="remote")
     parser.add_argument("--memory", choices=["on", "off"], default="on", help="Evaluation-only history ablation")
+    parser.add_argument("--rag", choices=["off", "lexical", "hybrid"], default=None,
+                        help="Evaluation-only RAG mode; sets HRCHAT_RAG_MODE for the Python gateway")
     parser.add_argument("--report-pointer", help="Write the exact report path for an experiment controller")
     parser.add_argument("--repair", choices=["on", "off"], help="Defaults on for S4, off for S2/S3")
     parser.add_argument("--repair-smoke", action="store_true", help="S4 injected fixture checks through Java API")
@@ -69,6 +71,9 @@ def main():
     if args.memory == "off" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
                                 or args.repair_real_smoke or args.planner_diagnostics):
         parser.error("Memory ablation uses natural cases only")
+    if args.rag is not None and (args.runtime != "remote" or args.fixture_smoke or args.fixture_cases
+                                 or args.repair_smoke or args.repair_real_smoke):
+        parser.error("RAG mode ablation requires remote real-model or natural launch; not fixture/smoke/local")
     real_model = args.runtime == "remote" and not args.fixture_smoke and not args.fixture_cases
     if args.repair_real_smoke and (args.fixture_smoke or args.repair_smoke or args.memory_smoke or args.case_id
                                  or args.planner_diagnostics or args.stage != "s4" or args.repair == "off"):
@@ -110,6 +115,13 @@ def main():
         env["HRCHAT_QUERY_REPAIR_ENABLED"] = "0"
     if args.model:
         env["OPENAI_MODEL"] = args.model
+    if args.rag is not None:
+        env["HRCHAT_RAG_MODE"] = args.rag
+        if args.rag == "hybrid":
+            from adapters.query_retrieval import MODEL_DIR
+            if not (MODEL_DIR / "config.json").is_file():
+                parser.error("hybrid RAG requires local embedding at " + str(MODEL_DIR)
+                             + "; run python -m adapters.prepare_embedding first")
     module = "evals.fixture_gateway:app" if args.fixture_smoke else "agent_gateway.app:app"
     if args.fixture_cases:
         module = "evals.mode_fixture_gateway:app"
@@ -153,6 +165,7 @@ def main():
                     "planner_variant": args.planner_variant,
                     "requested_model": env.get("OPENAI_MODEL") if real_model else None,
                     "memory_enabled": args.memory == "on" if args.runtime == "remote" else None,
+                    "rag_mode": env.get("HRCHAT_RAG_MODE") if args.runtime == "remote" else None,
                     "repair_enabled": env["HRCHAT_QUERY_REPAIR_ENABLED"] == "1",
                     "org_catalog_scope": args.org_catalog_scope,
                     "java_launch_command": java_cmd, "python_launch_command": python_cmd if args.runtime == "remote" else None}

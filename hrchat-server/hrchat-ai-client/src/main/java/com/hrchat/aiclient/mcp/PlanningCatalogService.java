@@ -76,12 +76,18 @@ public class PlanningCatalogService {
         if (user.getGrantedOrgs() != null) {
             user.getGrantedOrgs().forEach(g -> authorized.addAll(g.getSubtreeOrgKeys()));
         }
+        Map<Long, SecOrgNode> byId = new HashMap<>();
+        for (SecOrgNode node : nodes) {
+            byId.put(node.getId(), node);
+        }
         List<Map<String, Object>> orgs = new ArrayList<>();
         for (SecOrgNode node : nodes) {
             if (!authorized.contains(node.getId())) continue;
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("org_id", String.valueOf(node.getId()));
             row.put("name", node.getOrgName());
+            row.put("org_code", node.getOrgCode() == null ? "" : node.getOrgCode());
+            row.put("label", visiblePathLabel(node, byId, authorized));
             row.put("aliases", synonyms.stream().filter(s -> Integer.valueOf(2).equals(s.targetType())
                     && Objects.equals(node.getId(), s.targetId())).map(SynonymItem::termGroup).toList());
             orgs.add(row);
@@ -101,6 +107,41 @@ public class PlanningCatalogService {
     /** Internal reason is audit-only; callers cannot enumerate hidden organizations. */
     public record OrganizationResolution(Map<String, Object> publicResult, String auditReason) { }
 
+    /**
+     * Build a user-visible disambiguation label using only authorized ancestors (A+).
+     * Example: {@code 研发部（研发一部 / RD1-DEV）}.
+     */
+    static String visiblePathLabel(SecOrgNode node, Map<Long, SecOrgNode> byId, Set<Long> allowed) {
+        List<String> parents = new ArrayList<>();
+        Long parentId = node.getParentId();
+        Set<Long> visited = new HashSet<>();
+        visited.add(node.getId());
+        while (parentId != null && parentId != 0L && visited.add(parentId)) {
+            SecOrgNode parent = byId.get(parentId);
+            if (parent == null) {
+                break;
+            }
+            if (allowed.contains(parent.getId())) {
+                parents.add(0, parent.getOrgName());
+            }
+            parentId = parent.getParentId();
+        }
+        String code = node.getOrgCode() == null || node.getOrgCode().isBlank() ? String.valueOf(node.getId()) : node.getOrgCode();
+        if (parents.isEmpty()) {
+            return node.getOrgName() + "（" + code + "）";
+        }
+        return node.getOrgName() + "（" + String.join(" / ", parents) + " / " + code + "）";
+    }
+
+    private Map<String, Object> candidateView(SecOrgNode node, Map<Long, SecOrgNode> byId, Set<Long> allowed) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("org_id", String.valueOf(node.getId()));
+        row.put("name", node.getOrgName());
+        row.put("org_code", node.getOrgCode() == null ? "" : node.getOrgCode());
+        row.put("label", visiblePathLabel(node, byId, allowed));
+        return row;
+    }
+
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public OrganizationResolution resolveOrganization(UserContext user, String requestedName) {
         if (requestedName == null || requestedName.isBlank() || requestedName.length() > 100) {
@@ -112,6 +153,10 @@ public class PlanningCatalogService {
                 && requestedName.equals(s.termGroup())).forEach(s -> aliases.add(s.targetId()));
         List<SecOrgNode> nodes = organizations.selectList(new LambdaQueryWrapper<SecOrgNode>()
                 .eq(SecOrgNode::getTenantId, user.getTenantId()).eq(SecOrgNode::getStatus, 1));
+        Map<Long, SecOrgNode> byId = new HashMap<>();
+        for (SecOrgNode node : nodes) {
+            byId.put(node.getId(), node);
+        }
         List<SecOrgNode> matches = nodes.stream().filter(n -> requestedName.equals(n.getOrgName())
                 || aliases.contains(n.getId())).toList();
         Set<Long> allowed = new HashSet<>();
@@ -119,17 +164,26 @@ public class PlanningCatalogService {
         Map<String, Object> unavailable = Map.of("status", "UNAVAILABLE",
                 "message", "组织无法识别或不在当前可用范围，请使用可用组织的完整名称。");
         if (matches.isEmpty()) return new OrganizationResolution(unavailable, "ORG_NOT_FOUND");
+        // A+: any hidden hit collapses to the same public UNAVAILABLE (do not leak existence).
         if (matches.stream().anyMatch(n -> !allowed.contains(n.getId()))) {
             return new OrganizationResolution(unavailable, "ORG_NOT_VISIBLE");
         }
         if (matches.size() > 1) {
-            return new OrganizationResolution(Map.of("status", "AMBIGUOUS", "candidates", matches.stream()
-                    .map(n -> Map.of("org_id", String.valueOf(n.getId()), "name", n.getOrgName())).toList()), "ORG_AMBIGUOUS");
+            List<Map<String, Object>> candidates = matches.stream()
+                    .map(n -> candidateView(n, byId, allowed)).toList();
+            Map<String, Object> ambiguous = new LinkedHashMap<>();
+            ambiguous.put("status", "AMBIGUOUS");
+            ambiguous.put("candidates", candidates);
+            return new OrganizationResolution(ambiguous, "ORG_AMBIGUOUS");
         }
         SecOrgNode resolved = matches.get(0);
-        return new OrganizationResolution(Map.of("status", "RESOLVED", "organization",
-                Map.of("org_id", String.valueOf(resolved.getId()), "name", resolved.getOrgName(),
-                        "aliases", List.of(requestedName))), "ORG_RESOLVED");
+        Map<String, Object> organization = new LinkedHashMap<>();
+        organization.put("org_id", String.valueOf(resolved.getId()));
+        organization.put("name", resolved.getOrgName());
+        organization.put("org_code", resolved.getOrgCode() == null ? "" : resolved.getOrgCode());
+        organization.put("label", visiblePathLabel(resolved, byId, allowed));
+        organization.put("aliases", List.of(requestedName));
+        return new OrganizationResolution(Map.of("status", "RESOLVED", "organization", organization), "ORG_RESOLVED");
     }
 
     static <T> List<T> allPages(IntFunction<PageResult<T>> fetch) {

@@ -45,7 +45,7 @@ management:
 hrchat:
   ai:
     # local=Java侧确定性规则引擎(LocalAgentRuntimeImpl)；remote=Python agent-gateway
-    runtime: local
+    runtime: remote
     remote-base-url: http://localhost:8000
     # 本地演示：一键部署跳过 Python 调用（true）；生产置 false 走真实下发+健康检查
     deploy-mock: true

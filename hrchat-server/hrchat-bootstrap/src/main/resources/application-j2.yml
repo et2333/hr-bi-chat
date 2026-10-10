@@ -1,0 +1,4 @@
+# Optional homonym demo. Combine with local; keep the original evaluation seed intact.
+spring:
+  flyway:
+    locations: classpath:db/migration/h2,classpath:db/demo/j2
