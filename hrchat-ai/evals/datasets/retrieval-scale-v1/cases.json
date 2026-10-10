@@ -63,6 +63,19 @@
     {"id": "rs-hold-17", "split": "holdout", "question": "已入职人数不是开放HC", "expected_metric": "hire_count", "expected_mode": null},
     {"id": "rs-hold-18", "split": "holdout", "question": "总离职不是流失风险分", "expected_metric": "leave_count", "expected_mode": null},
     {"id": "rs-hold-19", "split": "holdout", "question": "在岗人数趋势图", "expected_metric": "headcount", "expected_mode": "trend"},
-    {"id": "rs-hold-20", "split": "holdout", "question": "新入职部门分布", "expected_metric": "hire_count", "expected_mode": "org"}
+    {"id": "rs-hold-20", "split": "holdout", "question": "新入职部门分布", "expected_metric": "hire_count", "expected_mode": "org"},
+
+    {"id": "rs-hard-01", "split": "hard", "question": "不要核定编制，问现在实际还在岗多少人", "expected_metric": "headcount", "expected_mode": null},
+    {"id": "rs-hard-02", "split": "hard", "question": "不是FTE折合全职，就要在职人头数", "expected_metric": "headcount", "expected_mode": null},
+    {"id": "rs-hard-03", "split": "hard", "question": "转正试用都算的在职，不是不含试用口径", "expected_metric": "headcount", "expected_mode": null},
+    {"id": "rs-hard-04", "split": "hard", "question": "当前在职名单，不是在册不计状态那种花名册人数", "expected_metric": "headcount", "expected_mode": "detail"},
+    {"id": "rs-hard-05", "split": "hard", "question": "已报到入职多少人，不是Offer发出数", "expected_metric": "hire_count", "expected_mode": null},
+    {"id": "rs-hard-06", "split": "hard", "question": "真正入职人数，别给我计划入职排期", "expected_metric": "hire_count", "expected_mode": null},
+    {"id": "rs-hard-07", "split": "hard", "question": "社招校招都算的新入职总数，不是单渠道", "expected_metric": "hire_count", "expected_mode": null},
+    {"id": "rs-hard-08", "split": "hard", "question": "总离职人数，不要主动离职专项", "expected_metric": "leave_count", "expected_mode": null},
+    {"id": "rs-hard-09", "split": "hard", "question": "人员流失数量，不是流失风险评分", "expected_metric": "leave_count", "expected_mode": null},
+    {"id": "rs-hard-10", "split": "hard", "question": "主动被动都算的离职合计，不是遗憾离职占比", "expected_metric": "leave_count", "expected_mode": null},
+    {"id": "rs-hard-11", "split": "hard", "question": "分部门看实际在岗，别按编制人数拆", "expected_metric": "headcount", "expected_mode": "org"},
+    {"id": "rs-hard-12", "split": "hard", "question": "离职月度走势用总离职，不要年化流失率", "expected_metric": "leave_count", "expected_mode": "trend"}
   ]
 }

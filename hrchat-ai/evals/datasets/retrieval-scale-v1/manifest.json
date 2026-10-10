@@ -3,17 +3,20 @@
   "purpose": "Scaled retrieval diagnostic with distractors; not end-to-end LLM accuracy",
   "splits": {
     "dev": "cases used for first-period reporting and spot checks",
-    "holdout": "reserved; do not tune retrieval parameters against this split before first scored run"
+    "holdout": "first scored 2026-10-10; do not retune retrieval against this split after that baseline",
+    "hard": "harder non-overlap paraphrases that deliberately echo distractor wording"
   },
-  "corpus_version": "retrieval-corpus-v2",
+  "corpus_version": "retrieval-corpus-v2.1",
   "executable_metrics": ["headcount", "hire_count", "leave_count"],
   "scoring": [
     "metric_hit_at_1 / metric_hit_at_2 among retrieved metadata",
+    "metric_mrr reciprocal rank of gold executable metric",
     "top1_distractor_rate when top metadata is non-executable",
     "example_hit_at_2 for mode-matched few-shots when expected_mode set"
   ],
   "notes": [
     "Independent from hr-query-v1 / modes task scores",
-    "Hit@K must not be reported as ask-success rate"
+    "Hit@K / MRR must not be reported as ask-success rate",
+    "hard split is zero-overlap with few-shot examples by construction"
   ]
 }
