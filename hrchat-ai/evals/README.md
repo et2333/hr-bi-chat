@@ -8,9 +8,31 @@
 
 复核原 `f32fe01` 语料发现 31/36 示例存在原文摘录不匹配、擅自补期间等编译错误；现已修正并实际通过 `compile_contextual` 校验。`reviewed=true` 原由生成器自动写入，不能作为人工抽检证据；当前明确记录“程序校验、人工复核未记录”。`--validate` 不再修改 manifest。审计明细：本地 `docs/evaluation-runs/r4-review.json`。
 
-规模题集 dev 42 条中有 **28 条与 few-shot 完全相同**；报告将 14 条非重合样本单列。`expected_mode=null` 原被自动算成示例命中，现改为也必须命中正确指标和 scalar。旧报告保留，不能直接与修正后指标混比。校验命令：`python -m evals.build_retrieval_corpus --validate`；规模对照：`python -m evals.retrieval_scale`。20 条 holdout 本轮未评分，未用其答案调参。
+规模题集：dev 42（含 28 条与 few-shot 重合）、**holdout 20**（零重合）、**hard 12**（故意咬合干扰词、零重合）。校验：`python -m evals.build_retrieval_corpus --validate`；对照：`python -m evals.retrieval_scale [dev|holdout|hard]`。
 
-修正后报告 `retrieval-scale-20261010T110542271760Z/report.json`：99 候选（3 可执行口径、60 干扰项、36 示例）。14 条非重合开发样本中，BM25 / hybrid 的指标 Hit@1 为 **2/14、4/14**，Hit@2 为 **4/14、6/14**；示例 Hit@2 为 **10/14、9/14**。混合检索未全面优于词法检索，仍是用于发现失败的压力实验，不能宣称业务问数收益。计划与边界见本地 R4 计划；公开语料说明见 [corpus README](../adapters/retrieval_corpus/README.md)。
+含 **MRR** 的检索对照（99 候选 = 3 可执行 + 60 干扰 + 36 示例）：
+
+| 子集 | 模式 | Hit@1 | Hit@2 | MRR | Top-1 误选率 | 报告 |
+|---|---|---:|---:|---:|---:|---|
+| 非重合 14（dev） | lexical | 0.14 | 0.29 | 0.21 | — | `…T143402…` |
+| 非重合 14（dev） | hybrid | **0.29** | **0.43** | **0.36** | — | 同上 |
+| 全量 42（dev） | lexical | 0.40 | 0.64 | 0.52 | 0.57 | 同上 |
+| 全量 42（dev） | hybrid | **0.52** | 0.64 | **0.58** | **0.45** | 同上 |
+| **holdout 20** | lexical | **0.45** | **0.65** | **0.55** | **0.55** | `…T144734…`（加权前基线） |
+| **holdout 20** | hybrid | 0.40 | 0.50 | 0.45 | 0.60 | 同上 |
+| **hard 12** | lexical | 0.00 | 0.33 | 0.17 | 1.00 | `…T145048…`（加权前基线） |
+| **hard 12** | hybrid | 0.00 | 0.08 | 0.04 | 1.00 | 同上 |
+
+**v2.2 可执行加权 + 过滤池**（`prefer_executable`；另报 `exec_pool_*` = 丢掉干扰项后再算 Hit@K/MRR）：
+
+| 子集 | 模式 | Hit@1（加权后） | 误选率 | exec_pool Hit@1 | exec_pool MRR |
+|---|---|---:|---:|---:|---:|
+| holdout 20 | lexical | 0.45 | 0.55 | **0.90** | **0.95** |
+| holdout 20 | hybrid | **0.95** | **0.00** | **0.95** | **0.975** |
+| hard 12 | lexical | 0.00 | 1.00 | **1.00** | **1.00** |
+| hard 12 | hybrid | **1.00** | **0.00** | **1.00** | **1.00** |
+
+解读：未加权时 holdout/hard 上 hybrid 可劣于 lexical；加可执行先验后 hybrid 表面 Hit@1 明显改善。`exec_pool_*` 回答「若只在可执行三条里排序，金标是否靠前」——hard 上多为 1.0，说明金标仍在可执行集合内被排到前面，原先崩盘主要是干扰项抢 Top-1。简历需写清指标定义，勿把加权后 Hit@1 与加权前混比。公开语料说明见 [corpus README](../adapters/retrieval_corpus/README.md)。
 
 首次在 `hrchat-ai` 安装 `.[dev,retrieval]` 并执行 `python -m adapters.prepare_embedding`；模型写入被 Git 忽略的 `.models/`。正常请求仅本地加载；缺失/故障在 evidence 中标记 `fallback_full_catalog`，不伪造向量。demo 入口默认 hybrid 且提前检查模型。模型来源：[BGE 官方模型卡](https://huggingface.co/BAAI/bge-small-zh-v1.5)，本轮 revision `7999e1d3359715c523056ef9478215996d62a620`。
 
@@ -47,6 +69,15 @@ R4/J2 复核验收：`conversation-20261010T111758107661Z/report.json` 的 7 项
 对照报告写入 `docs/evaluation-runs/j3-rag-*/comparison.json`（gitignore）。分层报告任务通过率、Token、延迟；**不可**转写成 Hit@K 或“RAG 提升问数准确率 23%”。需 `OPENAI_API_KEY`、已构建 JAR，以及 hybrid 臂的本地 embedding（`python -m adapters.prepare_embedding`）。已完成臂可用 `--compare-only` 重建对照（零调用）。
 
 **首轮真实消融**（`j3-rag-20261010T132731363549Z`，qwen-plus，repair 关，modes 三题）：三臂任务均为 **3/3**；配对 delta 为 0。Token（已知 usage 合计）约 off **4407** / lexical **5270** / hybrid **5280**（检索上下文使 lexical/hybrid 输入更高，本子集未带来任务增益）。hybrid 延迟 p95 受冷启动影响偏高，勿写成生产 SLA。样本极小，不能外推。
+
+**提示目录掺干扰的端到端压力**（评测专用 `HRCHAT_PROMPT_DISTRACTORS=1`，非默认演示；6 道咬合干扰词的硬题 × 3 模式）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.rag_pressure --model qwen-plus
+.\.venv\Scripts\python.exe -m evals.rag_pressure --plan <plan.json> --execute
+```
+
+报告 `rag-pressure-20261010T145144088510Z`：off / lexical / hybrid 均为 **3/6**，失败题相同（UNSUPPORTED/CLARIFYING）。在「提示里塞满干扰口径」时，本轮**未观察到检索纠正 off 错误**；可写取舍证据，不可写「RAG 提升端到端成功率」。
 
 跨服务与浏览器报告：`docs/evaluation-runs/conversation-20261010T052148358166Z/report.json`，6 项检查通过：两轮澄清历史、实际本地检索与公共 SSE、分析只准备确认、来源会话隔离、薪酬不被替换、刷新后历史与确认界面。此前失败的 `conversation-20261010T051957033702Z` 保留：脚本将带明确别名的“查人数”误设为入/离职歧义，已改用独立歧义问句“人员变动情况”，未放宽生产校验。
 

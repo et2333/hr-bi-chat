@@ -291,10 +291,21 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         s["evidence"]["catalog"] = {k: s["catalog"][k] for k in
             ("as_of_date", "timezone", "metric_count", "org_count", "complete", "capability_version")}
         s["evidence"]["metric_versions"] = {m["code"]: m["version"] for m in s["catalog"]["metrics"]}
-        from adapters.query_retrieval import retrieve as retrieve_context
-        retrieved, retrieval_evidence = await asyncio.to_thread(retrieve_context, question, s["catalog"])
+        import os
+        from adapters.query_retrieval import attach_prompt_distractors, retrieve as retrieve_context
+        pressure = os.getenv("HRCHAT_PROMPT_DISTRACTORS", "0") == "1"
+        if pressure:
+            attach_prompt_distractors(s["catalog"])
+        retrieved, retrieval_evidence = await asyncio.to_thread(
+            retrieve_context, question, s["catalog"], include_distractors=pressure)
         s["catalog"]["retrieved_context"] = retrieved
         s["evidence"]["retrieval"] = retrieval_evidence
+        if pressure:
+            s["evidence"]["prompt_distractors"] = {
+                "enabled": True,
+                "prompt_metric_count": len(s["catalog"].get("prompt_metrics") or []),
+                "authority_metric_count": len(s["catalog"]["metrics"]),
+            }
 
     async def plan_query(s, trace):
         nonlocal question

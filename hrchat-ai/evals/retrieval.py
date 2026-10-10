@@ -58,13 +58,19 @@ def main():
                 raise RuntimeError('Retrieval did not execute: ' + evidence['status'])
             codes = [d['code'] for d in context['metadata']]
             examples = [d['draft'] for d in context['examples']]
+            try:
+                metric_rr = 1.0 / (codes.index(metric) + 1)
+            except ValueError:
+                metric_rr = 0.0
             rows.append({'question': question, 'expected_metric': metric, 'expected_mode': query_mode,
                 'exact_example_overlap': question.strip() in example_questions,
                 'metric_hit_at_1': codes[:1] == [metric], 'metric_hit_at_2': metric in codes,
+                'metric_rr': metric_rr,
                 'example_hit_at_2': any(d['metric_codes'] == [metric] and (d.get('query_mode') or 'scalar') == (query_mode or 'scalar') for d in examples),
                 'retrieval': evidence})
         report['modes'][mode] = {'metric_hit_at_1': sum(r['metric_hit_at_1'] for r in rows) / len(rows),
             'metric_hit_at_2': sum(r['metric_hit_at_2'] for r in rows) / len(rows),
+            'metric_mrr': sum(r['metric_rr'] for r in rows) / len(rows),
             'example_hit_at_2': sum(r['example_hit_at_2'] for r in rows) / len(rows),
             'median_ms': statistics.median(r['retrieval']['elapsed_ms'] for r in rows), 'cases': rows}
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')

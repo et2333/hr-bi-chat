@@ -47,6 +47,33 @@ def load_corpus():
     return {"examples": examples, "distractors": distractors, "version": CORPUS_VERSION}
 
 
+def attach_prompt_distractors(catalog):
+    """Evaluation-only: expand the *prompt* metric list with retrieval distractors.
+
+    Compile/validate still use catalog['metrics'] (Java-authoritative executables).
+    """
+    corpus = load_corpus()
+    prompt = []
+    for m in catalog["metrics"]:
+        prompt.append({k: m[k] for k in ("code", "name", "aliases", "definition", "allowed_modes", "requires_period")
+                       if k in m})
+    known = {m["code"] for m in prompt}
+    for row in corpus["distractors"]:
+        if row["code"] in known:
+            continue
+        prompt.append({
+            "code": row["code"],
+            "name": row["name"],
+            "aliases": row.get("aliases") or [],
+            "definition": row["definition"],
+            "allowed_modes": [],
+            "requires_period": True,
+        })
+    catalog["prompt_metrics"] = prompt
+    catalog["prompt_distractors"] = True
+    return catalog
+
+
 def documents(catalog, *, include_distractors=False):
     """Build per-request docs: live catalog metrics ∪ distractors ∪ matching examples."""
     corpus = load_corpus()
@@ -144,34 +171,54 @@ def encoder():
     return LocalEncoder()
 
 
-def rank(question, docs, mode, embedder=None):
+# One RRF step (1/61≈0.0164). Enough to break near-ties toward executables without
+# erasing a large lexical/dense gap when a distractor is clearly more similar.
+EXECUTABLE_SCORE_BOOST = 1.0 / 61
+
+
+def rank(question, docs, mode, embedder=None, *, prefer_executable=False):
     if not docs:
         return []
     lexical = lexical_scores(question, docs)
     lexical_order = sorted(range(len(docs)), key=lambda i: (-lexical[i], docs[i]["id"]))
     if mode == "lexical":
-        return [(docs[i], lexical[i]) for i in lexical_order if lexical[i] > 0]
-    vectors = (embedder or encoder()).encode(["为这个句子生成表示以用于检索相关文章：" + question] + [d["text"] for d in docs])
-    dense = [float(sum(a * b for a, b in zip(vectors[0], v))) for v in vectors[1:]]
-    dense_order = sorted(range(len(docs)), key=lambda i: (-dense[i], docs[i]["id"]))
-    scores = Counter()
-    for ordering in (dense_order, [i for i in lexical_order if lexical[i] > 0]):
-        for position, index in enumerate(ordering):
-            scores[index] += 1 / (60 + position + 1)
-    return [(docs[i], scores[i]) for i in sorted(scores, key=lambda i: (-scores[i], docs[i]["id"]))]
+        ranked = [(docs[i], lexical[i]) for i in lexical_order if lexical[i] > 0]
+    else:
+        vectors = (embedder or encoder()).encode(["为这个句子生成表示以用于检索相关文章：" + question] + [d["text"] for d in docs])
+        dense = [float(sum(a * b for a, b in zip(vectors[0], v))) for v in vectors[1:]]
+        dense_order = sorted(range(len(docs)), key=lambda i: (-dense[i], docs[i]["id"]))
+        scores = Counter()
+        for ordering in (dense_order, [i for i in lexical_order if lexical[i] > 0]):
+            for position, index in enumerate(ordering):
+                scores[index] += 1 / (60 + position + 1)
+        ranked = [(docs[i], scores[i]) for i in sorted(scores, key=lambda i: (-scores[i], docs[i]["id"]))]
+    if prefer_executable and ranked:
+        # Lexical BM25 scores are O(1..20); RRF scores are O(0.01). Scale the boost accordingly.
+        peak = max(score for _, score in ranked) or 1.0
+        boost = EXECUTABLE_SCORE_BOOST if mode == "hybrid" else max(0.5, 0.08 * peak)
+        ranked = sorted(
+            ((doc, score + (boost if doc.get("executable") else 0.0)) for doc, score in ranked),
+            key=lambda item: (-item[1], item[0]["id"]),
+        )
+    return ranked
 
 
-def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors=False):
+def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors=False,
+             prefer_executable=None):
     mode = mode or os.getenv("HRCHAT_RAG_MODE", "off")
     if mode not in {"off", "lexical", "hybrid"}:
         raise ValueError("HRCHAT_RAG_MODE must be off, lexical or hybrid")
+    if prefer_executable is None:
+        prefer_executable = include_distractors
     started = time.perf_counter()
     fingerprint = hashlib.sha256(json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     evidence = {"mode": mode, "corpus_version": CORPUS_VERSION, "catalog_fingerprint": fingerprint,
                 "candidate_count": 0, "executable_metric_count": 0, "distractor_count": 0,
                 "include_distractors": include_distractors,
+                "prefer_executable": prefer_executable,
                 "model": MODEL_ID if mode == "hybrid" else None,
-                "selected": [], "status": "disabled" if mode == "off" else "ok"}
+                "selected": [], "ranked_metadata_codes": [],
+                "status": "disabled" if mode == "off" else "ok"}
     if mode == "off":
         evidence["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         return {}, evidence
@@ -181,9 +228,15 @@ def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors
             executable_metric_count=sum(d["kind"] == "metadata" and d.get("executable", False) for d in docs),
             distractor_count=sum(d["content"].get("role") == "retrieval_distractor" for d in docs),
             corpus_fingerprint=hashlib.sha256(json.dumps(docs, ensure_ascii=False, sort_keys=True).encode()).hexdigest())
-        selected = []
-        for kind, limit in (("metadata", 2), ("example", 2)):
-            selected.extend(rank(question, [d for d in docs if d["kind"] == kind], mode, embedder)[:limit])
+        metadata_ranked = rank(question, [d for d in docs if d["kind"] == "metadata"], mode, embedder,
+                               prefer_executable=prefer_executable)
+        evidence["ranked_metadata_codes"] = [
+            {"code": d["code"], "executable": bool(d.get("executable")), "score": score}
+            for d, score in metadata_ranked
+        ]
+        selected = list(metadata_ranked[:2])
+        selected.extend(rank(question, [d for d in docs if d["kind"] == "example"], mode, embedder,
+                             prefer_executable=False)[:2])
         evidence["selected"] = [{"id": d["id"], "code": d["code"], "version": d["version"],
                                  "executable": d.get("executable", True), "score": score}
                                 for d, score in selected]
