@@ -243,6 +243,7 @@ def main():
                     "planned_turns": scored["total"],
                 },
                 "rag_mode": args.rag,
+                "suite_version": scored["suite_version"],
                 "server": evidence,
                 "results": scored["cases"],
                 "cost_summary": summarize_calls([

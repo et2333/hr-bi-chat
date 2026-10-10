@@ -1,7 +1,7 @@
 """End-to-end pressure suite: noisy prompt catalog; retrieval may disambiguate.
 
-Evaluation-only (HRCHAT_PROMPT_DISTRACTORS=1). Success = COMPLETED with the gold
-executable metric. Not a claim about production RAG lift without this pressure.
+Evaluation-only (HRCHAT_PROMPT_DISTRACTORS=1). Success requires the gold metric,
+organization and period in authorized execution evidence. Not production RAG lift.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ CASES = [
     {"id": "rp-03", "question": "本月已报到入职多少人，不是Offer发出数",
      "expected_metric": "hire_count",
      "context_override": {"orgId": "2", "includeChildren": True,
-                          "timeRange": {"preset": "CUSTOM", "start": "2026-09-01", "end": "2026-09-28"}}},
+                          "timeRange": {"preset": "THIS_MONTH"}}},
     {"id": "rp-04", "question": "人员流失数量不是流失风险分，查上月",
      "expected_metric": "leave_count",
      "context_override": {"orgId": "2", "includeChildren": True,
@@ -36,7 +36,7 @@ CASES = [
     {"id": "rp-05", "question": "真正入职人数别给计划入职排期，本月研发中心",
      "expected_metric": "hire_count",
      "context_override": {"orgId": "2", "includeChildren": True,
-                          "timeRange": {"preset": "CUSTOM", "start": "2026-09-01", "end": "2026-09-28"}}},
+                          "timeRange": {"preset": "THIS_MONTH"}}},
     {"id": "rp-06", "question": "主动被动都算的离职合计，不是遗憾离职占比，上月",
      "expected_metric": "leave_count",
      "context_override": {"orgId": "2", "includeChildren": True,
@@ -44,6 +44,18 @@ CASES = [
 ]
 
 RAG_MODES = ("off", "lexical", "hybrid")
+SUITE_VERSION = "rag-pressure-v2"
+
+# Independent expectations at the frozen business date 2026-09-28. Do not use
+# the production date resolver to manufacture the scorer's expected values.
+EXPECTED_PERIODS = {
+    "rp-01": None,
+    "rp-02": ("2026-08-01", "2026-09-01"),
+    "rp-03": ("2026-09-01", "2026-09-29"),
+    "rp-04": ("2026-08-01", "2026-09-01"),
+    "rp-05": ("2026-09-01", "2026-09-29"),
+    "rp-06": ("2026-08-01", "2026-09-01"),
+}
 
 
 def save(path, value):
@@ -62,6 +74,42 @@ def extracted_metric(actual):
     return caliber.get("metricCode")
 
 
+def score_case(case, actual):
+    evidence = actual.get("evidence") or {}
+    execution = evidence.get("execution") or {}
+    plan = execution.get("query_plan") or {}
+    errors = []
+    if actual.get("status") != "COMPLETED" or actual.get("conflicting_terminal_events"):
+        errors.append("not_completed")
+    if not execution:
+        errors.append("execution_evidence_missing")
+    if plan.get("metric_codes") != [case["expected_metric"]]:
+        errors.append("metric_mismatch")
+    scope = plan.get("org_scope") or {}
+    if scope.get("org_id") != "2" or scope.get("include_children") is not True:
+        errors.append("organization_mismatch")
+    if sorted(str(x) for x in execution.get("effective_org_ids", [])) != ["2", "3", "4"]:
+        errors.append("effective_scope_mismatch")
+    window = plan.get("time_range")
+    expected = EXPECTED_PERIODS[case["id"]]
+    if expected is None:
+        # Current headcount can use implicit as-of or an explicit one-day window.
+        if window and (window.get("start"), window.get("end"), window.get("time_type")) != (
+                "2026-09-28", "2026-09-29", "as_of"):
+            errors.append("period_mismatch")
+    elif not window or (window.get("start"), window.get("end"), window.get("time_type")) != (*expected, "period"):
+        errors.append("period_mismatch")
+    if plan.get("query_mode") != "scalar":
+        errors.append("mode_mismatch")
+    diagnostics = {key: evidence.get(key) for key in (
+        "model_query_draft", "query_plan", "compilation", "validation_error", "reason", "repair", "trace")}
+    diagnostics.update(execution=execution, evidence_http_status=actual.get("evidence_http_status"),
+        error_codes=actual.get("error_codes", []),
+        clarification=[e.get("payload") for e in actual.get("events", []) if e.get("event") == "INTERRUPT"],
+        errors=[e.get("payload") for e in actual.get("events", []) if e.get("event") == "ERROR"])
+    return errors, diagnostics
+
+
 def score_arm(api, mode):
     rows = []
     for case in CASES:
@@ -71,21 +119,25 @@ def score_arm(api, mode):
             "context_override": case["context_override"],
         })
         metric = extracted_metric(actual)
-        passed = actual.get("status") == "COMPLETED" and metric == case["expected_metric"]
+        errors, diagnostics = score_case(case, actual)
         retrieval = (actual.get("evidence") or {}).get("retrieval") or {}
         rows.append({
             "id": case["id"],
             "question": case["question"],
             "expected_metric": case["expected_metric"],
+            "expected_period": EXPECTED_PERIODS[case["id"]],
             "status": actual.get("status"),
             "actual_metric": metric,
-            "passed": passed,
+            "passed": not errors,
+            "score_errors": errors,
+            "diagnostics": diagnostics,
             "rag_mode": retrieval.get("mode"),
             "prompt_distractors": (actual.get("evidence") or {}).get("prompt_distractors"),
             "elapsed_ms": actual.get("elapsed_ms"),
             "usage_calls": list((actual.get("evidence") or {}).get("model_calls") or []),
         })
     return {
+        "suite_version": SUITE_VERSION,
         "rag_mode": mode,
         "passed": sum(r["passed"] for r in rows),
         "total": len(rows),
@@ -103,16 +155,19 @@ def prepare(*, model="qwen-plus"):
     arms = [{"name": f"rag-{mode}", "rag_mode": mode,
              "command": [*base, "--rag", mode], "status": "planned"} for mode in RAG_MODES]
     plan = {
-        "version": "rag-pressure-v1",
+        "version": SUITE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "model": model,
         "case_ids": [c["id"] for c in CASES],
+        "cases": CASES,
+        "expected_periods": EXPECTED_PERIODS,
         "max_model_calls": len(RAG_MODES) * len(CASES),
         "source_sha256": source_fingerprint(),
         "jar_sha256": sha(jar),
         "scope": (
             "Prompt catalog includes retrieval distractors; compile authority stays Java executables. "
-            "Success = COMPLETED with gold metric. Demonstrates whether retrieval helps under noise; "
+            "Success = COMPLETED with gold metric, organization and period in execution evidence. "
+            "Tests whether retrieval helps under noise; "
             "not production default behavior."
         ),
         "arms": arms,
@@ -125,6 +180,8 @@ def prepare(*, model="qwen-plus"):
 def execute(path):
     path = Path(path).resolve()
     plan = json.loads(path.read_text(encoding="utf-8"))
+    if plan.get("version") != SUITE_VERSION:
+        raise ValueError("Pressure suite changed; preserve the old run and register a new plan")
     if source_fingerprint() != plan["source_sha256"]:
         raise ValueError("Source changed after registration; create a new plan")
     if sha(ROOT / "hrchat-server/hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar") != plan["jar_sha256"]:

@@ -12,7 +12,7 @@ from langgraph_flows.query_draft import ModelQueryDraft, CatalogOrganization, co
 from langgraph_flows.query_plan import PlanRejected
 from langgraph_flows.time_intent import resolve_expression, resolve_context_time, time_mentions, has_time_cue
 
-MEMORY_PROMPT_VERSION = "query-draft-v3.2-action-retrieval"
+MEMORY_PROMPT_VERSION = "query-draft-v3.3-contrast"
 MERGE_VERSION = "task-context-merge-v1.1"
 PERIOD_OPTIONS = {"time:THIS_MONTH": "本月", "time:LAST_MONTH": "上月", "time:LAST_30D": "近30天"}
 
@@ -57,6 +57,7 @@ time_expression：摘录 question 中时间原文，未提及为 null，不补�
 query_mode / mode_text：本轮有“趋势”填 trend 和“趋势”；“明细”填 detail 和“明细”；“按部门对比／按组织对比／各部门／各组织”填 org 并摘录对应原文；明确“汇总”填 scalar 和“汇总”；否则两个都 null。所有 *_text 必须是 question 内的连续原文，不得填 code 或英文模式名称。
 clear_slots：用户说“全部部门／全公司”填 ["organization"]；“取消时间限制”填 ["time_range"]；“清空指标”填 ["metric"]；“取消趋势／取消分组／改为汇总”填 ["query_mode"]。其他情况 []。清空的槽位不同时填写新值。
 不支持的筛选、维度、预测、因果、同比分析：decision=unsupported, unsupported_reason=unsupported_capability；主动离职缺专用口径：unsupported/metric_unavailable。其他情况 unsupported_reason=null。
+区分查询目标与被否定的口径：“总离职人数，不是主动离职专项”查询总离职；“已报到入职人数，不是Offer发出数”查询实际入职。被明确否定的口径不作为额外查询目标。“离职人数排除主动离职”则提出了未支持的筛选，不能改成总离职；语义有歧义时澄清。
 精确示例（字段与组织ID仍以当前目录为准）：
 question=那本月呢？ → {"decision":"execute","metric_codes":[],"metric_text":null,"organization":null,"time_expression":"本月","query_mode":null,"mode_text":null,"clear_slots":[],"unsupported_reason":null}
 question=查看趋势 → {"decision":"execute","metric_codes":[],"metric_text":null,"organization":null,"time_expression":null,"query_mode":"trend","mode_text":"趋势","clear_slots":[],"unsupported_reason":null}

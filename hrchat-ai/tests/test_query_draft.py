@@ -136,7 +136,7 @@ async def test_draft_compiles_through_full_flow_and_java_resolution(graph, org):
         adapter=DraftPlanner(draft(organization=org, time_expression="本月").model_dump()), tools=tools, use_langgraph=graph)
     assert result["answer_payload"]["conclusion"]["value"] == 7
     e = result["evidence"]
-    assert e["prompt_version"] == "query-draft-v2" and e["query_plan"] == e["execution"]["query_plan"]
+    assert e["prompt_version"] == "query-draft-v2.1-contrast" and e["query_plan"] == e["execution"]["query_plan"]
     assert e["query_plan"]["time_range"]["end"] == "2026-09-29"
 
 

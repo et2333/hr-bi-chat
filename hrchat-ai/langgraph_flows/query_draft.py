@@ -11,7 +11,7 @@ from pydantic import Field
 from langgraph_flows.query_plan import StrictModel, QueryPlan, OrgScope, TimeRange, ClarificationOption, PlanRejected
 from langgraph_flows.time_intent import resolve_expression, resolve_context_time, time_mentions, has_time_cue
 
-DRAFT_VERSION = "query-draft-v2"
+DRAFT_VERSION = "query-draft-v2.1-contrast"
 COMPILER_VERSION = "query-compiler-v1"
 FOLLOWUP_GUARD_VERSION = "explicit-slot-guard-v1"
 
@@ -64,6 +64,7 @@ def draft_messages(question, catalog, context, selected_metric=None):
 time_expression 只摘录问题中的时间原文，如“上月”“本月”“近7天”，日期由程序计算，不输出 start/end/time_type。问题没说时间则 null；入职/离职缺期间且无显式时间选择时 clarify，绝不能补本月。在职无时间可查当前。
 context_selection 是用户显式选择，优先使用；null/未提供仅表示没有覆盖值，不能据此忽略问题中已有条件。S2 没有跨轮记忆，追问缺指标时 clarify。
 保留全部需求。预测、原因、同比、性别等未支持筛选/分组返回 unsupported/unsupported_capability；主动离职没有专用口径返回 unsupported/metric_unavailable，不能偷换为总离职。多个显式组织暂不支持。
+区分查询目标与被否定的口径：“总离职人数，不是主动离职专项”查询总离职；“已报到入职人数，不是Offer发出数”查询实际入职。被明确否定的口径不作为额外查询目标。“离职人数排除主动离职”则提出了未支持的筛选，不能改成总离职；语义有歧义时澄清。
 输出字段仅为 decision、metric_codes、organization、time_expression、query_mode、unsupported_reason。明确一个指标且条件充足时 execute；多个指标候选时 clarify 并列真实 code；缺期间时保留已知指标和组织；unsupported_reason 只在 unsupported 时填写。
 例如未指定组织的“近7天入职人数”：{"decision":"execute","metric_codes":["hire_count"],"organization":null,"time_expression":"近7天","query_mode":"scalar"}。
 例如“入职人数”（无显式选择）：{"decision":"clarify","metric_codes":["hire_count"],"organization":null,"time_expression":null,"query_mode":"scalar"}。

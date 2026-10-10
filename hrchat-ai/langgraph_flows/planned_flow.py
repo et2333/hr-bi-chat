@@ -49,9 +49,27 @@ def _org_option_label(org):
     )
 
 
+def _requests_voluntary_leavers(question):
+    """Only exempt an explicit contrast with total leavers, never an exclusion filter.
+
+    Keep the original question for the model and compiler. This narrowly avoids
+    treating a standalone 'not the voluntary-leavers metric' clause as a request.
+    Other uses (including ambiguous negation) retain the capability boundary.
+    """
+    remaining = re.sub(
+        r"(^|[，,；;。])\s*(?:不是|并非|而非)\s*主动离职(?:专项|口径|指标|人数|数量)\s*(?=$|[，,；;。？！?!])",
+        r"\1", question)
+    total_requested = re.search(r"(?:总离职(?:人数|数量)?|离职总人数|离职人数|离职数量|离职合计)", remaining)
+    # Negative/conditional language outside the contrast may change the population.
+    ambiguous = re.search(r"不是|并非|而非|不要|不查|别|排除|不含|不包括|不算|除外|除了", remaining)
+    if remaining != question and total_requested and not ambiguous:
+        return "主动离职" in remaining
+    return "主动离职" in question
+
+
 def guard_known_capabilities(question, allow_analysis=False, catalog=None):
     """Known unsupported requirements take priority over asking for missing slots."""
-    if "主动离职" in question:
+    if _requests_voluntary_leavers(question):
         raise PlanRejected("metric_unavailable", MESSAGES["metric_unavailable"])
     if catalog is not None:
         # Observed manual failures: never substitute an available count for a
