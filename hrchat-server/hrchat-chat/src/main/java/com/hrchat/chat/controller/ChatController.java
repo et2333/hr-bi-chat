@@ -54,6 +54,11 @@ public class ChatController {
 
     // ---------------- 会话 ----------------
 
+    @GetMapping("/runtime")
+    public ApiResponse<java.util.Map<String, Object>> runtimeInfo(@CurrentUser UserContext ctx) {
+        return ApiResponse.ok(chatService.runtimeInfo(ctx));
+    }
+
     @DeleteMapping("/query-contexts")
     public ApiResponse<Void> clearQueryContexts(@CurrentUser UserContext ctx) {
         chatService.clearQueryContexts(ctx);
@@ -130,7 +135,7 @@ public class ChatController {
         if (request.mode() == null || "STREAM".equalsIgnoreCase(request.mode())) {
             // 开流前完成归属/功能鉴权，避免已写 HTTP 200 后把 HRC-2002 吞成 SSE ERROR。
             chatService.assertCanAsk(ctx, sessionId);
-            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+            return ResponseEntity.ok().contentType(new MediaType("text", "event-stream", StandardCharsets.UTF_8))
                     .header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no")
                     .body(output -> {
                         ChatStreamWriter writer = new ChatStreamWriter(output, objectMapper);

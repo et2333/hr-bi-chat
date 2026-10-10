@@ -18,6 +18,10 @@ import java.util.Map;
  * <p>问数主链路：意图识别 → 语义检索（Schema Linking）→ SQL 模板拼装 → 权限改写 → 执行 → 呈现。</p>
  */
 public interface AgentRuntimeClient {
+    /** Read-only developer preflight. Never performs inference or returns credentials. */
+    default Map<String, Object> runtimeInfo(UserContext ctx) {
+        return Map.of("runtime", "local", "llm_profile", "none", "model", "none", "query_backend", "local");
+    }
 
     /**
      * 提交问句，返回完整语义事件序列与终态载荷。

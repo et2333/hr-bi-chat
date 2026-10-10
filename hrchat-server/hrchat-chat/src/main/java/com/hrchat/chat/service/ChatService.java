@@ -186,6 +186,11 @@ public class ChatService {
         requireSession(ctx, sessionId);
     }
 
+    public Map<String, Object> runtimeInfo(UserContext ctx) {
+        authzService.checkFunc(ctx, PERM_ASK);
+        return agentRuntime.runtimeInfo(ctx);
+    }
+
     public AskOutcome ask(UserContext ctx, Long sessionId, AskRequest request, String idempotencyKey,
                           java.util.function.Consumer<SseEvent> progress) {
         authzService.checkFunc(ctx, PERM_ASK);
@@ -257,8 +262,13 @@ public class ChatService {
                 .noneMatch(o -> o.optionId().equals(selected.optionIds().get(0))))
             throw new BizException(ErrorCode.PARAM_INVALID, "请选择当前有效选项");
         boolean taskMemory = askStore.evidence(askId).containsKey("query_context_candidate");
-        QueryContextStore.Ticket ticket = taskMemory
-                ? queryContexts.begin(QueryContextStore.key(ctx, sessionId), askId, request.answers().get(0)) : null;
+        QueryContextStore.Ticket ticket = null;
+        try {
+            if (taskMemory) ticket = queryContexts.begin(QueryContextStore.key(ctx, sessionId), askId, selected);
+        } catch (BizException ex) {
+            appendHistory(record.turnId(), "outcome", Map.of("status", "expired", "message", ex.getMessage()));
+            throw ex;
+        }
         AgentInvocationContext invocation = buildInvocation(ctx, sessionId, askId);
         if (ticket != null) invocation = invocation.withQueryContext(ticket.snapshot());
         String label = prompt.options().stream().filter(o -> selected.optionIds().contains(o.optionId()))
@@ -298,6 +308,19 @@ public class ChatService {
 
     private AgentResult recordContextCommit(QueryContextStore.Ticket ticket, AgentResult result, String question) {
         String status = queryContexts.finish(ticket, result, question);
+        if (ticket.snapshot().get("pending") instanceof Map<?, ?> pending
+                && pending.get("ask_id") instanceof String previousAsk && !previousAsk.equals(result.askId())) {
+            ChatAskStore.AskRecord previous = askStore.get(previousAsk);
+            if (previous != null && previous.sessionId().equals(ticket.key().sessionId())
+                    && previous.userId().equals(ticket.key().userId()) && previous.tenantId().equals(ticket.key().tenantId())) {
+                appendHistory(previous.turnId(), "selection", Map.of("selected", question,
+                        "status", "submitted", "source", "text", "followupAskId", result.askId()));
+                boolean closed = List.of("confirmed", "pending_saved", "pending_cancelled").contains(status);
+                appendHistory(previous.turnId(), "outcome", Map.of("status", closed ? "continued" : "failed",
+                        "message", "pending_cancelled".equals(status) ? "已取消本次澄清"
+                                : closed ? "已在后续问句继续处理，请查看后续回答" : "后续问句未完成，请重新提问"));
+            }
+        }
         Map<String, Object> evidence = new LinkedHashMap<>(result.evidence() == null ? Map.of() : result.evidence());
         evidence.put("memory_commit", Map.of("status", status, "context_version", ticket.version()));
         return result.withEvidence(evidence);
@@ -543,7 +566,7 @@ public class ChatService {
             return;
         }
         answer.setAnswerState(stateToCode(
-                payload == null ? SseEvents.ASK_FAILED : SseEvents.ASK_COMPLETED));
+                payload == null ? SseEvents.ASK_FAILED : payload.status()));
         answer.setSummaryText(payload == null || payload.conclusion() == null
                 ? null : String.valueOf(payload.conclusion().value()));
         answer.setTotalRows(payload == null || payload.table() == null ? 0 : (int) payload.table().total());

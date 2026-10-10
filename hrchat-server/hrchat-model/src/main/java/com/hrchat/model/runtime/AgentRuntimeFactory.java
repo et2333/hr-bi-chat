@@ -208,6 +208,11 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     }
 
     @Override
+    public Map<String, Object> runtimeInfo(UserContext ctx) {
+        return resolve(ctx).runtimeInfo(ctx);
+    }
+
+    @Override
     public AgentResult ask(AskRequest request, UserContext ctx) {
         return resolve(ctx).ask(request, ctx);
     }

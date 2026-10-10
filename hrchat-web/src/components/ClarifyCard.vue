@@ -32,7 +32,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import type { ClarifyQuestions } from '@/api/types'
 
 const props = defineProps<{
@@ -46,6 +46,9 @@ const emit = defineEmits<{
 
 /** questionId → optionIds[] */
 const selected = reactive<Record<string, string[]>>({})
+watch(() => JSON.stringify(props.clarify.questions), () => {
+  for (const id of Object.keys(selected)) delete selected[id]
+})
 
 /** 兼容 ant-design-vue 复选框组（直接给数组）与单选组（事件对象）两种回调形态 */
 function onGroupChange(questionId: string, multiple: boolean, payload: unknown) {

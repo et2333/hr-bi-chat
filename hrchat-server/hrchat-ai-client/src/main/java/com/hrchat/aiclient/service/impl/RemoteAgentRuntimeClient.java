@@ -109,6 +109,18 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         return result;
     }
 
+    @Override
+    public Map<String, Object> runtimeInfo(UserContext ctx) {
+        var uri = org.springframework.web.util.UriComponentsBuilder.fromHttpUrl(baseUrl + "/health")
+                .queryParam("tenant_no", ctx.getTenantId()).build().encode().toUri();
+        Map<?, ?> health = restTemplate.getForObject(uri, Map.class);
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("runtime", "remote");
+        for (String key : List.of("llm_profile", "model", "query_backend", "rag_mode"))
+            summary.put(key, health != null && health.get(key) != null ? health.get(key) : "unknown");
+        return summary;
+    }
+
     @SuppressWarnings("unchecked")
     private Map<?, ?> streamTerminal(String url, Map<String, Object> body, HttpHeaders headers,
                                      java.util.function.Consumer<SseEvent> progress) {
