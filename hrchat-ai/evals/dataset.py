@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 
 DATASET = Path(__file__).parent / "datasets/hr-query-v1"
+MODE_DATASET = DATASET.with_name("hr-query-modes-v1")
+DATASETS = {p.name: p for p in (DATASET, MODE_DATASET)}
 
 
 def select_cases(cases, split, case_ids=None):

@@ -31,3 +31,12 @@ def test_partial_multiturn_does_not_shrink_denominator():
 def test_s4_does_not_relax_s3_task_scoring():
     assert load_policy("s4")["overrides"] == load_policy("s3")["overrides"]
     assert load_policy("s4")["deferred_scenes"] == {}
+
+
+def test_independent_mode_dataset_uses_its_own_score_without_stage_overrides():
+    cases = [{"case_id": "j1", "turns": [{}]}]
+    record = row("j1", True)
+    record["turns"][0].pop("stage_score")
+    record["turns"][0]["passed"] = True
+    result = summarize_repair(cases, [record])
+    assert result["final_task_passed"] == result["first_task_passed"] == 1

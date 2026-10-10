@@ -1,0 +1,1156 @@
+[
+  {
+    "case_id": "hr-modes-v1-01",
+    "group_id": "mode_trend",
+    "template_id": "mode_trend",
+    "scene": "trend",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数趋势",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-07-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-07-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-07",
+              "headcount": 15
+            },
+            {
+              "period": "2026-08",
+              "headcount": 17
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-02",
+    "group_id": "mode_trend",
+    "template_id": "mode_trend",
+    "scene": "trend",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心入职人数趋势",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-07-01",
+            "end": "2026-09-29"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-07-01/2026-09-28",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-07",
+              "hire_count": 2
+            },
+            {
+              "period": "2026-08",
+              "hire_count": 3
+            },
+            {
+              "period": "2026-09",
+              "hire_count": 1
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "hire_count",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-03",
+    "group_id": "mode_trend",
+    "template_id": "mode_trend",
+    "scene": "trend",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心离职人数趋势",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-09-19",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-08",
+              "leave_count": 1
+            },
+            {
+              "period": "2026-09",
+              "leave_count": 2
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "leave_count",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-04",
+    "group_id": "mode_trend",
+    "template_id": "mode_trend",
+    "scene": "trend",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发二部在职人数趋势",
+        "context_override": {
+          "orgId": "4",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "trend",
+            "org_keys": [
+              4
+            ],
+            "org_id": "4",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-09-19",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-08",
+              "headcount": 7
+            },
+            {
+              "period": "2026-09",
+              "headcount": 8
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-05",
+    "group_id": "mode_trend",
+    "template_id": "mode_trend",
+    "scene": "trend",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发一部入职人数趋势",
+        "context_override": {
+          "orgId": "3",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-09-01",
+            "end": "2026-09-15"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "trend",
+            "org_keys": [
+              3
+            ],
+            "org_id": "3",
+            "include_children": true,
+            "time_label": "2026-09-01/2026-09-14",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "hire_count",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-06",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "org",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数按部门对比",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "org",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "org_name": "研发一部",
+              "headcount": 10
+            },
+            {
+              "org_name": "研发二部",
+              "headcount": 7
+            }
+          ],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ],
+          "partition_total": 17
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-07",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "org",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心入职人数按部门对比",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "org",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "org_name": "研发一部",
+              "hire_count": 2
+            },
+            {
+              "org_name": "研发二部",
+              "hire_count": 1
+            }
+          ],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "hire_count",
+              "masked": false
+            }
+          ],
+          "partition_total": 3
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-08",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "org",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心离职人数按部门对比",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-09-01",
+            "end": "2026-09-29"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "query_mode": "org",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-09-01/2026-09-28",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "org_name": "研发一部",
+              "leave_count": 1
+            },
+            {
+              "org_name": "研发二部",
+              "leave_count": 1
+            }
+          ],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "leave_count",
+              "masked": false
+            }
+          ],
+          "partition_total": 2
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-09",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "org",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数按部门对比",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": false,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "org",
+            "org_keys": [
+              2
+            ],
+            "org_id": "2",
+            "include_children": false,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ],
+          "partition_total": 0
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-10",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "org",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr03",
+    "session_owner": "hr03",
+    "turns": [
+      {
+        "question": "职能部离职人数按部门对比",
+        "context_override": {
+          "orgId": "6",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "query_mode": "org",
+            "org_keys": [
+              6,
+              7,
+              8
+            ],
+            "org_id": "6",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "leave_count",
+              "masked": false
+            }
+          ],
+          "partition_total": 0
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-11",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "detail",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发二部在职人数明细",
+        "context_override": {
+          "orgId": "4",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-08-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "detail",
+            "org_keys": [
+              4
+            ],
+            "org_id": "4",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-19",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "emp_no": "E***1",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***3",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***4",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***5",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***6",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***7",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "N***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            }
+          ],
+          "columns": [
+            {
+              "key": "emp_no",
+              "masked": true
+            },
+            {
+              "key": "emp_name",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            },
+            {
+              "key": "job_level",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-12",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "detail",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发二部在职人数明细",
+        "context_override": {
+          "orgId": "4",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-08-21"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "detail",
+            "org_keys": [
+              4
+            ],
+            "org_id": "4",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-20",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "emp_no": "E***1",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***3",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***4",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***5",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***6",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "N***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            }
+          ],
+          "columns": [
+            {
+              "key": "emp_no",
+              "masked": true
+            },
+            {
+              "key": "emp_name",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            },
+            {
+              "key": "job_level",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-13",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "detail",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心入职人数明细",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-09-01",
+            "end": "2026-09-16"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "detail",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-09-01/2026-09-15",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "dt": "20******01",
+              "emp_key": "****",
+              "org_key": "****"
+            }
+          ],
+          "columns": [
+            {
+              "key": "dt",
+              "masked": true
+            },
+            {
+              "key": "emp_key",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-14",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "detail",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心离职人数明细",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-09-01",
+            "end": "2026-09-29"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "query_mode": "detail",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-09-01/2026-09-28",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "dt": "20******01",
+              "emp_key": "****",
+              "org_key": "****"
+            },
+            {
+              "dt": "20******01",
+              "emp_key": "****",
+              "org_key": "****"
+            }
+          ],
+          "columns": [
+            {
+              "key": "dt",
+              "masked": true
+            },
+            {
+              "key": "emp_key",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-15",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "detail",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发一部入职人数明细",
+        "context_override": {
+          "orgId": "3",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-09-01",
+            "end": "2026-09-15"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "detail",
+            "org_keys": [
+              3
+            ],
+            "org_id": "3",
+            "include_children": true,
+            "time_label": "2026-09-01/2026-09-14",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [],
+          "columns": [
+            {
+              "key": "dt",
+              "masked": true
+            },
+            {
+              "key": "emp_key",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-16",
+    "group_id": "mode_detail",
+    "template_id": "mode_detail",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr02",
+    "session_owner": "hr02",
+    "turns": [
+      {
+        "question": "销售部在职人数明细",
+        "context_override": {
+          "orgId": "5",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "error_code": "HRC-2002"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-17",
+    "group_id": "mode_org",
+    "template_id": "mode_org",
+    "scene": "permission",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "销售部离职人数按部门对比",
+        "context_override": {
+          "orgId": "5",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "DENIED"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "error_code": "HRC-2003"
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "hr-modes-v1-18",
+    "group_id": "mode_scalar",
+    "template_id": "mode_scalar",
+    "scene": "scalar",
+    "split": "dev",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "研发中心在职人数汇总",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "scalar",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "value": 17
+        }
+      }
+    ]
+  }
+]

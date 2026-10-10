@@ -3,6 +3,8 @@ import math
 import re
 from datetime import date, timedelta
 
+from evals.mode_scoring import failure_layers, score_mode, score_saved_pages
+
 
 def score(expected, actual):
     errors = []
@@ -13,6 +15,8 @@ def score(expected, actual):
     if expected.get("error_code") and expected["error_code"] not in actual.get("error_codes", []):
         errors.append("error_code")
     payload = actual.get("answer") or {}
+    if expected.get("no_execution") and (actual.get("evidence") or {}).get("execution"):
+        errors.append("unexpected_execution")
     conclusion = payload.get("conclusion") or {}
     if expected.get("no_data") and (
         (payload.get("table") or {}).get("rows")
@@ -34,6 +38,8 @@ def score(expected, actual):
                   re.findall(r"\borg_key\s+in\s*\(([^)]+)\)", sql)]
         evidence = actual.get("evidence") or {}
         execution = evidence.get("execution")
+        if expected.get("require_execution_evidence") and not execution:
+            errors.append("execution_evidence_missing")
         if execution:
             actual_plan = execution.get("query_plan") or {}
             if set(execution.get("effective_org_ids", [])) != set(plan["org_keys"]):
@@ -42,6 +48,18 @@ def score(expected, actual):
                 errors.append("executed_metric")
             if actual_plan.get("query_mode") != plan["query_mode"]:
                 errors.append("executed_mode")
+            if "org_id" in plan and actual_plan.get("org_scope") != {
+                    "org_id": plan["org_id"], "include_children": plan["include_children"]}:
+                errors.append("executed_scope")
+            if "metric_version" in plan and execution.get("metric_version") != plan["metric_version"]:
+                errors.append("metric_version")
+            if expected.get("require_execution_evidence"):
+                actual_time = actual_plan.get("time_range") or {}
+                if any(actual_time.get(k) != v for k, v in {
+                    "grain": "MONTH" if plan["query_mode"] == "trend" else "NONE",
+                    "time_type": "as_of" if plan["metric_code"] == "headcount" else "period",
+                    "timezone": "Asia/Shanghai"}.items()):
+                    errors.append("executed_time_semantics")
             # Card labels alone cannot prove that Java queried the right dates.
             if re.fullmatch(r"\d{4}-\d{2}-\d{2}/\d{4}-\d{2}-\d{2}", plan["time_label"]):
                 start, inclusive_end = plan["time_label"].split("/")
@@ -74,8 +92,12 @@ def score(expected, actual):
                     v, expected["value"], rel_tol=0, abs_tol=expected.get("tolerance", 0)
                 ) for v in displays):
                     errors.append("display_value")
+        elif plan["query_mode"] in {"trend", "org", "detail"} and "rows" in expected:
+            errors.extend(score_mode(expected, payload))
+            if plan["query_mode"] == "detail":
+                errors.extend(score_saved_pages(actual))
         else:
             errors.append("unimplemented_mode_scorer")
     if actual.get("infrastructure_error"):
         errors.append("infrastructure")
-    return {"passed": not errors, "errors": errors}
+    return {"passed": not errors, "errors": errors, "failure_layers": failure_layers(errors)}

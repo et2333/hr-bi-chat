@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from evals.api import JavaApi
-from evals.dataset import DATASET, load_dataset, select_cases, sha, sha_text
+from evals.dataset import DATASET, DATASETS, load_dataset, select_cases, sha, sha_text
 from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
 from evals.stage_policy import POLICY, load_policy, score_stage, stage_report
@@ -42,9 +42,14 @@ def execute(cases, api, on_result=lambda results: None, policy=POLICY):
             session = api.session(case["session_owner"])
             for turn in case["turns"]:
                 actual = api.ask(session, case["identity_fixture"], turn)
-                row["turns"].append({"question": turn["question"], "expected": turn["expected"],
-                                     "actual": actual, **score(turn["expected"], actual),
-                                     "stage_score": score_stage(case, turn, actual, policy)})
+                if (policy is None and (turn["expected"].get("plan") or {}).get("query_mode") == "detail"
+                        and actual.get("status") == "COMPLETED"):
+                    actual["saved_pages"] = api.saved_pages(case["identity_fixture"], actual["answer"])
+                scored = {"question": turn["question"], "expected": turn["expected"],
+                          "actual": actual, **score(turn["expected"], actual)}
+                if policy is not None:
+                    scored["stage_score"] = score_stage(case, turn, actual, policy)
+                row["turns"].append(scored)
         except (Exception, KeyboardInterrupt) as exc:
             # Do not serialize raw exception messages (may include credentials or arbitrary payloads).
             row["execution_error"] = type(exc).__name__
@@ -79,13 +84,29 @@ def summarize(cases, results):
             "turn_latency_ms": {"count": len(latencies), "includes_sql_evidence_fetch": True,
                                 "p50": latencies[math.ceil(len(latencies) * .5) - 1] if latencies else None,
                                 "p95": latencies[math.ceil(len(latencies) * .95) - 1] if latencies else None},
-            "failure_types": dict(Counter(e for r in results for t in r["turns"] for e in t["errors"]))}
+            "failure_types": dict(Counter(e for r in results for t in r["turns"] for e in t["errors"])),
+            "failure_layers": dict(Counter(e for r in results for t in r["turns"] for e in t.get("failure_layers", [])))}
+
+
+def prior_runs(parent, manifest, cases):
+    previous, overlap = [], []
+    equivalent_hashes = {manifest["cases_sha256"], *manifest.get("legacy_cases_sha256", [])}
+    for path in parent.glob("*/report.json"):
+        old = json.loads(path.read_text(encoding="utf-8"))
+        # S6 and other experiment reports legitimately have a different schema.
+        if (old.get("dataset") or {}).get("cases_sha256") in equivalent_hashes:
+            previous.append(path.parent.name)
+            scored_ids = {r["case_id"] for r in old.get("results", []) if r.get("turns")}
+            if scored_ids.intersection(c["case_id"] for c in cases):
+                overlap.append(path.parent.name)
+    return previous, overlap
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:18085")
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
+    parser.add_argument("--dataset", choices=sorted(DATASETS), default=DATASET.name)
     parser.add_argument("--case-id", action="append", help="Repeat to select complete cases for a focused run")
     parser.add_argument("--runtime", choices=["local", "remote"], default="local")
     parser.add_argument("--model-kind", choices=["real", "fixture", "rule_based", "unknown"], default="unknown")
@@ -95,10 +116,10 @@ def main():
     parser.add_argument("--server-evidence", type=Path, required=True,
                         help="JSON of the isolated server launch/configuration (no secrets)")
     args = parser.parse_args()
-    policy = load_policy(args.stage)
+    policy = load_policy(args.stage) if args.dataset == DATASET.name else None
     if urlparse(args.base_url).hostname not in {"localhost", "127.0.0.1", "::1"}:
         parser.error("This runner uses demo identity headers; only local isolated servers are supported")
-    manifest, all_cases = load_dataset()
+    manifest, all_cases = load_dataset(DATASETS[args.dataset])
     for name, digest in manifest["migration_sha256"].items():
         if sha_text(MIGRATIONS / name) != digest:
             raise ValueError("Migration drift: " + name)
@@ -109,20 +130,13 @@ def main():
             raise ValueError("Server evidence mismatch: " + key)
     try:
         cases = select_cases(all_cases, args.split, args.case_id)
+        if not cases:
+            raise ValueError("Selection is empty; no evaluation will be run")
     except ValueError as exc:
         parser.error(str(exc))
     parent = ROOT / "docs/evaluation-runs"
     parent.mkdir(parents=True, exist_ok=True)
-    previous = []
-    overlap = []
-    for path in parent.glob("*/report.json"):
-        old = json.loads(path.read_text(encoding="utf-8"))
-        equivalent_hashes = {manifest["cases_sha256"], *manifest.get("legacy_cases_sha256", [])}
-        if old["dataset"]["cases_sha256"] in equivalent_hashes:
-            previous.append(path.parent.name)
-            scored_ids = {r["case_id"] for r in old.get("results", []) if r.get("turns")}
-            if scored_ids.intersection(c["case_id"] for c in cases):
-                overlap.append(path.parent.name)
+    previous, overlap = prior_runs(parent, manifest, cases)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     output = parent / run_id
     output.mkdir()
@@ -143,7 +157,8 @@ def main():
 
     def save(results):
         report.update(summary=summarize(cases, results), results=results)
-        report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
+        if policy is not None:
+            report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
         report["repair_evaluation"] = summarize_repair(cases, results)
         turns = [t for r in results for t in r["turns"]]
         evidence = [(t.get("actual") or {}).get("evidence") or {} for t in turns]
@@ -174,7 +189,10 @@ def main():
     report["finished_at"] = datetime.now(timezone.utc).isoformat()
     save(results)
     print(json.dumps({"report": str(output / "report.json"), **report["summary"]}, ensure_ascii=False))
-    return 0 if report["summary"]["status"] == "COMPLETED" else 2
+    complete = report["summary"]["status"] == "COMPLETED"
+    # Legacy stage policies override selected v1 expectations. J1 has no overrides.
+    passed = policy is not None or report["summary"]["passed"] == len(cases)
+    return 0 if complete and passed else 2
 
 
 if __name__ == "__main__":
