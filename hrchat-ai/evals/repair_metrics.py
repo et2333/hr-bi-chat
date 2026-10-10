@@ -7,14 +7,14 @@ def summarize_repair(cases, results):
     covered = [t for t in turns if "repair" in ((t.get("actual") or {}).get("evidence") or {})]
     eligible = [t for t in covered if t["actual"]["evidence"]["repair"].get("eligible")]
     attempted = [t for t in covered if t["actual"]["evidence"]["repair"].get("attempts")]
-    corrected = [t for t in attempted if t["stage_score"]["passed"]]
+    corrected = [t for t in attempted if t.get("stage_score", t).get("passed", False)]
     first_passed = first_failed = first_unknown = final_passed = 0
     by_id = {row["case_id"]: row for row in results}
     for case in cases:
         row = by_id.get(case["case_id"], {})
         current = row.get("turns", [])
         complete = len(current) == len(case["turns"])
-        final_ok = complete and all(t["stage_score"]["passed"] for t in current)
+        final_ok = complete and all(t.get("stage_score", t).get("passed", False) for t in current)
         final_passed += int(final_ok)
         if not complete or any("repair" not in ((t.get("actual") or {}).get("evidence") or {}) for t in current):
             first_unknown += 1
@@ -25,7 +25,7 @@ def summarize_repair(cases, results):
     repairs = [t["actual"]["evidence"]["repair"] for t in covered]
     calls = [c for t in covered for c in t["actual"]["evidence"].get("model_calls", []) if c.get("phase") == "repair"]
     complete = len(turns) == sum(len(c["turns"]) for c in cases)
-    return {"scope": "stage-scored tasks; missing protected evidence remains unknown",
+    return {"scope": "dataset task scores (stage policy when present); missing protected evidence remains unknown",
             "case_count": len(cases), "observed_turns": len(turns), "turns_with_repair_evidence": len(covered),
             "first_task_passed": first_passed, "first_task_failed": first_failed, "first_task_unknown": first_unknown,
             "first_task_success_rate": first_passed / len(cases) if cases and not first_unknown else None,

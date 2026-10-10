@@ -93,7 +93,7 @@ public final class MetricSqlComposer {
                 cond.add(window.sqlPredicate(dateColumn(p.table())));
             }
             return "SELECT dt, emp_key, org_key FROM " + p.table()
-                    + " WHERE " + String.join(" AND ", cond) + " ORDER BY dt DESC LIMIT 50";
+                    + " WHERE " + String.join(" AND ", cond) + " ORDER BY dt DESC, emp_key, org_key LIMIT 50";
         }
         throw new BizException(ErrorCode.PARAM_INVALID, "该指标不支持明细");
     }

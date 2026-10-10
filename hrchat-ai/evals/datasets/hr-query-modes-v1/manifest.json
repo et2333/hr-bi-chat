@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "dataset_version": "hr-query-modes-v1",
+  "data_version": "h2-v6",
+  "as_of_date": "2026-09-28",
+  "timezone": "Asia/Shanghai",
+  "hash_scheme": "sha256-lf-text-v1",
+  "cases_sha256": "3350319e53a92c76192e16b44ace0898f20a276967201eab6a2cb028a95e19a7",
+  "migration_sha256": {
+    "V1__baseline.sql": "bbcee78c03ac3d36804f8f384ad117236d46721ad354b5ad1bb39a8418a1cc44",
+    "V2__demo_seed.sql": "4d7d01c80b9e8fc11e9bc963b42d50a46eb66e105b0b0f6bd6d93fae365c1e40",
+    "V3__role_function_permissions.sql": "1c511519d5fe66f91a0996d6b16d04c1fd9abd589033537b9b548ca709cf5353",
+    "V4__demo_reports.sql": "2dff36075ae87c3add4cb005b5b2f8fae05067607bd613a92d25d93c8f97736b",
+    "V5__metric_card_drop_static_value.sql": "0e2f8a99409556d387affedfeb82e6a539a0a15f5fdd92e169e912e96146d907",
+    "V6__headcount_as_of_version.sql": "31266e4a498befc4b2266b6c8c02c89cd9a8dc5081b3947ec05084710926b2f3"
+  },
+  "case_count": 18,
+  "turn_count": 18,
+  "expected_source": "literal seed records; independent row/group/calendar oracle; no production SQL imports",
+  "scope": "J1 query mode result contracts; explicit user date/org controls; separate from hr-query-v1",
+  "freeze_policy": "No expectation changes after first scored run; all later runs are regression",
+  "limitations": [
+    "Not broad language generalization: date/org controls are supplied explicitly",
+    "Fixture drafts test orchestration and execution, not LLM understanding",
+    "Masked display rows can collide; exact identity and >50 truncation use separate Java tests",
+    "Event trends omit empty months; no invented zero fill",
+    "No browser rendering or production load measurement"
+  ]
+}

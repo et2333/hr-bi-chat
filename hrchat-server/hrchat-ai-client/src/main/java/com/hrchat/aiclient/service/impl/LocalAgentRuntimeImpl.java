@@ -1160,7 +1160,7 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             List<Map<String, Object>> rows = new ArrayList<>(result.rows());
             String tip = rows.isEmpty()
                     ? "「" + metric.name() + "」暂无明细行。"
-                    : "「" + metric.name() + "」明细共 " + rows.size() + " 行（最多展示 50 行）。";
+                    : "「" + metric.name() + "」明细本次返回 " + rows.size() + " 行（最多展示 50 行，不代表全部匹配记录）。";
             events.add(delta(SseEvents.MESSAGE_DELTA, Map.of("delta", tip, "phase", "SUMMARIZING")));
 
             AnswerPayload payload = new AnswerPayload(

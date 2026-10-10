@@ -40,6 +40,17 @@ class JavaApi:
                                   {"answers": [{"questionId": question_id, "optionIds": [option_id]}]})
         return self.read_turn(status, raw, identity, started)
 
+    def saved_pages(self, identity, answer):
+        """J1: pagination covers the saved (at most 50-row) result, not the database."""
+        rows = (answer.get("table") or {}).get("rows") or []
+        size = 3
+        pages = []
+        for page in (1, 2, max(3, (len(rows) + size - 1) // size + 1)):
+            status, raw = self.request(f'/api/v1/chat/asks/{answer["askId"]}/table?page={page}&size={size}', identity)
+            pages.append({"page": page, "size": size, "http_status": status,
+                          "data": json.loads(raw).get("data") if status == 200 else None})
+        return pages
+
     def read_turn(self, status, raw, identity, started):
         events = []
         for block in raw.replace("\r\n", "\n").split("\n\n"):

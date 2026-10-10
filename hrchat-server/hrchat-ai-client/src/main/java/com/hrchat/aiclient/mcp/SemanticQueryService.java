@@ -170,7 +170,7 @@ public class SemanticQueryService {
         }
         AuthorizedQuery authorized = sqlRewriteService.authorize(sql, effectiveUser);
         QueryResult raw = queryExecService.executeReadonly(authorized);
-        Map<String, Object> result = toMaskedResult(user, details, raw, limit);
+        Map<String, Object> result = toMaskedResult(user, details, raw, limit, queryMode);
         result.put("query_mode", queryMode);
         if (planEvidence != null) {
             result.put("query_plan", planEvidence.get("validated_plan"));
@@ -276,12 +276,12 @@ public class SemanticQueryService {
     }
 
     private Map<String, Object> toMaskedResult(UserContext user, List<MetricDetail> metrics,
-                                               QueryResult raw, int limit) {
+                                               QueryResult raw, int limit, String queryMode) {
         Set<String> metricCodes = metrics.stream().map(MetricDetail::code).collect(Collectors.toSet());
         List<Map<String, Object>> columns = new ArrayList<>();
         for (QueryResult.ColumnMeta col : raw.columns()) {
             // 指标聚合列是 KPI 结果，不是 PII 字段；未知 fieldCode 默认脱敏会导致 Python 无法数值化
-            int policy = fieldPolicyForColumn(user, col.key(), metricCodes);
+            int policy = fieldPolicyForColumn(user, col.key(), metricCodes, queryMode);
             boolean masked = policy != 4;
             Map<String, Object> c = new LinkedHashMap<>();
             c.put("key", col.key());
@@ -300,7 +300,7 @@ public class SemanticQueryService {
             for (Map<String, Object> col : columns) {
                 String key = String.valueOf(col.get("key"));
                 Object value = row.get(key);
-                int policy = fieldPolicyForColumn(user, key, metricCodes);
+                int policy = fieldPolicyForColumn(user, key, metricCodes, queryMode);
                 if (policy == 1) {
                     values.add(null);
                 } else if (policy == 4 || value == null) {
@@ -327,8 +327,16 @@ public class SemanticQueryService {
         return out;
     }
 
-    private int fieldPolicyForColumn(UserContext user, String columnKey, Set<String> metricCodes) {
+    private int fieldPolicyForColumn(UserContext user, String columnKey, Set<String> metricCodes, String queryMode) {
         if (columnKey != null && metricCodes.contains(columnKey)) {
+            return 4;
+        }
+        // Only the authorized aggregate label is public by default. Explicit
+        // administrator policies still win; this never exposes employee fields.
+        boolean aggregateLabel = ("trend".equals(queryMode) && "period".equals(columnKey))
+                || ("org".equals(queryMode) && "org_name".equals(columnKey));
+        if (aggregateLabel && (user.getFieldPolicyByField() == null
+                || !user.getFieldPolicyByField().containsKey(columnKey))) {
             return 4;
         }
         return authzService.decideFieldPolicy(user, columnKey);

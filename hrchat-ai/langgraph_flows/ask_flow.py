@@ -123,6 +123,8 @@ def _org_compare_sentence(meta: MetricView, table: Any, unit: str) -> str:
         return f"「{meta.name}」暂无组织分布数据。"
     code = meta.code
     parsed: list[tuple[str, float]] = []
+    if any(r.get(code) is None for r in rows):
+        return f"「{meta.name}」部分组织数值缺失，暂不计算合计或最高最低。"
     for r in rows:
         name = r.get("org_name") or r.get("org")
         raw = r.get(code) if code else None
@@ -180,7 +182,7 @@ def _build_payload(state: dict[str, Any]) -> dict[str, Any]:
     if mode == "detail":
         conclusion = {
             "type": "TEXT",
-            "value": f"「{meta.name}」明细共 {state.get('row_count') or 0} 行。",
+            "value": f"「{meta.name}」明细本次返回 {state.get('row_count') or 0} 行（最多展示 50 行，不代表全部匹配记录）。",
             "unit": None,
             "compare": None,
         }

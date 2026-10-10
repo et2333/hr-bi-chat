@@ -10,7 +10,7 @@ import time
 import urllib.request
 
 from adapters.local_env import load_local_model_env
-from evals.dataset import load_dataset, select_cases, sha
+from evals.dataset import DATASET, DATASETS, MODE_DATASET, load_dataset, select_cases, sha
 from evals.reference import ROOT
 from evals.s5_compare import source_fingerprint
 
@@ -33,6 +33,9 @@ def wait_for(url, process):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--split", choices=["dev", "frozen", "all"], default="dev")
+    parser.add_argument("--dataset", choices=sorted(DATASETS), default=DATASET.name)
+    parser.add_argument("--fixture-cases", action="store_true",
+                        help="J1 scripted planner over the selected mode cases; zero external model calls")
     parser.add_argument("--stage", choices=["s2", "s3", "s4"], default="s3")
     parser.add_argument("--runtime", choices=["remote", "local"], default="remote")
     parser.add_argument("--memory", choices=["on", "off"], default="on", help="Evaluation-only history ablation")
@@ -52,6 +55,13 @@ def main():
     parser.add_argument("--planner-variant", choices=["baseline", "contract-notes-v1"], default="baseline",
                         help="Prompt experiment; only used with --planner-diagnostics")
     args = parser.parse_args()
+    if args.fixture_cases and (args.dataset != MODE_DATASET.name or args.runtime != "remote"
+            or args.fixture_smoke or args.memory_smoke or args.repair_smoke or args.repair_real_smoke
+            or args.planner_diagnostics or args.model or args.memory != "on" or args.repair == "on"):
+        parser.error("Fixture cases require remote hr-query-modes-v1 with memory on; no model/repair/smoke options")
+    if args.dataset == MODE_DATASET.name and (args.runtime != "remote" or args.fixture_smoke
+            or args.memory_smoke or args.repair_smoke or args.repair_real_smoke):
+        parser.error("Mode dataset requires remote execution evidence; use --fixture-cases or real model")
     if args.runtime == "local" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
                                    or args.repair_real_smoke or args.planner_diagnostics or args.model
                                    or args.memory == "off" or args.repair == "on"):
@@ -59,7 +69,7 @@ def main():
     if args.memory == "off" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
                                 or args.repair_real_smoke or args.planner_diagnostics):
         parser.error("Memory ablation uses natural cases only")
-    real_model = args.runtime == "remote" and not args.fixture_smoke
+    real_model = args.runtime == "remote" and not args.fixture_smoke and not args.fixture_cases
     if args.repair_real_smoke and (args.fixture_smoke or args.repair_smoke or args.memory_smoke or args.case_id
                                  or args.planner_diagnostics or args.stage != "s4" or args.repair == "off"):
         parser.error("Real repair smoke requires --stage s4 with repair enabled, without other smoke/selection options")
@@ -72,7 +82,9 @@ def main():
     if args.planner_variant != "baseline" and not args.planner_diagnostics:
         parser.error("Prompt variants require --planner-diagnostics")
     try:
-        selected = select_cases(load_dataset()[1], args.split, args.case_id)
+        selected = select_cases(load_dataset(DATASETS[args.dataset])[1], args.split, args.case_id)
+        if not selected:
+            raise ValueError("Selection is empty; no services will be started")
     except ValueError as exc:
         parser.error(str(exc))
     if args.planner_diagnostics and sum(len(c["turns"]) for c in selected) > 8:
@@ -94,9 +106,13 @@ def main():
                HRCHAT_MCP_SERVICE_TOKEN="isolated-s2-service-token", LLM_PROFILE="openai",
                HRCHAT_DEMO_NOW="2026-09-28", PYTHONIOENCODING="utf-8")
     env["HRCHAT_QUERY_REPAIR_ENABLED"] = "1" if args.runtime == "remote" and (args.repair == "on" or args.repair is None and args.stage == "s4") else "0"
+    if args.fixture_cases:
+        env["HRCHAT_QUERY_REPAIR_ENABLED"] = "0"
     if args.model:
         env["OPENAI_MODEL"] = args.model
     module = "evals.fixture_gateway:app" if args.fixture_smoke else "agent_gateway.app:app"
+    if args.fixture_cases:
+        module = "evals.mode_fixture_gateway:app"
     if args.memory == "off":
         module = "evals.memory_ablation_gateway:app"
     if args.fixture_smoke and args.memory_smoke:
@@ -132,7 +148,7 @@ def main():
         evidence = {"runtime": args.runtime, "as_of_date": "2026-09-28", "data_version": "h2-v6",
                     "source_sha256": source_fingerprint(),
                     "timezone": "Asia/Shanghai", "query_backend": "java_local" if args.runtime == "local" else "java_mcp", "jar_sha256": sha(jar),
-                    "model_kind": "rule_based" if args.runtime == "local" else "injected_first_real_repair" if args.repair_real_smoke else "fixture" if args.fixture_smoke else "real",
+                    "model_kind": "rule_based" if args.runtime == "local" else "injected_first_real_repair" if args.repair_real_smoke else "fixture" if args.fixture_smoke or args.fixture_cases else "real",
                     "planner_diagnostics": args.planner_diagnostics,
                     "planner_variant": args.planner_variant,
                     "requested_model": env.get("OPENAI_MODEL") if real_model else None,
@@ -189,7 +205,8 @@ def main():
         pointer_args = ["--report-pointer", args.report_pointer] if args.report_pointer else []
         return subprocess.run([sys.executable, "-m", "evals.run", "--base-url", java_url,
             "--runtime", args.runtime, "--model-kind", evidence["model_kind"], "--split", args.split,
-            "--timeout", "100", "--stage", args.stage, "--server-evidence", str(path), *case_args, *pointer_args], cwd=ROOT / "hrchat-ai").returncode
+            "--timeout", "100", "--stage", args.stage, "--dataset", args.dataset,
+            "--server-evidence", str(path), *case_args, *pointer_args], cwd=ROOT / "hrchat-ai").returncode
     finally:
         for proc in reversed(procs):
             proc.terminate()
