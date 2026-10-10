@@ -28,6 +28,14 @@ beforeEach(() => {
 })
 
 describe('AttributionPanel', () => {
+  it('natural-language preparation opens confirmation without invoking paid analysis', async () => {
+    const wrapper = mount(AttributionPanel, { props: { sourceAskId: 'ask1', autoOpen: true }, global: { plugins: [Antd] } })
+    await flushPromises()
+    expect(api.getAnalysisContext).toHaveBeenCalledWith('ask1')
+    expect(wrapper.find('form').exists()).toBe(true)
+    expect(api.startAnalysis).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('fetches scope on open, shows both periods, and only starts AI after explicit confirmation', async () => {
     const wrapper = render()
     expect(api.startAnalysis).not.toHaveBeenCalled()

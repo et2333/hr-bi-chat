@@ -96,7 +96,7 @@
       </div>
 
       <AttributionPanel
-        v-if="canAnalyze && (payload.analysisPreparation || (payload.askId && payload.caliber?.metricCode === 'leave_count' && payload.caliber?.queryMode !== 'trend' && payload.caliber?.queryMode !== 'org' && payload.caliber?.queryMode !== 'detail'))"
+        v-if="canAnalyze && (payload.analysisPreparation || (payload.askId && payload.caliber?.metricCode === 'leave_count' && ['scalar', '汇总'].includes(payload.caliber?.queryMode ?? '')))"
         :key="payload.askId"
         :source-ask-id="payload.analysisPreparation?.sourceAskId ?? payload.askId"
         :auto-open="!!payload.analysisPreparation"

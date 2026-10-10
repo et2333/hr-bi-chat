@@ -1,0 +1,12 @@
+{
+  "version": "manual-feedback-v1",
+  "source": "2026-10-10 09:58 user feedback, Asia/Shanghai",
+  "limitation": "Original clarification choices were not recorded. These are regression expectations, not a reconstructed transcript or model accuracy benchmark.",
+  "cases": [
+    {"question": "按组织对比平均薪酬", "expected": "metric_unavailable"},
+    {"question": "薪酬对比", "expected": "metric_unavailable"},
+    {"question": "薪资对比", "expected": "metric_unavailable"},
+    {"question": "各部门", "expected": "preserve_org_mode_or_clarify", "context": "previous supported scalar headcount query"},
+    {"question": "上月？", "expected": "preserve_metric_and_org", "context": "previous supported headcount query"}
+  ]
+}

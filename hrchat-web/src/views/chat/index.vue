@@ -49,7 +49,7 @@
               <summary>{{ t.hint || '查看处理阶段' }}</summary>
               <p v-for="stage in t.progress" :key="stage.stage">{{ stage.message }} · {{ stage.status === 'started' ? '处理中' : stage.status === 'ok' ? '完成' : '已结束' }}<span v-if="stage.elapsed_ms != null">（{{ stage.elapsed_ms }} ms）</span></p>
             </details>
-            <AnswerCard
+            <AnswerCard v-if="!historyClosed(t)"
               :state="t.state"
               :payload="t.payload"
               :clarify="t.clarify"
@@ -324,13 +324,18 @@ async function send(question?: string) {
   }
 
   const stream = chatApi.askStream(sessionId, { question: q }, handleFrame)
-  await stream.done
-  const turn = chat.turns.find((t) => t.id === turnId)
-  if (turn) await refreshInteractionHistory(turn)
-  if (turn && turn.state === 'loading') {
-    chat.updateTurn(turnId, { state: 'failed', errorMessage: '未收到有效响应' })
+  try {
+    await stream.done
+    const turn = chat.turns.find((t) => t.id === turnId)
+    if (turn && ['loading', 'streaming'].includes(turn.state) && !turn.payload) {
+      chat.updateTurn(turnId, { state: 'failed', errorMessage: '响应中断，请重新提问', hint: '' })
+    }
+  } catch {
+    chat.updateTurn(turnId, { state: 'failed', errorMessage: '连接中断，请重新提问', hint: '' })
+  } finally {
+    chat.asking = false
+    await Promise.all(chat.turns.filter(t => t.role === 'assistant' && (t.id === turnId || t.clarify)).map(t => refreshInteractionHistory(t)))
   }
-  chat.asking = false
   scrollToBottom()
 }
 
@@ -371,6 +376,7 @@ function tryFinalize(turnId: string) {
 }
 
 function handleError(turnId: string, payload: Record<string, unknown>) {
+  chat.updateTurn(turnId, { hint: '' })
   const code = String(payload.code ?? '')
   if (code.includes('2003')) {
     chat.updateTurn(turnId, { state: 'forbidden' })
@@ -633,6 +639,11 @@ async function refreshInteractionHistory(t: ChatTurn, originalAskId?: string) {
     const result = await chatApi.getInteractionHistory(askId)
     chat.updateTurn(t.id, { interactionHistory: result.data as InteractionEntry[] })
   } catch { /* Keep the current history on transient errors; never invent a choice. */ }
+}
+
+function historyClosed(t: ChatTurn) {
+  return t.state === 'clarifying' && t.interactionHistory?.some(e => e.kind === 'outcome'
+    && ['continued', 'expired'].includes(e.status ?? ''))
 }
 
 // ---------------- 辅助操作 ----------------

@@ -210,6 +210,8 @@ def _runtime_view(runtime: dict[str, Any], tenant_no: Optional[str]) -> dict[str
         "base_url": runtime.get("base_url"),
         "tenant_no": tenant_no or "",
         "config_version": runtime.get("config_version"),
+        "query_backend": os.getenv("QUERY_BACKEND", "java_mcp"),
+        "rag_mode": os.getenv("HRCHAT_RAG_MODE", "off"),
     }
 
 
@@ -575,7 +577,10 @@ async def _with_heartbeat(
                 except StopAsyncIteration:
                     return
                 frame = framer.frame(evt["event"], evt["payload"])
-                buffer.append(framer.last_seq, evt["event"], evt["payload"])
+                # Internal Java envelope contains diagnostics and must never be
+                # replayed through the public SSE history.
+                if evt["event"] != "TERMINAL":
+                    buffer.append(framer.last_seq, evt["event"], evt["payload"])
                 yield frame
                 next_evt = asyncio.create_task(iterator.__anext__())
             else:

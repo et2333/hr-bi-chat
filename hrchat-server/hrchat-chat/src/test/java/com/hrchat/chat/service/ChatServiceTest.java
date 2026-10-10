@@ -22,6 +22,7 @@ import com.hrchat.chat.mapper.ChtFeedbackMapper;
 import com.hrchat.chat.mapper.ChtSessionMapper;
 import com.hrchat.chat.mapper.ChtTurnMapper;
 import com.hrchat.chat.store.ChatAskStore;
+import com.hrchat.chat.analysis.AttributionService;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.common.error.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -132,6 +133,57 @@ class ChatServiceTest {
                         new ClarifyQuestion.Option("leave_count", "离职人数")), false));
         return new AgentResult(askId, List.of(new SseEvent(SseEvents.INTERRUPT, Map.of("interrupt_type", "CLARIFY"))),
                 null, questions, null, SseEvents.INTENT_QUERY, false, 50L);
+    }
+
+    @Test
+    void repeatedClarificationRetainsChoicesAndStaysPendingUntilCompleted() {
+        when(sessionMapper.selectById(1L)).thenReturn(session(1L, 1L));
+        ChtTurn stored = new ChtTurn();
+        stored.setId(10L);
+        when(turnMapper.selectById(10L)).thenReturn(stored);
+        doAnswer(inv -> { inv.getArgument(0, ChtTurn.class).setId(10L); return 1; }).when(turnMapper).insert(any());
+        ChtAnswer answer = new ChtAnswer();
+        when(answerMapper.selectOne(any())).thenReturn(answer);
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(clarifyingResult("ask_history"));
+        chatService.ask(hr01, 1L, new AskRequest("查人数", "SYNC", null), null);
+        when(agentRuntime.clarify(anyString(), anyString(), any(), any(), any()))
+                .thenReturn(clarifyingResult("ask_history"), completedResult("ask_history"));
+        ClarifyAnswerRequest selection = new ClarifyAnswerRequest(List.of(
+                new ClarifyAnswerRequest.Answer("ask_history-q1", List.of("leave_count"))));
+        chatService.clarify(hr01, 1L, "ask_history", selection);
+        assertEquals(1, answer.getAnswerState(), "second clarification must remain pending");
+        chatService.clarify(hr01, 1L, "ask_history", selection);
+        assertEquals(3, answer.getAnswerState());
+        List<Map<String, Object>> history = chatService.getInteractionHistory(hr01, "ask_history");
+        assertEquals(2, history.stream().filter(e -> "selection".equals(e.get("kind"))).count());
+        assertTrue(history.stream().anyMatch(e -> "离职人数".equals(e.get("selected"))));
+        assertEquals("completed", history.get(history.size() - 1).get("status"));
+        assertThrows(BizException.class, () -> chatService.clarify(hr01, 1L, "ask_history", selection));
+    }
+
+    @Test
+    void analysisPreparationUsesOwnedSessionSourceAndRechecksAuthorization() throws Exception {
+        when(sessionMapper.selectById(1L)).thenReturn(session(1L, 1L));
+        var attribution = org.mockito.Mockito.mock(AttributionService.class);
+        var field = ChatService.class.getDeclaredField("attributionService");
+        field.setAccessible(true);
+        field.set(chatService, attribution);
+        for (var source : List.of(
+                new ChatAskStore.AskRecord("own", 1L, 1L, "t01", 10L, "离职人数", "QUERY", "COMPLETED", null, completedResult("own").payload(), null, null),
+                new ChatAskStore.AskRecord("other-session", 2L, 1L, "t01", 99L, "离职人数", "QUERY", "COMPLETED", null, null, null, null),
+                new ChatAskStore.AskRecord("other-tenant", 1L, 1L, "t02", 100L, "离职人数", "QUERY", "COMPLETED", null, null, null, null))) askStore.put(source);
+        when(attribution.context(hr01, "own")).thenReturn(Map.of("metricCode", "leave_count"));
+        when(agentRuntime.ask(any(), any(), any())).thenReturn(completedResult("prepare")
+                .withEvidence(Map.of("analysis_request", Map.of("action", "prepare_analysis"))));
+        var ready = chatService.ask(hr01, 1L, new AskRequest("分析变化", "SYNC", null), null);
+        assertEquals("own", ready.payload().analysisPreparation().get("sourceAskId"));
+        verify(attribution).context(hr01, "own");
+        org.mockito.Mockito.verifyNoMoreInteractions(attribution); // context only, no start
+        askStore.put(new ChatAskStore.AskRecord("prepare", 1L, 1L, "t01", 11L, "分析变化", "ANALYSIS", "COMPLETED", null, null, null, null));
+        when(attribution.context(hr01, "own")).thenThrow(new BizException(ErrorCode.FUNC_FORBIDDEN));
+        var rejected = chatService.ask(hr01, 1L, new AskRequest("分析变化", "SYNC", null), null);
+        assertEquals(null, rejected.payload());
+        assertTrue(rejected.sseBody().contains("ERROR"));
     }
 
     // ---------------- 用例 1：STREAM → SSE 帧化（HEARTBEAT seq=-1 + ANSWER_DONE） ----------------

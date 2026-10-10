@@ -8,7 +8,8 @@ from dotenv import dotenv_values
 
 
 LOCAL_ENV_FILE = Path(__file__).resolve().parents[1] / ".env.local"
-MODEL_ENV_KEYS = ("OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_API_KEY", "LLM_PROFILE", "HRCHAT_QUERY_REPAIR_ENABLED")
+MODEL_ENV_KEYS = ("OPENAI_BASE_URL", "OPENAI_MODEL", "OPENAI_API_KEY", "LLM_PROFILE", "HRCHAT_QUERY_REPAIR_ENABLED",
+                  "HRCHAT_RAG_MODE", "HRCHAT_EMBEDDING_DIR", "HRCHAT_MODEL_PRICES")
 
 
 def load_local_model_env(*, override: bool = True) -> bool:

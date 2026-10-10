@@ -20,6 +20,7 @@ from langgraph_flows.demo_data import Window, resolve_window
 from langgraph_flows.query_memory import (ContextQueryDraft, memory_messages, compile_contextual,
     context_candidate, selection_draft, task_action, PERIOD_OPTIONS, MEMORY_PROMPT_VERSION)
 from langgraph_flows.query_repair import REPAIR_VERSION, repair_contract, repair_messages, check_repair
+from langgraph_flows.time_intent import has_time_cue
 
 
 MESSAGES = {
@@ -31,10 +32,17 @@ MESSAGES = {
 }
 
 
-def guard_known_capabilities(question, allow_analysis=False):
+def guard_known_capabilities(question, allow_analysis=False, catalog=None):
     """Known unsupported requirements take priority over asking for missing slots."""
     if "主动离职" in question:
         raise PlanRejected("metric_unavailable", MESSAGES["metric_unavailable"])
+    if catalog is not None:
+        # Observed manual failures: never substitute an available count for a
+        # salary/cost/rate metric absent from the current authoritative catalog.
+        for family in (r"薪资|薪酬|工资|薪水", r"人力成本", r"离职率"):
+            if re.search(family, question) and not any(re.search(family,
+                    " ".join([m["name"], *m.get("aliases", [])])) and m.get("allowed_modes") for m in catalog["metrics"]):
+                raise PlanRejected("metric_unavailable", MESSAGES["metric_unavailable"])
     if re.search(r"预测|性别|职级|司龄|年龄|学历|岗位|男性|女性|男员工|女员工|同比|去年同期", question) or (
             not allow_analysis and re.search(r"为什么|原因|归因", question)):
         raise PlanRejected("unsupported_capability", MESSAGES["unsupported_capability"])
@@ -44,7 +52,7 @@ def guard_request(plan, question, metadata, context, selected):
     """Deterministic known-failure checks complement, not replace, model understanding."""
     if plan.decision != "execute":
         return
-    guard_known_capabilities(question)
+    guard_known_capabilities(question, catalog=metadata)
     residual = question
     matches = set()
     names = sorted([(name, o["org_id"]) for o in metadata["organizations"]
@@ -242,6 +250,10 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         s["evidence"]["catalog"] = {k: s["catalog"][k] for k in
             ("as_of_date", "timezone", "metric_count", "org_count", "complete", "capability_version")}
         s["evidence"]["metric_versions"] = {m["code"]: m["version"] for m in s["catalog"]["metrics"]}
+        from adapters.query_retrieval import retrieve as retrieve_context
+        retrieved, retrieval_evidence = await asyncio.to_thread(retrieve_context, question, s["catalog"])
+        s["catalog"]["retrieved_context"] = retrieved
+        s["evidence"]["retrieval"] = retrieval_evidence
 
     async def plan_query(s, trace):
         nonlocal question
@@ -258,15 +270,21 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                 s["events"].append({"event": "ANSWER_DONE", "payload": s["answer_payload"]})
                 return
             else:
-                guard_known_capabilities(question, allow_analysis=True)
+                guard_known_capabilities(question, allow_analysis=True, catalog=s["catalog"])
                 result = await call_model(s, trace, messages=memory_messages(question, s["catalog"], context_override, query_context))
                 draft = ContextQueryDraft.model_validate_json(result.text)
             s["evidence"]["model_query_draft"] = draft.model_dump(exclude_none=True)
             if draft.action == "prepare_analysis":
+                # Even when the model omits a named, non-visible organization,
+                # do not silently analyze the previous organization's answer.
+                org_text = re.sub(r"哪个部门|哪些部门|各部门|哪个组织|哪些组织|各组织|部门贡献", "", question)
                 if (not re.search(r"分析|变化|变动|为什么|原因|归因", question) or draft.metric_codes
                         or draft.organization or draft.time_expression or draft.query_mode or draft.clear_slots
                         or draft.decision != "execute" or draft.unsupported_reason or context_override
-                        or query_context.get("pending")):
+                        or query_context.get("pending") or has_time_cue(question)
+                        or any(o["name"] in question for o in s["catalog"]["organizations"])
+                        or re.search(r"[\u4e00-\u9fff]{2,}(?:部|中心|团队|事业群|公司)", org_text)
+                        or re.search(r"薪资|薪酬|人力成本|入职|在职|离职率|主动离职|明细|预测|同比", question)):
                     raise PlanRejected("analysis_source_required", "请先完成要分析的离职人数单期查询，再确认两期进行变化分析。", "clarify")
                 s["evidence"]["analysis_request"] = {"action": "prepare_analysis", "source": "latest_completed_query"}
                 s["answer_payload"] = {"ask_id": ask_id, "answer_id": "ans_" + ask_id,
@@ -282,7 +300,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             return
         if uses_draft:
             s["evidence"]["capability_guard_version"] = "known-capability-guard-v1"
-            guard_known_capabilities(question)
+            guard_known_capabilities(question, catalog=s["catalog"])
             s["evidence"]["followup_guard_version"] = FOLLOWUP_GUARD_VERSION
             if is_slot_only_question(question, s["catalog"], context_override, forced_metric_code):
                 raise PlanRejected("missing_slots", "请补充希望查询的指标；入职或离职人数还需提供统计期间。", "clarify")
