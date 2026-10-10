@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -20,6 +21,34 @@ class HeadcountAsOfIntegrationTest {
 
     @Autowired JdbcTemplate jdbc;
     @Autowired SemanticMetaService semanticMetaService;
+    @Autowired com.hrchat.aiclient.mcp.SemanticQueryService semanticQuery;
+    @Autowired com.hrchat.authz.service.UserContextService users;
+    @Autowired com.hrchat.authz.mcp.ToolContextTokenService tokens;
+    @Autowired com.hrchat.authz.mcp.McpController mcp;
+    @org.springframework.beans.factory.annotation.Value("${HRCHAT_MCP_SERVICE_TOKEN:${hrchat.mcp.service-token:local-dev-mcp-service-token}}")
+    String serviceToken;
+
+    @Test
+    void sameNormalizedPlanHasSameLocalAndAuthenticatedMcpExecution() {
+        var user = users.resolve("hr01", "t01", null);
+        for (String mode : List.of("scalar", "org", "trend")) {
+            Map<String, Object> plan = Map.of("schema_version", "1", "decision", "execute", "reason", "ready",
+                    "metric_codes", List.of("headcount"), "query_mode", mode,
+                    "org_scope", Map.of("org_id", "2", "include_children", true),
+                    "time_range", Map.of("start", "2026-08-01", "end", "2026-09-01", "time_type", "as_of",
+                            "timezone", "Asia/Shanghai", "grain", "trend".equals(mode) ? "MONTH" : "NONE"));
+            Map<String, Object> arguments = Map.of("query_plan", plan, "metric_version", 2);
+            var local = semanticQuery.execute(user, arguments, Map.of());
+            String invocation = "parity-" + mode;
+            var remote = mcp.handle(serviceToken, new com.hrchat.api.mcp.McpEnvelope.Request("2.0", invocation,
+                    "tools/call", Map.of("name", "semantic_query", "arguments", arguments, "context",
+                            Map.of("invocation_id", invocation, "tool_context_token", tokens.issue("hr01", "t01", invocation)))));
+            assertEquals(null, remote.error());
+            Map<?, ?> result = (Map<?, ?>) remote.result();
+            for (String field : List.of("rows", "query_plan", "effective_org_ids", "metric_version", "query_mode", "sql"))
+                assertEquals(local.get(field), result.get(field), mode + ": " + field);
+        }
+    }
 
     @Test
     void versionedAsOfHeadcountIncludesLeaverBeforeLeaveDayAndExcludesOnLeaveDay() {

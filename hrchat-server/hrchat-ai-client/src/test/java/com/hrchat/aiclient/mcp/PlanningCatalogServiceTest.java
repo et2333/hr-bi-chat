@@ -100,4 +100,41 @@ class PlanningCatalogServiceTest {
         assertThrows(BizException.class, () -> service.checkRequestedOrg(user, "8"));
         service.checkRequestedOrg(user, "2");
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void ambiguousVisibleHomonymsReturnDistinguishableCandidates() {
+        var semantic = mock(SemanticMetaService.class);
+        var orgs = mock(SecOrgNodeMapper.class);
+        when(semantic.listSynonyms(null, 1, 200)).thenReturn(PageResult.of(List.of(), 0, 1, 200));
+        SecOrgNode rd1 = new SecOrgNode(); rd1.setId(3L); rd1.setOrgName("研发一部"); rd1.setOrgCode("RD1");
+        rd1.setParentId(2L); rd1.setOrgPath("/1/2/3/");
+        SecOrgNode rd2 = new SecOrgNode(); rd2.setId(4L); rd2.setOrgName("研发二部"); rd2.setOrgCode("RD2");
+        rd2.setParentId(2L); rd2.setOrgPath("/1/2/4/");
+        SecOrgNode a = new SecOrgNode(); a.setId(9L); a.setOrgName("研发部"); a.setOrgCode("RD1-DEV");
+        a.setParentId(3L); a.setOrgPath("/1/2/3/9/");
+        SecOrgNode b = new SecOrgNode(); b.setId(10L); b.setOrgName("研发部"); b.setOrgCode("RD2-DEV");
+        b.setParentId(4L); b.setOrgPath("/1/2/4/10/");
+        when(orgs.selectList(any())).thenReturn(List.of(rd1, rd2, a, b));
+        UserContext user = UserContext.builder().tenantId("t01").grantedOrgs(List.of(
+                UserContext.GrantedOrg.builder().subtreeOrgKeys(List.of(3L, 4L, 9L, 10L)).build())).build();
+        var service = new PlanningCatalogService(semantic, LocalDate.of(2026, 9, 28), orgs, "authorized");
+        var result = service.resolveOrganization(user, "研发部").publicResult();
+        assertEquals("AMBIGUOUS", result.get("status"));
+        List<Map<String, Object>> candidates = (List<Map<String, Object>>) result.get("candidates");
+        assertEquals(2, candidates.size());
+        assertTrue(candidates.stream().anyMatch(c -> "9".equals(c.get("org_id"))
+                && String.valueOf(c.get("label")).contains("研发一部")));
+        assertTrue(candidates.stream().anyMatch(c -> "10".equals(c.get("org_id"))
+                && String.valueOf(c.get("label")).contains("研发二部")));
+    }
+
+    @Test
+    void labelsHideUnauthorizedParentsAndTerminateOnCyclicData() {
+        SecOrgNode child = new SecOrgNode(); child.setId(9L); child.setOrgName("研发部"); child.setParentId(3L);
+        SecOrgNode hidden = new SecOrgNode(); hidden.setId(3L); hidden.setOrgName("秘密事业群"); hidden.setParentId(9L);
+        String label = PlanningCatalogService.visiblePathLabel(child, Map.of(9L, child, 3L, hidden), java.util.Set.of(9L));
+        assertFalse(label.contains("秘密事业群"));
+        assertTrue(label.contains("研发部"));
+    }
 }

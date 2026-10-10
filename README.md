@@ -96,6 +96,8 @@ pnpm dev --host 127.0.0.1 --port 5173 --strictPort
 
 记录失败时保留原始问句、澄清选择、实际回答与期望，连续追问按完整会话记录。离线回归与真实模型验收说明见 [评测 README](hrchat-ai/evals/README.md)。
 
+**可选 J2 同名部门演示**：将终端 B 启动命令中的 `--spring.profiles.active=local` 改为 `--spring.profiles.active=local,j2`，重启 Java 后新建会话，输入“研发部离职人数”。应先选择带上级路径和编码的部门，再选择“上月”；答案和历史保留实际采用的部门。两个演示部门没有员工数据，结果为 0，重点验证消歧和条件保留。普通启动不加载这些部门，旧 S1/J1/S6 评测继续使用原组织集合。
+
 
 
 

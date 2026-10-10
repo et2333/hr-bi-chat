@@ -491,10 +491,17 @@ def create_app(
 
         time_presets = {"THIS_MONTH", "LAST_MONTH", "LAST_30D", "LAST_7D"}
         context_override = dict(stored.get("context_override") or {})
-        forced_metric_code = selected
-        if selected in time_presets:
+        pending_question = next((q for q in pending
+                                 if q.get("question_id") == body.answers[0].question_id), {})
+        slot = pending_question.get("slot") or ("time_range" if selected in time_presets else "metric")
+        forced_metric_code = stored.get("metric_code")
+        if slot == "time_range" or selected in time_presets:
             context_override["time_range"] = {"preset": selected}
-            forced_metric_code = stored.get("metric_code")
+        elif slot == "organization":
+            # Re-check happens inside planning via authorized catalog / Java MCP.
+            context_override["org"] = {"org_id": selected, "include_children": True}
+        else:
+            forced_metric_code = selected
 
         result = await run_ask_flow(
             question=stored["question"],
@@ -513,13 +520,17 @@ def create_app(
                               stored.get("tenant_no")).items() if k != "base_url"},
         )
         terminal = _terminal_response(ask_id, result)
-        store.save_ask(ask_id, {
+        extra = {
             **stored,
             "status": terminal["status"],
             "answer_payload": terminal.get("answer_payload"),
             "error": terminal.get("error"),
             "questions": result.get("clarify_questions", []),
-        })
+            "context_override": context_override or stored.get("context_override"),
+        }
+        if result.get("metric_code"):
+            extra["metric_code"] = result["metric_code"]
+        store.save_ask(ask_id, extra)
         return terminal
 
     @app.get("/v1/chat/asks/{ask_id}")
