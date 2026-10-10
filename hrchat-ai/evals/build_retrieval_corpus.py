@@ -17,6 +17,26 @@ RESERVED_CODES = EXECUTABLE_CODES + (
     "turnover_rate", "payroll_total", "avg_salary", "attendance_rate", "perf_avg",
 )
 MODES = ("scalar", "org", "trend", "detail")
+
+
+def compile_example(row):
+    from langgraph_flows.query_memory import ContextQueryDraft, compile_contextual
+    from langgraph_flows.query_plan import PlanRejected
+    catalog = {"as_of_date": "2026-09-28", "timezone": "Asia/Shanghai", "organizations": [], "metrics": [
+        {"code": code, "name": METRIC_TEXT[code][0], "aliases": [], "version": 1,
+         "allowed_modes": list(MODES), "requires_period": code != "headcount",
+         "time_type": "as_of" if code == "headcount" else "period"} for code in EXECUTABLE_CODES]}
+    draft = ContextQueryDraft.model_validate(row['draft'])
+    try:
+        plan, _, _ = compile_contextual(draft, row['question'], catalog, None,
+            {"schema_version": "1", "context_version": 1}, 'corpus-validation')
+        return {"decision": plan.decision, "reason": plan.reason}
+    except PlanRejected as exc:
+        # An accurately extracted but imprecise period must lead to clarification,
+        # never an invented default. All other compilation defects fail validation.
+        if exc.reason == 'unresolved_time' and exc.decision == 'clarify':
+            return {"decision": 'clarify', "reason": exc.reason}
+        raise
 MODE_TEXT = {"scalar": None, "org": "按部门对比", "trend": "趋势", "detail": "明细"}
 METRIC_TEXT = {
     "headcount": ("在职人数", "在岗", "在岗人数"),
@@ -129,55 +149,33 @@ DISTRACTORS = [
 
 
 def example_rows():
+    from datetime import date
+    from langgraph_flows.time_intent import time_mentions
+    surfaces = {
+        'headcount': ['在职人数', '在岗人数', '在岗人员', '在册员工', '员工规模', '员工', '在岗', '人'],
+        'hire_count': ['入职人数', '入职人员', '入职数量', '新入职', '新增员工', '报到人员', '加入公司的员工', '招进来的人数', '新来公司的人数', '入职'],
+        'leave_count': ['离职人数', '离职人员', '人员流失数量', '离职数量', '人员流出', '离开公司的员工', '流失人员', '离职花名册', '人离开公司'],
+    }
+    modes = {'scalar': [], 'org': ['按部门对比', '各部门', '按组织', '哪些部门', '各组织'],
+             'trend': ['趋势', '走势', '按月', '变化'], 'detail': ['明细', '名单', '清单', '花名册', '列表']}
     rows = []
     for (code, mode), questions in MATRIX.items():
-        metric_text = METRIC_TEXT[code][0]
-        mode_text = MODE_TEXT[mode]
-        period = None
-        if mode == "trend":
-            period = "近三月"
-        elif code != "headcount" and mode in ("scalar", "detail", "org"):
-            period = "本月" if "本月" in questions[0] or "近30" not in questions[0] else "近30天"
-            if "近30" in questions[0]:
-                period = "近30天"
-            if "上月" in questions[0]:
-                period = "上月"
         for i, question in enumerate(questions):
-            # Infer period cues from surface form when present.
-            pe = period
-            if "上月" in question:
-                pe = "上月"
-            elif "近30" in question:
-                pe = "近30天"
-            elif "近三月" in question or "近半年" in question or "最近六个月" in question:
-                pe = "近三月" if "三月" in question else ("近半年" if "半年" in question else "近六月")
-            elif "本月" in question:
-                pe = "本月"
-            elif "八月" in question:
-                pe = "八月"
-            elif "今年" in question:
-                pe = "今年"
-            elif code == "headcount" and mode == "scalar":
-                pe = None
-            rows.append({
-                "id": f"ex_{code}_{mode}_{i + 1:02d}",
-                "role": "example_gold",
-                "question": question,
-                "draft": {
-                    "action": "query",
-                    "decision": "execute",
-                    "metric_codes": [code],
-                    "metric_text": metric_text,
-                    "organization": None,
-                    "time_expression": pe,
-                    "query_mode": None if mode == "scalar" else mode,
-                    "mode_text": mode_text,
-                    "clear_slots": [],
-                    "unsupported_reason": None,
-                },
-                "source": "matrix_seed+paraphrase_v1",
-                "reviewed": True,
-            })
+            mentions = time_mentions(question, date(2026, 9, 28))
+            period = mentions[0][0] if mentions else next((v for v in ['近半年', '近期'] if v in question), None)
+            row = {
+                'id': f'ex_{code}_{mode}_{i + 1:02d}', 'role': 'example_gold', 'question': question,
+                'draft': {'action': 'query', 'decision': 'execute', 'metric_codes': [code],
+                    'metric_text': next(v for v in surfaces[code] if v in question),
+                    'organization': None, 'time_expression': period,
+                    'query_mode': None if mode == 'scalar' else mode,
+                    'mode_text': next((v for v in modes[mode] if v in question), None),
+                    'clear_slots': [], 'unsupported_reason': None},
+                'source': 'matrix_seed+paraphrase_v1', 'reviewed': False,
+                'validation': 'context_compiler_v1', 'human_review': 'not_recorded',
+            }
+            row['compiled_outcome'] = compile_example(row)
+            rows.append(row)
     return rows
 
 
@@ -194,7 +192,9 @@ def distractor_rows():
             "allowed_modes": [],
             "executable": False,
             "source": "authored_draft_v1",
-            "reviewed": i <= 12 or i % 5 == 0,  # ≥15% spot-check: first 12 + every 5th
+            "reviewed": False,
+            "human_review": "not_recorded",
+            "validation": "schema_role_and_reserved_codes_v1",
         })
     return rows
 
@@ -254,6 +254,12 @@ def validate(examples, distractors):
             errors.append(f"{row.get('id')}: organization must be null in few-shot corpus")
         if "SELECT" in (draft.get("metric_text") or "").upper():
             errors.append(f"{row.get('id')}: SQL leaked into metric_text")
+        try:
+            actual = compile_example(row)
+            if row.get('compiled_outcome') is not None and row['compiled_outcome'] != actual:
+                errors.append(f"{row.get('id')}: compiled outcome changed")
+        except (ValueError, KeyError, TypeError) as exc:
+            errors.append(f"{row.get('id')}: compiler rejected example ({type(exc).__name__}: {exc})")
 
     for row in distractors:
         code = row.get("code") or ""
@@ -276,10 +282,8 @@ def validate(examples, distractors):
         if row.get("reviewed"):
             reviewed_dist += 1
 
-    if examples and reviewed_ex / len(examples) < 0.8:
-        errors.append(f"example reviewed ratio {reviewed_ex}/{len(examples)} < 80%")
-    if distractors and reviewed_dist / len(distractors) < 0.15:
-        errors.append(f"distractor reviewed ratio {reviewed_dist}/{len(distractors)} < 15%")
+    # A generated boolean cannot establish human review. Quality gates above
+    # execute real validation; separately record manual review when it happens.
 
     # Matrix coverage: each metric×mode at least once.
     covered = {(e["draft"]["metric_codes"][0], e["draft"].get("query_mode") or "scalar") for e in examples
@@ -294,13 +298,14 @@ def validate(examples, distractors):
 def write_manifest(examples, distractors):
     reviewed_dist = sum(1 for d in distractors if d.get("reviewed"))
     manifest = {
-        "corpus_version": "retrieval-corpus-v2",
+        "corpus_version": "retrieval-corpus-v2.1",
         "plan": "R4规模化语义检索数据Mock实施计划",
         "executable_codes": list(EXECUTABLE_CODES),
         "reserved_codes": list(RESERVED_CODES),
         "counts": {
             "examples": len(examples),
             "examples_reviewed": sum(1 for e in examples if e.get("reviewed")),
+            "examples_compiler_checked": sum(1 for e in examples if e.get("compiled_outcome")),
             "distractors": len(distractors),
             "distractors_reviewed": reviewed_dist,
         },
@@ -343,8 +348,7 @@ def main(argv=None):
         if errors:
             print("VALIDATION FAILED:", *errors, sep="\n- ")
             return 1
-        manifest = write_manifest(examples, distractors)
-        print(json.dumps({"ok": True, "counts": manifest["counts"]}, ensure_ascii=False, indent=2))
+        print(json.dumps({"ok": True, "examples": len(examples), "distractors": len(distractors)}, ensure_ascii=False, indent=2))
     return 0
 
 

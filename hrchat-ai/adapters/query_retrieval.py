@@ -20,7 +20,7 @@ import time
 MODEL_ID = "BAAI/bge-small-zh-v1.5"
 MODEL_DIR = Path(__file__).resolve().parents[1] / ".models" / "bge-small-zh-v1.5"
 CORPUS_DIR = Path(__file__).resolve().parent / "retrieval_corpus"
-CORPUS_VERSION = "retrieval-corpus-v2"
+CORPUS_VERSION = "retrieval-corpus-v2.1"
 
 
 def _load_jsonl(path: Path):
@@ -47,18 +47,20 @@ def load_corpus():
     return {"examples": examples, "distractors": distractors, "version": CORPUS_VERSION}
 
 
-def documents(catalog):
+def documents(catalog, *, include_distractors=False):
     """Build per-request docs: live catalog metrics ∪ distractors ∪ matching examples."""
     corpus = load_corpus()
     metrics = {m["code"]: m for m in catalog["metrics"]}
     docs = []
     for m in metrics.values():
         content = {k: m[k] for k in ("code", "name", "aliases", "definition", "version", "allowed_modes", "requires_period")}
-        content["executable"] = True
+        executable = bool(m["allowed_modes"])
+        content["executable"] = executable
+        content["role"] = "executable" if executable else "catalog_visible_unsupported"
         docs.append({"id": "metric:" + m["code"], "kind": "metadata", "code": m["code"],
-                     "version": m["version"], "executable": True,
+                     "version": m["version"], "executable": executable,
                      "text": json.dumps(content, ensure_ascii=False), "content": content})
-    for row in corpus["distractors"]:
+    for row in corpus["distractors"] if include_distractors else []:
         code = row["code"]
         if code in metrics:
             # Never shadow an authorized catalog metric with a distractor.
@@ -159,27 +161,26 @@ def rank(question, docs, mode, embedder=None):
     return [(docs[i], scores[i]) for i in sorted(scores, key=lambda i: (-scores[i], docs[i]["id"]))]
 
 
-def retrieve(question, catalog, *, mode=None, embedder=None):
+def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors=False):
     mode = mode or os.getenv("HRCHAT_RAG_MODE", "off")
     if mode not in {"off", "lexical", "hybrid"}:
         raise ValueError("HRCHAT_RAG_MODE must be off, lexical or hybrid")
     started = time.perf_counter()
-    docs = documents(catalog)
-    executable_metric_count = sum(1 for d in docs if d["kind"] == "metadata" and d.get("executable"))
-    distractor_count = sum(1 for d in docs if d["kind"] == "metadata" and not d.get("executable"))
-    fingerprint = hashlib.sha256(json.dumps(
-        [{"id": d["id"], "code": d["code"], "kind": d["kind"]} for d in docs],
-        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    fingerprint = hashlib.sha256(json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     evidence = {"mode": mode, "corpus_version": CORPUS_VERSION, "catalog_fingerprint": fingerprint,
-                "candidate_count": len(docs),
-                "executable_metric_count": executable_metric_count,
-                "distractor_count": distractor_count,
+                "candidate_count": 0, "executable_metric_count": 0, "distractor_count": 0,
+                "include_distractors": include_distractors,
                 "model": MODEL_ID if mode == "hybrid" else None,
                 "selected": [], "status": "disabled" if mode == "off" else "ok"}
     if mode == "off":
         evidence["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         return {}, evidence
     try:
+        docs = documents(catalog, include_distractors=include_distractors)
+        evidence.update(candidate_count=len(docs),
+            executable_metric_count=sum(d["kind"] == "metadata" and d.get("executable", False) for d in docs),
+            distractor_count=sum(d["content"].get("role") == "retrieval_distractor" for d in docs),
+            corpus_fingerprint=hashlib.sha256(json.dumps(docs, ensure_ascii=False, sort_keys=True).encode()).hexdigest())
         selected = []
         for kind, limit in (("metadata", 2), ("example", 2)):
             selected.extend(rank(question, [d for d in docs if d["kind"] == kind], mode, embedder)[:limit])

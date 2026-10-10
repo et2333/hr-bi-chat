@@ -5,10 +5,10 @@ from pathlib import Path
 import statistics
 import time
 
-from adapters.query_retrieval import MODEL_DIR, retrieve, encoder
+from adapters.query_retrieval import MODEL_DIR, retrieve, encoder, load_corpus
 
-# Separate from authored retrieval examples. This is a development set, not a
-# held-out model benchmark; three metrics cannot demonstrate large-catalog scale.
+# Originally separate from v1 examples; v2.1 includes 13 of these questions.
+# Report overlap explicitly. This is not a held-out model benchmark.
 CASES = [
     ('还留在公司的人有多少', 'headcount', None),
     ('现有员工规模', 'headcount', None),
@@ -43,10 +43,13 @@ def main():
     start = time.perf_counter()
     encoder()
     load_ms = (time.perf_counter() - start) * 1000
+    example_questions = {row['question'].strip() for row in load_corpus()['examples']}
     report = {'purpose': 'development retrieval diagnostic, not end-to-end LLM evaluation',
         'catalog_source': 'synthetic three-metric catalog; live requests use authorized Java catalog',
         'model_manifest': json.loads((MODEL_DIR / 'hrchat-model.json').read_text(encoding='utf-8')),
-        'model_load_ms': round(load_ms, 2), 'llm_calls': 0, 'count': len(CASES), 'modes': {}}
+        'model_load_ms': round(load_ms, 2), 'llm_calls': 0, 'count': len(CASES),
+        'exact_example_overlap_count': sum(q.strip() in example_questions for q, _, _ in CASES),
+        'modes': {}}
     for mode in ['lexical', 'hybrid']:
         rows = []
         for question, metric, query_mode in CASES:
@@ -56,8 +59,9 @@ def main():
             codes = [d['code'] for d in context['metadata']]
             examples = [d['draft'] for d in context['examples']]
             rows.append({'question': question, 'expected_metric': metric, 'expected_mode': query_mode,
+                'exact_example_overlap': question.strip() in example_questions,
                 'metric_hit_at_1': codes[:1] == [metric], 'metric_hit_at_2': metric in codes,
-                'example_hit_at_2': any(d['metric_codes'] == [metric] and d['query_mode'] == query_mode for d in examples),
+                'example_hit_at_2': any(d['metric_codes'] == [metric] and (d.get('query_mode') or 'scalar') == (query_mode or 'scalar') for d in examples),
                 'retrieval': evidence})
         report['modes'][mode] = {'metric_hit_at_1': sum(r['metric_hit_at_1'] for r in rows) / len(rows),
             'metric_hit_at_2': sum(r['metric_hit_at_2'] for r in rows) / len(rows),

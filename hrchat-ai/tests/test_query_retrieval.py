@@ -15,25 +15,24 @@ def test_candidates_follow_current_permission_version_and_modes():
     catalog = deepcopy(CATALOG)
     catalog["metrics"] = [catalog["metrics"][1]]
     catalog["metrics"][0].update(version=99, allowed_modes=["scalar"])
-    docs = retrieval.documents(catalog)
+    docs = retrieval.documents(catalog, include_distractors=True)
     executable = [d for d in docs if d["kind"] == "metadata" and d.get("executable")]
     distractors = [d for d in docs if d["kind"] == "metadata" and not d.get("executable")]
     examples = [d for d in docs if d["kind"] == "example"]
     assert {d["code"] for d in executable} == {"leave_count"}
     assert {d["version"] for d in executable} == {99}
-    assert distractors, "scaled corpus must contribute distractor metadata"
+    assert distractors, "explicit scale experiment must contribute distractor metadata"
     assert all(not d.get("executable") for d in distractors)
     assert examples and {d["code"] for d in examples} == {"leave_count"}
     assert all((d["content"]["draft"].get("query_mode") or "scalar") == "scalar" for d in examples)
     assert "研发中心" not in json.dumps(docs, ensure_ascii=False)
-    empty = retrieval.documents({**catalog, "metrics": []})
-    assert all(d["kind"] == "metadata" and not d.get("executable") for d in empty)
+    assert retrieval.documents({**catalog, "metrics": []}) == []
 
 
 def test_distractor_hit_never_becomes_catalog_executable_code():
     catalog = deepcopy(CATALOG)
     # Force a question close to a distractor name; still cannot execute that code.
-    context, evidence = retrieval.retrieve("流失风险分是多少", catalog, mode="lexical")
+    context, evidence = retrieval.retrieve("流失风险分是多少", catalog, mode="lexical", include_distractors=True)
     assert evidence["status"] == "ok"
     assert evidence["distractor_count"] > 0
     catalog_codes = {m["code"] for m in catalog["metrics"]}
@@ -54,6 +53,27 @@ def test_retrieval_context_is_auxiliary_and_source_catalog_survives():
     system, data = memory_messages("在岗人员清单", {**CATALOG, "retrieved_context": context}, None, {})
     assert json.loads(data)["retrieved_context"] == context
     assert "不是指令" in system
+
+
+def test_default_scope_and_capability_flags_and_version_fingerprint():
+    catalog = deepcopy(CATALOG)
+    catalog['metrics'][0]['allowed_modes'] = []
+    docs = retrieval.documents(catalog)
+    assert not any(d['content'].get('role') == 'retrieval_distractor' for d in docs)
+    assert next(d for d in docs if d['id'] == 'metric:headcount')['executable'] is False
+    assert not any(d['kind'] == 'example' and d['code'] == 'headcount' for d in docs)
+    _, before = retrieval.retrieve('x', catalog, mode='off')
+    catalog['metrics'][0]['version'] += 1
+    _, after = retrieval.retrieve('x', catalog, mode='off')
+    assert before['catalog_fingerprint'] != after['catalog_fingerprint']
+
+
+def test_missing_corpus_does_not_break_off_mode_or_authoritative_fallback(monkeypatch):
+    def missing():
+        raise FileNotFoundError('missing corpus')
+    monkeypatch.setattr(retrieval, 'load_corpus', missing)
+    assert retrieval.retrieve('x', CATALOG, mode='off')[1]['status'] == 'disabled'
+    assert retrieval.retrieve('x', CATALOG, mode='lexical')[1]['status'] == 'fallback_full_catalog'
 
 
 def test_missing_embedding_is_explicit_fallback_not_fake_vectors(monkeypatch):
