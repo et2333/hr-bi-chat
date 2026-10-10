@@ -1,0 +1,32 @@
+{
+  "corpus_version": "retrieval-corpus-v2",
+  "plan": "R4规模化语义检索数据Mock实施计划",
+  "executable_codes": [
+    "headcount",
+    "hire_count",
+    "leave_count"
+  ],
+  "reserved_codes": [
+    "headcount",
+    "hire_count",
+    "leave_count",
+    "turnover_rate",
+    "payroll_total",
+    "avg_salary",
+    "attendance_rate",
+    "perf_avg"
+  ],
+  "counts": {
+    "examples": 36,
+    "examples_reviewed": 36,
+    "distractors": 60,
+    "distractors_reviewed": 22
+  },
+  "notes": [
+    "Distractors never enter Java semantic_query.",
+    "Examples omit organization names and tenant IDs.",
+    "Open HR employee dumps are not used as gold labels."
+  ],
+  "generate": "python -m evals.build_retrieval_corpus --write",
+  "validate": "python -m evals.build_retrieval_corpus --validate"
+}

@@ -1,5 +1,40 @@
 # HR 问数评测基线（S1）
 
+## 本地 RAG与对话体验验收（J3/J4/J5）
+
+2026-10-10：实现本地 `BAAI/bge-small-zh-v1.5`（CPU、512 维）+ BM25/RRF，动态检索当前 Java 可见业务口径及 QueryDraft 开发示例。不是历史 SQL 检索，也不生成自由 SQL；组织/指标权限与最终执行仍由 Java 校验。当前保留完整目录约束，检索只补充相关口径与示例，不宣称减少输入 Token。
+
+**R4（同日续）**：外置语料 `adapters/retrieval_corpus/`（`retrieval-corpus-v2`）= 36 条核验 `example_gold` + 60 条仅检索用 `retrieval_distractor`。可执行指标仍仅为目录中的人数类三条；干扰项不得进入 `semantic_query`。校验：`python -m evals.build_retrieval_corpus --validate`。规模化检索评测：`python -m evals.retrieval_scale`（题集 `datasets/retrieval-scale-v1/`，dev 42 / holdout 20；报告 Hit@K 与 `top1_distractor_rate`，**不是**问数准确率）。计划见 [R4](../../docs/development-plans/R4规模化语义检索数据Mock实施计划.md)。
+
+首次在 `hrchat-ai` 安装 `.[dev,retrieval]` 并执行 `python -m adapters.prepare_embedding`；模型写入被 Git 忽略的 `.models/`。正常请求仅本地加载；缺失/故障在 evidence 中标记 `fallback_full_catalog`，不伪造向量。demo 入口默认 hybrid 且提前检查模型。模型来源：[BGE 官方模型卡](https://huggingface.co/BAAI/bge-small-zh-v1.5)，本轮 revision `7999e1d3359715c523056ef9478215996d62a620`。
+
+在 `hrchat-ai` 执行下列单行命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.retrieval
+.\.venv\Scripts\python.exe -m evals.retrieval_scale
+.\.venv\Scripts\python.exe -m evals.conversation_smoke --browser
+```
+
+第三条需先构建 Java JAR、安装前端依赖和 Playwright Chromium；使用隔离端口 18106/18107 和浏览器 5199，脚本 LLM + 真实 H2/Java/Python/本地 embedding，**零付费模型调用**。不用于证明自然语言理解准确率。
+
+首轮小目录检索报告：`docs/evaluation-runs/retrieval-20261010T051258546280Z/report.json`。18 条独立编写的开发问句、三指标模拟目录；不是冻结集，不代表大目录或生产效果。R4 规模化报告写入 `docs/evaluation-runs/retrieval-scale-*`（gitignore）。
+
+| 检索方案（小目录 18 题） | 指标首位命中 | 指标前两位命中 | 指标与模式匹配示例前两位命中 | 单题中位耗时 |
+|---|---:|---:|---:|---:|
+| BM25 | 14/18 | 17/18 | 15/18 | 0.18 ms |
+| BGE + BM25/RRF | 16/18 | 17/18 | 16/18 | 7.90 ms |
+
+向量检索改善了此小样本排序，但 Top-2 召回未改善；尚未做 `off / lexical / hybrid` 的真实 LLM 问数消融。不可转写成“RAG 提升问数准确率 23%”。后续真实模型实验需单独授权预算、固定同一题集/模型/解码参数，并同时报告最终任务成功、拒绝正确性、Token、延迟。
+
+跨服务与浏览器报告：`docs/evaluation-runs/conversation-20261010T052148358166Z/report.json`，6 项检查通过：两轮澄清历史、实际本地检索与公共 SSE、分析只准备确认、来源会话隔离、薪酬不被替换、刷新后历史与确认界面。此前失败的 `conversation-20261010T051957033702Z` 保留：脚本将带明确别名的“查人数”误设为入/离职歧义，已改用独立歧义问句“人员变动情况”，未放宽生产校验。
+
+`datasets/manual-feedback-v1/cases.json` 保存 09:58 试用的原句与回归预期；缺失的历史澄清选择明确标注未知。`tests/test_manual_feedback.py` 验证薪酬不静默改成人数、“各部门”不可忽略、期间追问保留原指标与组织。更多保护见 `test_query_retrieval.py`、`test_analysis_entry.py` 以及 Java/前端同名功能测试。
+
+澄清记录保存在 `ChtTurn.inheritJson`，历史选项只读；文字续答关联后续问句，取消/失效/失败保留结果；实际采用条件展示在答案卡。H2 重启会丢失模拟会话，不承诺跨重启持久化。普通问数阶段来自实时节点事件；续答仍使用原同步续答接口。usage 复用已有估算器，缺价格/usage 为未知，非计费账单。
+
+S2 的真实模型规划、调用证据、估算费用及跨服务验证见 [受约束模型查询](S2-query-planning.md)。S1 原始题集与基线报告不改写。
+
 此目录评测**模拟 HR 数据上的用户任务**。首版从 Java 用户 HTTP API 创建真实会话、提交问句、消费 SSE 终态及读取有权限的 SQL 记录；没有调用待测 SQL 构造器生成答案。Java local 是规则基线，不是大模型效果。后台旧模拟评分已在 S0 停用，本 CLI 不调用它。
 
 ## 题集与判定
@@ -9,7 +44,7 @@
 | 场景 | 案例数 | 检查内容 |
 |---|---:|---|
 | 明确单轮 | 24 | 三个计数指标、研发中心/一部、自然月/近 7 天/近 30 天 |
-| 缺参/澄清 | 8 | 缺指标触发澄清；缺统计期间按 S0 停止并返回 HRX-1001 |
+| 缺参/澄清 | 8 | 原 S1 缺期间预期保留 FAILED/HRX-1001；S2/S3/S4 按阶段政策验收追问，缺指标仍澄清 |
 | 多轮 | 9 | 继承指标和期间只换组织，或继承指标和组织只换期间 |
 | 数据权限 | 6 | 三个模拟 HR 身份查询无权组织，不返回数字 |
 | 会话隔离 | 3 | 非所有者向他人会话提交问句，被 HRC-2002 拒绝 |
@@ -76,3 +111,64 @@ Set-Location ../hrchat-ai
 覆盖独立参考值、同值错组织、时间/指标/模式错误、空值/布尔/NaN、拒绝时带数据、重复/冲突终态、分组泄漏、超时、连接失败、格式异常与中断。故障注入是 **runner/判定器单元测试**，不进入 60 个用户任务分母，也不宣称已验证业务工具的故障恢复。
 
 首版不含趋势/明细/比率数值判定、租户切换/权限变更、多轮澄清提交、远端工具故障注入；不以占位案例凑到建议的 80 题。后续对应能力到位时新增独立题集版本，保留 v1 作回归。
+
+S3 的多轮状态、期间快捷澄清与独立生命周期检查见 [S3-task-memory.md](S3-task-memory.md)。运行 `evals.launch_remote --stage s3` 将原 v1 的 9 组多轮全部纳入阶段分母；`--memory-smoke` 另验连续任务和澄清提交，结果不混入 v1 的 60 组分母。
+
+S4 的一次受约束修复、总调用预算及首次/最终结果统计见 [S4-bounded-repair.md](S4-bounded-repair.md)。使用 `--stage s4` 开启修复评测；原始 v1 题集保持不变，故障注入单独报告。
+
+S5 的规则/完整方案对照、任务记忆消融、演示及匿名试用模板见 [S5-evidence-and-demo.md](S5-evidence-and-demo.md)。`evals.s5_experiment` 先登记实验，再显式执行；失败与中断保留，不自动挑选最好成绩。
+
+已完成的单轮 Qwen Plus 对照与 Memory 消融结果见 [S5-results.md](S5-results.md)，不将模拟回归解释为生产准确率。
+
+## J1：趋势、组织分组与明细结果核验
+
+新增独立版本 `datasets/hr-query-modes-v1/`，18 个单轮任务：趋势 5、组织分组 5、明细 5、权限拒绝 2、标量对照 1。全部属于开发回归集，相关表达模板放在同一组；没有把同模板轻微改写当成未见冻结集。旧 `hr-query-v1` 的 60 组题、阶段政策和历史成绩保持不变，两套成绩不合并。
+
+日期、组织和是否含下级由显式界面参数给定。本扩展主要回答“规划进入执行后，结果是否正确”，不证明模型能理解各种自然日期表达。`mode_reference.py` 直接读取原始模拟记录，按日历快照、直接组织归属及事件日期独立计算；不导入 SQL 构造器。`build_modes_dataset.py` 只用于首次出题，拒绝覆盖已发布版本。
+
+判定同时检查执行计划、组织展开、指标版本、逐期间/部门计数、完整行集合（含重复次数）、允许字段和脱敏标记、表格与图表、结论中的末值/合计。部门分组是直属记录的互斥分项；父级不是再算一次子树总数。在职趋势逐月核对期末快照，不能跨月求和。事件趋势沿用稀疏结果：没有事件的月份不自动补 0；null 也不能补 0。
+
+明细最多保存 50 行，结论明确为“本次返回”，表格 `total` 是**已保存行数**。分页接口分页的是这份结果，不是继续扫描数据库；本扩展核对第一页、第二页和空尾页。由于脱敏后不同员工可能显示相同内容，公共接口只能核对脱敏后的多重集合，不能据此宣称精确验证每个原始身份。独立的 `QueryModeContractIntegrationTest` 在专用 H2 中使用显式测试字段授权，核对离职日前后准确名单、超过 50 条的截断、同月事件排序，以及跨组织/租户隔离；不修改原种子或放宽产品权限。
+
+### 本地运行与报告
+
+以下命令均为单行。先在仓库根目录构建当前 Java JAR：
+
+```powershell
+mvn -f hrchat-server/pom.xml -pl hrchat-bootstrap -am package -DskipTests -q
+```
+
+然后 `cd hrchat-ai`，运行不收费的脚本模型链路：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.launch_remote --dataset hr-query-modes-v1 --fixture-cases --split all --report-pointer ..\docs\evaluation-runs\j1-latest-report.txt
+```
+
+`--fixture-cases` 只替换条件提取模型，后续 Java 用户 API → Python 编排 → Java MCP → H2 → 答案/分页接口均实际执行，不读取预期答案来伪造工具返回，也不发外部模型请求。报告记录 `model_kind=fixture`、`model_effectiveness=false`。J1 不使用 S2/S3/S4 的题目政策覆盖；任一严格判定不通过，runner 返回非零。`COMPLETED` 仅表示全部执行完。
+
+2026-10-10 本地结果：
+
+| 记录 | 结果 | 说明 |
+|---|---|---|
+| 首次完整报告 `20261009T223026961361Z` | 12/18 | 5 个趋势因网关将未选粒度补为 NONE 而失败；另 1 个身份缺诊断权限 |
+| 修复后报告 `20261009T223243468818Z` | 17/18 | 趋势 5/5、分组 4/5、明细 5/5、权限拒绝 2/2、标量 1/1；属于回归 |
+
+报告 ID 使用 UTC，以上记录对应北京时间 10 月 10 日。完整报告保存在 `docs/evaluation-runs/<run_id>/report.json`，不提交远程；更早一次报告保存回调因沿用旧阶段评分字段而中断，也保留在本地。该保存兼容性问题已修复并补回归。
+
+唯一未通过案例 `hr-modes-v1-10`：`hr03` 查询职能部的空分组结果符合独立预期，但 `/evidence` 和 SQL 诊断入口受 `chat:viewSql` 权限限制，返回 403。因缺少执行范围证据，仍计不通过，不删题、不借其他身份取证、不放宽权限。该记录不能等同于“已查到错误数字”，也不能写成 18/18。错误按规划/终态、执行、展示、权限和证据分类，仅作排查线索，非自动根因认定。
+
+本轮同时修正：只选日期时不再默认添加粒度约束；已授权聚合月份/部门名默认可读，显式字段隐藏/脱敏策略仍优先；工具行列不齐、布尔/字符串/非有限计数直接拒绝，null 保留；部分组织缺值时不输出完整合计；事件明细增加稳定排序；明细文案披露 50 行上限。
+
+最终 Python 全量测试 469 项通过；Java 定向验证 26 项通过（语义工具 20、历史时点 2、J1 专用 H2 契约 4）。最终判定器对已记录响应重新计分仍为 17/18，重放不产生服务或模型调用。上述测试数不并入 18 个用户任务分母。
+
+真实模型首次验收于 2026-10-10 获准执行最多 3 次，选择 `01/06/11`，关闭修复且不重跑。报告 `20261010T013252772226Z` 记录 3 次 initial 请求尝试，全部 `ConnectError`，没有 HTTP 响应或 usage，任务 0/3；这是执行环境连接失败，不能解读为模型答错。随后不带 Key 的连通性检查定位到本次沙箱的 `HTTP_PROXY/HTTPS_PROXY/ALL_PROXY=127.0.0.1:9` 拒绝连接；经批准在沙箱外访问服务根路径获得 HTTP 404，证明 HTTPS 可达，不代表模型认证或推理成功。该失败报告保留。
+
+用户随后重新授权，在正常联网环境执行同三题，报告 `20261010T014303808696Z`：**3/3 通过**（趋势 `01`、部门分组 `06`、明细及保存结果分页 `11`）。Qwen Plus 共 3 次 initial 调用，均 HTTP 200，无修复、无自动重试；实际输入 3,550、输出 269，合计 **3,819 Token**。缺少适用价格快照，金额保持未知。本轮调用额度已用完，后续新增付费验收须另获授权。三题均为既有开发集抽样，日期/组织由显式参数提供，不作为自然语言泛化成绩；也不改变完整脚本回归 17/18 的独立结论。
+
+复现命令（会发起模型请求，仅在授权后运行；代理问题应通过获准的正常联网执行环境处理）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.launch_remote --dataset hr-query-modes-v1 --split dev --stage s3 --repair off --model qwen-plus --case-id hr-modes-v1-01 --case-id hr-modes-v1-06 --case-id hr-modes-v1-11
+```
+
+这只是模型接入后的三个任务验收，不能推导趋势/明细的生产准确率。J1 没有新增指标、同比、任意 SQL、数据库全量分页或浏览器渲染测试。
