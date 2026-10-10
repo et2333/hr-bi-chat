@@ -52,7 +52,9 @@ class TimeRangeOverride(BaseModel):
     ]] = None
     start: Optional[str] = None  # CUSTOM 时必填，ISO-8601
     end: Optional[str] = None  # CUSTOM 时必填，ISO-8601
-    grain: Optional[Literal["NONE", "DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]] = "NONE"
+    # Omitted means no explicit user choice. NONE is an explicit scalar constraint;
+    # inserting it here incorrectly rejects a trend over UI-selected dates.
+    grain: Optional[Literal["NONE", "DAY", "WEEK", "MONTH", "QUARTER", "YEAR"]] = None
 
 
 class OrgOverride(BaseModel):

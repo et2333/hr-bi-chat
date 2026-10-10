@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol
@@ -171,7 +172,7 @@ class JavaMcpSemanticToolClient:
             if rows and (columns != [code] or not isinstance(rows[0], list) or len(rows[0]) != 1):
                 raise McpBusinessError("HRS-3002", "标量结果列与指标不一致")
             value = rows[0][0] if rows else None
-            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)):
                 raise McpBusinessError("HRS-3002", "标量结果并非数值或空值")
             result = {"current": value, "compare": None, "prev_period": None,
                       "rows": len(rows), "query_mode": "scalar", "metric": view,
@@ -301,12 +302,14 @@ def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: st
     actual_mode = raw.get("query_mode")
     if actual_mode != mode:
         raise McpBusinessError("HRC-1003", f"查询模式未按请求执行：请求 {mode}，实际 {actual_mode or '未知'}")
-    columns_raw = raw.get("columns") or []
-    rows_raw = raw.get("rows") or []
+    columns_raw = raw.get("columns")
+    rows_raw = raw.get("rows")
+    if not isinstance(columns_raw, list) or not columns_raw or not isinstance(rows_raw, list):
+        raise McpBusinessError("HRS-3002", "查询结果缺少有效的列或行结构")
     col_keys: list[str] = []
     columns: list[dict[str, Any]] = []
     for c in columns_raw:
-        if isinstance(c, dict):
+        if isinstance(c, dict) and isinstance(c.get("key"), str) and c["key"]:
             key = str(c.get("key") or "")
             col_keys.append(key)
             columns.append({
@@ -315,13 +318,28 @@ def _present_from_mcp(code: str, view: MetricView, raw: dict[str, Any], mode: st
                 "type": str(c.get("type") or "string"),
                 "masked": bool(c.get("masked")),
             })
+        else:
+            raise McpBusinessError("HRS-3002", "查询结果列结构异常")
+    if len(col_keys) != len(set(col_keys)):
+        raise McpBusinessError("HRS-3002", "查询结果含重复列")
+    if mode in {"org", "trend"} and col_keys != ["org_name" if mode == "org" else "period", code]:
+        raise McpBusinessError("HRS-3002", "查询结果列与分组指标不一致")
     table_rows: list[dict[str, Any]] = []
     for row in rows_raw:
         if isinstance(row, list):
-            item = {col_keys[i]: row[i] for i in range(min(len(col_keys), len(row)))}
+            if len(row) != len(col_keys):
+                raise McpBusinessError("HRS-3002", "查询结果行列数量不一致")
+            item = dict(zip(col_keys, row, strict=True))
             table_rows.append(item)
-        elif isinstance(row, dict):
+        elif isinstance(row, dict) and set(row) == set(col_keys):
             table_rows.append(row)
+        else:
+            raise McpBusinessError("HRS-3002", "查询结果行结构异常")
+    if mode in {"org", "trend"}:
+        for row in table_rows:
+            value = row[code]
+            if value is not None and (type(value) not in (int, float) or not math.isfinite(value)):
+                raise McpBusinessError("HRS-3002", "分组结果并非有效数值或空值")
 
     chart = None
     current = None

@@ -62,6 +62,22 @@ async def test_new_org_and_clear_org_keep_metric_and_time():
     assert cleared["answer_payload"]["caliber"]["organization"] == "当前全部授权组织"
 
 
+async def test_gateway_date_selection_without_grain_supports_trend_but_explicit_none_conflicts():
+    from agent_gateway.schemas import ContextOverride
+    selection = ContextOverride.model_validate({"time_range": {
+        "preset": "CUSTOM", "start": "2026-07-01", "end": "2026-09-01"}}).model_dump()
+    changes = {"query_mode": "trend", "mode_text": "趋势"}
+    result = await run("查看趋势", changes, ui=selection)
+    assert result["error"] is None
+    plan = result["evidence"]["execution"]["query_plan"]
+    assert plan["time_range"]["grain"] == "MONTH"
+    assert (plan["time_range"]["start"], plan["time_range"]["end"]) == ("2026-07-01", "2026-09-01")
+    selection["time_range"]["grain"] = "NONE"
+    refused = await run("查看趋势", changes, ui=selection)
+    assert refused["evidence"]["reason"] == "selection_conflict"
+    assert not refused["evidence"].get("execution")
+
+
 async def test_missing_period_pending_supports_free_text_and_exact_button_without_model():
     pending = await run("研发中心离职人数", {"metric_codes": ["leave_count"], "metric_text": "离职人数",
         "organization": {"kind": "catalog_id", "org_id": "2", "source_text": "研发中心"}}, context=memory())
