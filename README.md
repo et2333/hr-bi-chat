@@ -103,10 +103,6 @@ pnpm dev --host 127.0.0.1 --port 5173 --strictPort
 
 
 
-
-
-
-
 E2E 需先按“本地启动”启动 8080 端口的 Java local/mock 服务；首次运行还需执行 `pnpm exec playwright install chromium`：
 
 ```powershell
@@ -134,7 +130,3 @@ pnpm exec playwright test e2e/ask.spec.ts e2e/permission.spec.ts e2e/report.spec
 本地 H2 数据会在后端停止后清空，重启时自动载入演示数据。
 
 RAG 使用当前 Java 可见目录、人工编写的查询草稿示例和本地 BGE 中文 embedding，混合 BM25 与向量排序；目录中的不可执行口径仍可用于说明边界，不能据此取数。不检索员工结果或历史 SQL。当前保留完整目录作为约束，尚未证明 Token 节省或最终问数提升。配置、离线对照及真实模型待验收项见[评测说明](hrchat-ai/evals/README.md#本地-rag与对话体验验收j3j4j5)。
-
-## 评测与能力边界
-
-[评测说明](hrchat-ai/evals/README.md)包含独立原始记录预期、版本化题集、实际用户接口验证和运行命令。原 60 组任务与新增 18 组趋势/分组/明细任务分开报告；脚本模型测试不作为大模型准确率。J1 本地严格验收 17/18，另 1 项因测试身份无诊断权限而缺少执行证据，保留未通过。真实模型多轮任务与消融结果见 [S5-results](hrchat-ai/evals/S5-results.md)。
