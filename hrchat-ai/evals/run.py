@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from evals.api import JavaApi
-from evals.dataset import DATASET, DATASETS, load_dataset, select_cases, sha, sha_text
+from evals.dataset import DATASET, DATASETS, MODE_DATASET, load_dataset, select_cases, sha, sha_text
 from evals.reference import ROOT, MIGRATIONS
 from evals.scoring import score
 from evals.stage_policy import POLICY, load_policy, score_stage, stage_report
@@ -93,8 +93,11 @@ def prior_runs(parent, manifest, cases):
     equivalent_hashes = {manifest["cases_sha256"], *manifest.get("legacy_cases_sha256", [])}
     for path in parent.glob("*/report.json"):
         old = json.loads(path.read_text(encoding="utf-8"))
-        # S6 and other experiment reports legitimately have a different schema.
-        if (old.get("dataset") or {}).get("cases_sha256") in equivalent_hashes:
+        # S6/retrieval reports may use a string dataset label or another schema.
+        dataset = old.get("dataset")
+        if not isinstance(dataset, dict):
+            continue
+        if dataset.get("cases_sha256") in equivalent_hashes:
             previous.append(path.parent.name)
             scored_ids = {r["case_id"] for r in old.get("results", []) if r.get("turns")}
             if scored_ids.intersection(c["case_id"] for c in cases):
@@ -159,6 +162,16 @@ def main():
         report.update(summary=summarize(cases, results), results=results)
         if policy is not None:
             report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
+        elif args.dataset == MODE_DATASET.name:
+            # Modes scoring has no stage override file; fingerprint the scorer modules.
+            digest = hashlib.sha256()
+            for relative in ("evals/scoring.py", "evals/mode_scoring.py", "evals/mode_reference.py"):
+                digest.update(sha_text(ROOT / "hrchat-ai" / relative).encode())
+            report["stage_evaluation"] = {
+                "kind": "hr-query-modes-v1",
+                "sha256": digest.hexdigest(),
+                "files": ["evals/scoring.py", "evals/mode_scoring.py", "evals/mode_reference.py"],
+            }
         report["repair_evaluation"] = summarize_repair(cases, results)
         turns = [t for r in results for t in r["turns"]]
         evidence = [(t.get("actual") or {}).get("evidence") or {} for t in turns]

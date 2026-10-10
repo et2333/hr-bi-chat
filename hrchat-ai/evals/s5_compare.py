@@ -28,8 +28,19 @@ def task_rows(report, ids):
     return [by_id[key] for key in ids]
 
 
+def turn_score(turn):
+    """Normalize S5 stage_score rows and J1 modes `passed`/`errors` rows."""
+    if "stage_score" in turn:
+        score = turn["stage_score"]
+        return {"passed": bool(score.get("passed")), "errors": list(score.get("errors") or []),
+                "override_reason": score.get("override_reason"),
+                "no_query_verified": score.get("no_query_verified")}
+    return {"passed": bool(turn.get("passed")), "errors": list(turn.get("errors") or []),
+            "override_reason": None, "no_query_verified": None}
+
+
 def task_passed(row):
-    return bool(row["turns"]) and not row.get("execution_error") and all(t["stage_score"]["passed"] for t in row["turns"])
+    return bool(row["turns"]) and not row.get("execution_error") and all(turn_score(t)["passed"] for t in row["turns"])
 
 
 def public_task_passed(row):
@@ -37,7 +48,7 @@ def public_task_passed(row):
     # remote planner internals and must not masquerade as public answer quality.
     diagnostic = {"stop_reason", "unexpected_query_or_missing_trace"}
     return bool(row["turns"]) and not row.get("execution_error") and all(
-        not (set(t["stage_score"]["errors"]) - diagnostic) for t in row["turns"])
+        not (set(turn_score(t)["errors"]) - diagnostic) for t in row["turns"])
 
 
 def metrics(report, ids):
@@ -47,22 +58,40 @@ def metrics(report, ids):
     evidence = [(t["actual"].get("evidence") or {}) for t in turns]
     calls = [c for e in evidence for c in e.get("model_calls", [])]
     cost = summarize_calls(calls)
+    scores = [turn_score(t) for t in turns]
     return {"passed": sum(task_passed(r) for r in rows), "total": len(ids), "turns": len(turns),
             "public_task_passed": sum(public_task_passed(r) for r in rows),
             "score_definition": "passed includes stage diagnostic conformance; public_task_passed excludes only stop_reason and unexpected_query_or_missing_trace. Public success does not prove no unauthorized query executed.",
-            "no_query_verification": {label: sum(t["stage_score"].get("no_query_verified") is value for t in turns
-                if t["stage_score"].get("override_reason")) for label, value in (("verified", True), ("failed", False), ("unknown", None))},
+            "no_query_verification": {label: sum(s.get("no_query_verified") is value for s in scores
+                if s.get("override_reason")) for label, value in (("verified", True), ("failed", False), ("unknown", None))},
             "by_scene": {scene: {"passed": sum(task_passed(r) for r in rows if r["scene"] == scene),
                                   "total": sum(r["scene"] == scene for r in rows)} for scene in sorted({r["scene"] for r in rows})},
             "turn_latency_ms": {f"p{p}": latency[math.ceil(len(latency) * p / 100) - 1] if latency else None for p in (50, 95)},
             "turns_with_evidence": sum(bool(e) for e in evidence), "observed_cost": cost,
-            "first_turn_passed": sum(bool(r["turns"]) and r["turns"][0]["stage_score"]["passed"] for r in rows),
+            "first_turn_passed": sum(bool(r["turns"]) and turn_score(r["turns"][0])["passed"] for r in rows),
             "repair_attempts_observed": sum((e.get("repair") or {}).get("attempts", 0) for e in evidence),
-            "failed_cases": [{"case_id": r["case_id"], "turn_errors": [t["stage_score"]["errors"] for t in r["turns"]]} for r in rows if not task_passed(r)]}
+            "failed_cases": [{"case_id": r["case_id"], "turn_errors": [turn_score(t)["errors"] for t in r["turns"]]}
+                             for r in rows if not task_passed(r)]}
+
+
+def _assert_rag_mode_evidence(report, expected_mode, ids):
+    if report["server"].get("rag_mode") != expected_mode:
+        raise ValueError("Server rag_mode mismatch")
+    for row in task_rows(report, ids):
+        for turn in row["turns"]:
+            ev = turn["actual"].get("evidence") or {}
+            retrieval = ev.get("retrieval") or {}
+            if retrieval.get("mode") != expected_mode:
+                raise ValueError("Retrieval evidence mode mismatch")
+            if not ev.get("decoding") or not ev.get("prompt_version"):
+                raise ValueError("Missing prompt/decoding evidence")
+            for call in ev.get("model_calls", []):
+                if call.get("model") != report["server"]["requested_model"] or call.get("provider") in (None, "fixture"):
+                    raise ValueError("Actual model differs from requested real model")
 
 
 def compare_pair(baseline, full, *, kind, ids):
-    if kind not in {"rules_vs_full", "memory_ablation"} or not ids or len(set(ids)) != len(ids):
+    if kind not in {"rules_vs_full", "memory_ablation", "rag_ablation"} or not ids or len(set(ids)) != len(ids):
         raise ValueError("Invalid comparison contract")
     for report in (baseline, full):
         if report["summary"]["status"] != "COMPLETED":
@@ -104,6 +133,21 @@ def compare_pair(baseline, full, *, kind, ids):
             observed.append(signatures)
         if observed[0] != observed[1]:
             raise ValueError("Prompt or decoding changed between arms")
+    elif kind == "rag_ablation":
+        if baseline["runtime"] != "remote" or baseline["model_kind"] != "real" or not baseline["server"].get("memory_enabled"):
+            raise ValueError("RAG ablation baseline must use the real model and memory")
+        for key in ("requested_model", "repair_enabled", "planner_variant", "memory_enabled"):
+            if baseline["server"].get(key) != full["server"].get(key):
+                raise ValueError("Non-RAG setting changed: " + key)
+        if baseline["selected_case_ids"] != ids or full["selected_case_ids"] != ids:
+            raise ValueError("Ablation case selection changed")
+        base_mode, full_mode = baseline["server"].get("rag_mode"), full["server"].get("rag_mode")
+        if base_mode not in {"off", "lexical", "hybrid"} or full_mode not in {"off", "lexical", "hybrid"}:
+            raise ValueError("rag_mode missing or invalid")
+        if base_mode == full_mode:
+            raise ValueError("RAG arms must differ by rag_mode")
+        _assert_rag_mode_evidence(baseline, base_mode, ids)
+        _assert_rag_mode_evidence(full, full_mode, ids)
     elif baseline["runtime"] != "local" or baseline["model_kind"] != "rule_based" or baseline["selected_case_ids"] != full["selected_case_ids"] or ids != full["selected_case_ids"]:
         raise ValueError("Rule comparison requires equal full case sets")
     before, after = task_rows(baseline, ids), task_rows(full, ids)

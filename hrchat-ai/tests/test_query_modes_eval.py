@@ -140,8 +140,11 @@ def test_dataset_is_separate_and_original_sixty_cases_unchanged():
 
 
 def test_prior_run_discovery_ignores_unrelated_s6_schema(tmp_path):
-    for name, report in {"s6": {"experiment": "s6"}, "j1": {"dataset": {"cases_sha256": "new"},
-            "results": [{"case_id": "m1", "turns": [1]}]}}.items():
+    for name, report in {
+        "s6": {"experiment": "s6"},
+        "string-dataset": {"dataset": "retrieval-scale-v1"},
+        "j1": {"dataset": {"cases_sha256": "new"}, "results": [{"case_id": "m1", "turns": [1]}]},
+    }.items():
         folder = tmp_path / name
         folder.mkdir()
         (folder / "report.json").write_text(json.dumps(report), encoding="utf-8")

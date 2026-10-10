@@ -4,7 +4,13 @@
 
 2026-10-10：实现本地 `BAAI/bge-small-zh-v1.5`（CPU、512 维）+ BM25/RRF，动态检索当前 Java 可见业务口径及 QueryDraft 开发示例。不是历史 SQL 检索，也不生成自由 SQL；组织/指标权限与最终执行仍由 Java 校验。当前保留完整目录约束，检索只补充相关口径与示例，不宣称减少输入 Token。
 
-**R4（同日续）**：外置语料 `adapters/retrieval_corpus/`（`retrieval-corpus-v2`）= 36 条核验 `example_gold` + 60 条仅检索用 `retrieval_distractor`。可执行指标仍仅为目录中的人数类三条；干扰项不得进入 `semantic_query`。校验：`python -m evals.build_retrieval_corpus --validate`。规模化检索评测：`python -m evals.retrieval_scale`（题集 `datasets/retrieval-scale-v1/`，dev 42 / holdout 20；报告 Hit@K 与 `top1_distractor_rate`，**不是**问数准确率）。计划见 [R4](../../docs/development-plans/R4规模化语义检索数据Mock实施计划.md)。
+**R4 复核修正版**：外置语料 `adapters/retrieval_corpus/`（`retrieval-corpus-v2.1`）包含 36 条编译契约校验示例、60 条模拟干扰口径。按用户选择，默认问数只检索 Java 可见目录与有效示例，`evals.retrieval_scale` 才显式启用干扰项。可见但不支持执行的目录项不再标为 executable；检索指纹包含口径版本及内容，语料故障可降级到完整权威目录。
+
+复核原 `f32fe01` 语料发现 31/36 示例存在原文摘录不匹配、擅自补期间等编译错误；现已修正并实际通过 `compile_contextual` 校验。`reviewed=true` 原由生成器自动写入，不能作为人工抽检证据；当前明确记录“程序校验、人工复核未记录”。`--validate` 不再修改 manifest。审计明细：本地 `docs/evaluation-runs/r4-review.json`。
+
+规模题集 dev 42 条中有 **28 条与 few-shot 完全相同**；报告将 14 条非重合样本单列。`expected_mode=null` 原被自动算成示例命中，现改为也必须命中正确指标和 scalar。旧报告保留，不能直接与修正后指标混比。校验命令：`python -m evals.build_retrieval_corpus --validate`；规模对照：`python -m evals.retrieval_scale`。20 条 holdout 本轮未评分，未用其答案调参。
+
+修正后报告 `retrieval-scale-20261010T110542271760Z/report.json`：99 候选（3 可执行口径、60 干扰项、36 示例）。14 条非重合开发样本中，BM25 / hybrid 的指标 Hit@1 为 **2/14、4/14**，Hit@2 为 **4/14、6/14**；示例 Hit@2 为 **10/14、9/14**。混合检索未全面优于词法检索，仍是用于发现失败的压力实验，不能宣称业务问数收益。计划与边界见本地 R4 计划；公开语料说明见 [corpus README](../adapters/retrieval_corpus/README.md)。
 
 首次在 `hrchat-ai` 安装 `.[dev,retrieval]` 并执行 `python -m adapters.prepare_embedding`；模型写入被 Git 忽略的 `.models/`。正常请求仅本地加载；缺失/故障在 evidence 中标记 `fallback_full_catalog`，不伪造向量。demo 入口默认 hybrid 且提前检查模型。模型来源：[BGE 官方模型卡](https://huggingface.co/BAAI/bge-small-zh-v1.5)，本轮 revision `7999e1d3359715c523056ef9478215996d62a620`。
 
@@ -14,18 +20,33 @@
 .\.venv\Scripts\python.exe -m evals.retrieval
 .\.venv\Scripts\python.exe -m evals.retrieval_scale
 .\.venv\Scripts\python.exe -m evals.conversation_smoke --browser
+.\.venv\Scripts\python.exe -m evals.conversation_smoke --j2 --browser
 ```
 
 第三条需先构建 Java JAR、安装前端依赖和 Playwright Chromium；使用隔离端口 18106/18107 和浏览器 5199，脚本 LLM + 真实 H2/Java/Python/本地 embedding，**零付费模型调用**。不用于证明自然语言理解准确率。
 
-首轮小目录检索报告：`docs/evaluation-runs/retrieval-20261010T051258546280Z/report.json`。18 条独立编写的开发问句、三指标模拟目录；不是冻结集，不代表大目录或生产效果。R4 规模化报告写入 `docs/evaluation-runs/retrieval-scale-*`（gitignore）。
+第四条启用 `local,j2` 可选演示种子，增加两个同名“研发部”。验证模型猜 ID 仍需确认、选组织后补期间、最终条件与刷新历史；默认 `local` 不加载该种子，旧评测组织范围不变。移动迁移文件后请执行一次 `mvn -pl hrchat-bootstrap -am clean package "-DskipTests"`，避免旧 target 中残留默认迁移。
+
+R4/J2 复核验收：`conversation-20261010T111758107661Z/report.json` 的 7 项检查和 2 个浏览器场景通过；默认 profile 复验 `conversation-20261010T111932570355Z/report.json` 的 6 项检查通过，确认研发中心有效组织仍为 `{2,3,4}`、正常检索干扰项为 0。单元/集成测试：Python 498 通过、Java 643 通过。均为离线或脚本模型验证，未新增付费调用。
+
+首轮小目录检索报告：`docs/evaluation-runs/retrieval-20261010T051258546280Z/report.json`。以下是 **v1 语料的历史结果**。扩充后的 v2.1 与这 18 题有 13 题重合，因此当前重跑只作开发诊断；不能沿用“独立问句”结论。R4 规模化报告写入 `docs/evaluation-runs/retrieval-scale-*`（gitignore）。
 
 | 检索方案（小目录 18 题） | 指标首位命中 | 指标前两位命中 | 指标与模式匹配示例前两位命中 | 单题中位耗时 |
 |---|---:|---:|---:|---:|
 | BM25 | 14/18 | 17/18 | 15/18 | 0.18 ms |
 | BGE + BM25/RRF | 16/18 | 17/18 | 16/18 | 7.90 ms |
 
-向量检索改善了此小样本排序，但 Top-2 召回未改善；尚未做 `off / lexical / hybrid` 的真实 LLM 问数消融。不可转写成“RAG 提升问数准确率 23%”。后续真实模型实验需单独授权预算、固定同一题集/模型/解码参数，并同时报告最终任务成功、拒绝正确性、Token、延迟。
+向量检索改善了此小样本排序，但 Top-2 召回未改善。`off / lexical / hybrid` 端到端问数消融用独立控制器（默认 3 题 × 3 模式 = **最多 9 次** initial 调用，repair 关、干扰项关）：
+
+```powershell
+# 仅登记 plan（零付费）；确认 max_model_calls 后再 --execute
+.\.venv\Scripts\python.exe -m evals.rag_ablation --model qwen-plus
+.\.venv\Scripts\python.exe -m evals.rag_ablation --plan <plan.json路径> --execute
+```
+
+对照报告写入 `docs/evaluation-runs/j3-rag-*/comparison.json`（gitignore）。分层报告任务通过率、Token、延迟；**不可**转写成 Hit@K 或“RAG 提升问数准确率 23%”。需 `OPENAI_API_KEY`、已构建 JAR，以及 hybrid 臂的本地 embedding（`python -m adapters.prepare_embedding`）。已完成臂可用 `--compare-only` 重建对照（零调用）。
+
+**首轮真实消融**（`j3-rag-20261010T132731363549Z`，qwen-plus，repair 关，modes 三题）：三臂任务均为 **3/3**；配对 delta 为 0。Token（已知 usage 合计）约 off **4407** / lexical **5270** / hybrid **5280**（检索上下文使 lexical/hybrid 输入更高，本子集未带来任务增益）。hybrid 延迟 p95 受冷启动影响偏高，勿写成生产 SLA。样本极小，不能外推。
 
 跨服务与浏览器报告：`docs/evaluation-runs/conversation-20261010T052148358166Z/report.json`，6 项检查通过：两轮澄清历史、实际本地检索与公共 SSE、分析只准备确认、来源会话隔离、薪酬不被替换、刷新后历史与确认界面。此前失败的 `conversation-20261010T051957033702Z` 保留：脚本将带明确别名的“查人数”误设为入/离职歧义，已改用独立歧义问句“人员变动情况”，未放宽生产校验。
 
