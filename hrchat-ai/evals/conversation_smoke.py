@@ -25,7 +25,7 @@ def main():
     jar = ROOT / 'hrchat-server/hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar'
     commands = [
         ('python', [sys.executable, '-m', 'uvicorn', 'evals.conversation_fixture_gateway:app', '--host', '127.0.0.1', '--port', '18107'], ROOT / 'hrchat-ai', python_url + '/health'),
-        ('java', ['java', '-jar', str(jar), '--spring.profiles.active=local', '--server.address=127.0.0.1', '--server.port=18106',
+        ('java', ['java', '-jar', str(jar), '--spring.profiles.active=' + ('local,j2' if '--j2' in sys.argv else 'local'), '--server.address=127.0.0.1', '--server.port=18106',
           '--hrchat.ai.runtime=remote', '--hrchat.ai.remote-base-url=' + python_url, '--logging.level.root=WARN'], ROOT / 'hrchat-server', java_url + '/actuator/health')]
     processes, logs = [], []
     report = {'kind': 'scripted LLM + real Java + real local embedding', 'paid_model_calls': 0, 'checks': {}}
@@ -65,6 +65,10 @@ def main():
         source = api.ask(session, 'hr04', {'question': '上月研发中心离职人数'})
         report['source'] = source
         assert source['evidence']['retrieval']['status'] == 'ok', source
+        assert source['evidence']['retrieval']['distractor_count'] == 0, source
+        expected_scope = {2, 3, 4, 9, 10} if '--j2' in sys.argv else {2, 3, 4}
+        assert set(source['evidence']['execution']['effective_org_ids']) == expected_scope, source
+        report['checks']['optional_seed_scope_and_live_retrieval_boundary'] = True
         events = [e['event'] for e in source['events']]
         assert events.index('PROGRESS') < events.index('ANSWER_DONE') and 'USAGE' in events
         report['checks']['real_embedding_and_progress_on_public_path'] = True
@@ -79,10 +83,37 @@ def main():
         for question in ['按组织对比平均薪酬', '薪酬对比', '薪资对比']:
             assert api.ask(other, 'hr04', {'question': question})['status'] == 'UNSUPPORTED'
         report['checks']['salary_not_silently_substituted'] = True
+        if '--j2' in sys.argv:
+            org_session = api.session('hr04')
+            first = api.ask(org_session, 'hr04', {'question': '研发部离职人数'})
+            report['organization_initial'] = first
+            payload = interrupt(first)
+            org_ask_id = payload.get('askId') or payload['ask_id']
+            question = payload['questions'][0]
+            options = question['options']
+            assert {o.get('optionId') or o.get('option_id') for o in options} == {'9', '10'}, options
+            assert any('RD2-DEV' in o['label'] for o in options), options
+            chosen = api.clarify(org_session, 'hr04', org_ask_id,
+                question.get('questionId') or question['question_id'], '10')
+            report['organization_selected'] = chosen
+            assert chosen['status'] == 'CLARIFYING', chosen
+            question = interrupt(chosen)['questions'][0]
+            answer = api.clarify(org_session, 'hr04', org_ask_id,
+                question.get('questionId') or question['question_id'], 'time:LAST_MONTH')
+            report['organization_answer'] = answer
+            assert answer['status'] == 'COMPLETED', answer
+            plan = answer['evidence']['execution']['query_plan']
+            assert plan['org_scope']['org_id'] == '10', plan
+            assert plan['time_range']['start'] == '2026-08-01', plan
+            org_history = get('/api/v1/chat/asks/' + org_ask_id + '/history')
+            assert len([e for e in org_history if e['kind'] == 'selection']) == 2, org_history
+            report['organization_history'] = org_history
+            report['checks']['homonym_choice_then_period_persisted'] = True
         if '--browser' in sys.argv:
             cli = ROOT / 'hrchat-web/node_modules/@playwright/test/cli.js'
             browser = subprocess.run(['node', str(cli), 'test', 'e2e/conversation.spec.ts'], cwd=ROOT / 'hrchat-web',
-                env=dict(env, HRCHAT_API_TARGET=java_url, CONVERSATION_FIXTURE_E2E='1'), timeout=180)
+                env=dict(env, HRCHAT_API_TARGET=java_url, CONVERSATION_FIXTURE_E2E='1',
+                         J2_FIXTURE_E2E='1' if '--j2' in sys.argv else '0'), timeout=180)
             assert browser.returncode == 0
             report['checks']['browser_history_reload_and_analysis_confirmation'] = True
         report['passed'] = True

@@ -27,9 +27,26 @@ MESSAGES = {
     "metric_unavailable": "当前可用目录未提供该指标口径，暂不支持这种统计。",
     "unsupported_capability": "暂不支持这种统计、筛选或分析方式，请调整问题。",
     "unknown_organization": "组织无法识别或不在当前可用范围，请使用可用组织的完整名称。",
+    "ambiguous_organization": "存在多个同名组织，请选择要查询的范围。",
     "ambiguous_metric": "请明确您希望查询的指标。",
     "missing_slots": "请补充指标、组织或统计时间等缺少的条件。",
 }
+
+
+def _metric_option_label(metric):
+    """Short caliber hint so near-duplicate metric names are distinguishable."""
+    name = metric.get("name") or metric.get("code") or ""
+    definition = (metric.get("definition") or "").strip().removeprefix("口径：").strip()
+    if not definition:
+        return name
+    short = definition if len(definition) <= 36 else definition[:35] + "…"
+    return f"{name}（{short}）"
+
+
+def _org_option_label(org):
+    return org.get("label") or (
+        f"{org.get('name', '')}（{org.get('org_code') or org.get('org_id', '')}）"
+    )
 
 
 def guard_known_capabilities(question, allow_analysis=False, catalog=None):
@@ -48,31 +65,48 @@ def guard_known_capabilities(question, allow_analysis=False, catalog=None):
         raise PlanRejected("unsupported_capability", MESSAGES["unsupported_capability"])
 
 
-def guard_request(plan, question, metadata, context, selected):
+def guard_request(plan, question, metadata, context, selected, organization_choice=None):
     """Deterministic known-failure checks complement, not replace, model understanding."""
-    if plan.decision != "execute":
+    if plan.decision in {"unsupported", "chitchat"}:
         return
     guard_known_capabilities(question, catalog=metadata)
     residual = question
     matches = set()
-    names = sorted([(name, o["org_id"]) for o in metadata["organizations"]
-                    for name in [o["name"], *o["aliases"]] if name], key=lambda x: -len(x[0]))
-    for name, oid in names:
+    names = {}
+    for org in metadata["organizations"]:
+        for name in [org["name"], *org.get("aliases", [])]:
+            if name:
+                names.setdefault(name, set()).add(org["org_id"])
+    surfaces = []
+    for name in sorted(names, key=len, reverse=True):
         if name in residual:
-            matches.add(oid)
+            matches.update(names[name])
+            surfaces.append(name)
             residual = residual.replace(name, " ")
     for phrase in ("按部门对比", "按组织对比", "全部部门", "所有部门", "全部组织", "所有组织", "全公司",
                    "不限部门", "取消组织条件", "不限制部门", "全部", "各部门"):
         residual = residual.replace(phrase, " ")
     if re.search(r"[\u4e00-\u9fffA-Za-z0-9]{1,24}(?:部门|事业群|分公司|事业部|中心|团队|小组|部)", residual):
         raise PlanRejected("unknown_organization", MESSAGES["unknown_organization"], "clarify")
-    if len(matches) > 1:
-        raise PlanRejected("unsupported_capability", "暂不支持同时指定多个组织，请分别查询。")
     override_org = (context or {}).get("org") or {}
+    if len(matches) > 1:
+        if len(surfaces) > 1:
+            raise PlanRejected("unsupported_capability", "暂不支持同时指定多个组织，请分别查询。")
+        # Same surface name under multiple visible parents → clarify, not multi-org execute.
+        if organization_choice and organization_choice in matches:
+            matches = {organization_choice}
+        else:
+            candidates = [o for o in metadata["organizations"] if o["org_id"] in matches]
+            raise PlanRejected(
+                "ambiguous_organization", MESSAGES["ambiguous_organization"], "clarify",
+                options=[{"option_id": o["org_id"], "label": _org_option_label(o)} for o in candidates],
+                slot="organization")
+    if plan.decision != "execute":
+        return
     expected_org = override_org.get("org_id") or (next(iter(matches)) if matches else None)
     if expected_org and (not plan.org_scope or plan.org_scope.org_id != expected_org):
         raise PlanRejected("invalid_plan", "查询计划没有保留指定的组织范围", "failed")
-    if override_org.get("org_id") and plan.org_scope.include_children != override_org.get("include_children", True):
+    if override_org.get("org_id") and plan.org_scope and plan.org_scope.include_children != override_org.get("include_children", True):
         raise PlanRejected("invalid_plan", "查询计划没有保留组织下级范围设置", "failed")
     expected_metrics = [selected] if selected else (context or {}).get("metrics")
     if expected_metrics and plan.metric_codes != expected_metrics:
@@ -121,15 +155,22 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         if decision == "clarify":
             plan = s.get("plan")
             by_code = {m["code"]: m for m in s.get("catalog", {}).get("metrics", [])}
-            options = [{"option_id": o.option_id, "label": by_code[o.option_id]["name"]}
-                       for o in (plan.clarification_options if plan else []) if o.option_id in by_code]
-            if uses_memory and plan and plan.missing_slots == ["time_range"]:
+            slot = s.get("_clarify_slot") or "metric"
+            options = list(s.get("_clarify_options") or [])
+            if not options:
+                options = [{"option_id": o.option_id, "label": _metric_option_label(by_code[o.option_id])}
+                           for o in (plan.clarification_options if plan else []) if o.option_id in by_code]
+            if not s.get("_clarify_options") and uses_memory and plan and plan.missing_slots == ["time_range"]:
                 options = [{"option_id": code, "label": label} for code, label in PERIOD_OPTIONS.items()]
                 metric_name = by_code.get(plan.metric_codes[0], {}).get("name", "该指标") if plan.metric_codes else "该指标"
-                org_name = next((o["name"] for o in s["catalog"]["organizations"]
+                org_name = next((o.get("label") or o["name"] for o in s["catalog"]["organizations"]
                                  if plan.org_scope and o["org_id"] == plan.org_scope.org_id), "当前授权组织")
                 message = f"已保留：{org_name} · {metric_name}。请选择统计期间，也可在输入框直接输入其他期间。"
-            s["clarify_questions"] = [{"question_id": ask_id + "-q1", "question": message, "options": options}]
+                slot = "time_range"
+            elif reason == "ambiguous_metric":
+                slot = "metric"
+            s["clarify_questions"] = [{"question_id": ask_id + "-q1", "question": message,
+                                      "slot": slot, "options": options}]
             s["events"].append({"event": "INTERRUPT", "payload": {
                 "interrupt_type": "CLARIFY", "ask_id": ask_id, "questions": s["clarify_questions"]}})
         else:
@@ -322,7 +363,17 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
 
     async def validate(s, trace):
         p = s["plan"]
-        if p.org_scope and p.org_scope.requested_name:
+        effective = s.get("effective_context") or context_override or {}
+        override_org = (effective.get("org") or {}) if isinstance(effective, dict) else {}
+        if p.org_scope and p.org_scope.requested_name and override_org.get("org_id"):
+            # Clarify / UI already chose a catalog org; do not re-resolve the ambiguous name.
+            if override_org["org_id"] not in {o["org_id"] for o in s["catalog"]["organizations"]}:
+                raise McpBusinessError("HRC-2003", "当前组织范围已不可用，请重新选择授权组织")
+            p.org_scope = OrgScope(org_id=override_org["org_id"],
+                                   include_children=override_org.get("include_children", True))
+            s["evidence"]["query_plan"] = p.model_dump(exclude_none=True)
+            s["evidence"]["org_resolution"] = {"status": "RESOLVED", "source": "context_override"}
+        elif p.org_scope and p.org_scope.requested_name:
             name = p.org_scope.requested_name
             if name not in question:
                 raise PlanRejected("invalid_plan", "组织核查名称并非来自原问题", "failed")
@@ -338,18 +389,40 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             finally:
                 lookup_trace["elapsed_ms"] = int((time.perf_counter() - t) * 1000)
                 s["evidence"]["trace"].append(lookup_trace)
+            s["evidence"]["org_resolution"] = {k: resolution.get(k) for k in ("status", "candidates")
+                                               if k in resolution} or {"status": resolution.get("status")}
+            if resolution["status"] == "AMBIGUOUS":
+                candidates = resolution.get("candidates") or []
+                if not candidates:
+                    raise PlanRejected("unknown_organization", MESSAGES["unknown_organization"], "clarify")
+                raise PlanRejected(
+                    "ambiguous_organization", MESSAGES["ambiguous_organization"], "clarify",
+                    options=[{"option_id": c["org_id"], "label": _org_option_label(c)} for c in candidates],
+                    slot="organization")
             if resolution["status"] != "RESOLVED":
                 raise PlanRejected("unknown_organization", MESSAGES["unknown_organization"], "clarify")
             org = resolution["organization"]
             existing = next((o for o in s["catalog"]["organizations"] if o["org_id"] == org["org_id"]), None)
             if existing:
-                existing["aliases"] = list(set(existing["aliases"] + org["aliases"]))
+                existing["aliases"] = list(set(existing.get("aliases", []) + org.get("aliases", [])))
+                for key in ("label", "org_code"):
+                    if org.get(key):
+                        existing[key] = org[key]
             else:
                 s["catalog"]["organizations"].append(org)
             p.org_scope = OrgScope(org_id=org["org_id"], include_children=p.org_scope.include_children)
             s["evidence"]["query_plan"] = p.model_dump(exclude_none=True)
         validate_plan(p, s["catalog"], turn_id=ask_id)
-        guard_request(p, question, s["catalog"], s.get("effective_context", context_override), forced_metric_code)
+        # Only a user/UI choice may disambiguate a homonym, not an ID guessed
+        # by the model and copied into the compiler's effective context.
+        organization_choice = ((context_override or {}).get("org") or {}).get("org_id")
+        if uses_memory and query_context.get("selection"):
+            choice = query_context["selection"]
+            pending_questions = (query_context.get("pending") or {}).get("questions", [])
+            if any(q.get("question_id") == choice.get("question_id") and q.get("slot") == "organization"
+                   for q in pending_questions):
+                organization_choice = choice.get("option_id")
+        guard_request(p, question, s["catalog"], effective, forced_metric_code, organization_choice)
         if p.decision in ("unsupported", "clarify"):
             stop(s, p.reason, MESSAGES.get(p.reason, MESSAGES["missing_slots"]), p.decision)
         elif p.decision == "chitchat":
@@ -379,7 +452,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         payload = _build_payload(output)
         # Never invent a data refresh timestamp. Demo clock is a query reference, not ETL evidence.
         payload["caliber"]["data_updated_at"] = None
-        selected_org = next((o["name"] for o in s["catalog"]["organizations"]
+        selected_org = next((o.get("label") or o["name"] for o in s["catalog"]["organizations"]
                              if p.org_scope and o["org_id"] == p.org_scope.org_id), "当前全部授权组织")
         payload["caliber"]["organization"] = selected_org + ("（含下级）" if p.org_scope and p.org_scope.include_children else "")
         payload["caliber"]["query_mode"] = {"scalar": "汇总", "org": "按组织对比", "trend": "趋势", "detail": "明细"}[p.query_mode]
@@ -415,6 +488,9 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             except PlanRejected as exc:
                 trace["status"] = "rejected"
                 s["evidence"]["validation_error"] = {"stage": name, "code": exc.reason, "message": exc.message}
+                if exc.options:
+                    s["_clarify_options"] = exc.options
+                    s["_clarify_slot"] = exc.slot or "metric"
                 if name == "plan_query" and uses_draft and s.get("_raw_draft_text"):
                     s["_planning_failure"] = (exc.reason, exc.message, exc.decision)
                 elif name == "repair_query" and exc.reason == "repair_scope_violation":
@@ -509,4 +585,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         on_event({"event": "USAGE", "payload": state["evidence"]["cost_summary"]})
     if state.get("answer_payload"):
         state["answer_payload"]["elapsed_ms"] = state["elapsed_ms"]
+    plan = state.get("plan")
+    if plan is not None and getattr(plan, "metric_codes", None):
+        state["metric_code"] = plan.metric_codes[0]
     return state

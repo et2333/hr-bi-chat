@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
+import hashlib
 from pathlib import Path
 import statistics
 import time
@@ -35,11 +36,12 @@ def load_cases(split="dev"):
 
 def score_mode(mode, cases, catalog, embedder=None):
     rows = []
+    example_questions = {row['question'] for row in load_corpus()['examples']}
     for case in cases:
         question = case["question"]
         metric = case["expected_metric"]
         query_mode = case.get("expected_mode")
-        context, evidence = retrieve(question, catalog, mode=mode, embedder=embedder)
+        context, evidence = retrieve(question, catalog, mode=mode, embedder=embedder, include_distractors=True)
         if evidence["status"] != "ok":
             raise RuntimeError("Retrieval did not execute: " + evidence["status"])
         meta = context.get("metadata") or []
@@ -49,14 +51,14 @@ def score_mode(mode, cases, catalog, embedder=None):
         rows.append({
             "id": case.get("id"),
             "question": question,
+            "exact_example_overlap": question in example_questions,
             "expected_metric": metric,
             "expected_mode": query_mode,
             "metric_hit_at_1": codes[:1] == [metric],
             "metric_hit_at_2": metric in codes,
             "top1_distractor": bool(meta) and not top_executable,
             "example_hit_at_2": (
-                query_mode is None
-                or any(
+                any(
                     d.get("metric_codes") == [metric]
                     and (d.get("query_mode") or "scalar") == (query_mode or "scalar")
                     for d in examples
@@ -66,6 +68,11 @@ def score_mode(mode, cases, catalog, embedder=None):
         })
     n = len(rows) or 1
     return {
+        "exact_overlap_count": sum(r['exact_example_overlap'] for r in rows),
+        "nonoverlap_count": sum(not r['exact_example_overlap'] for r in rows),
+        "nonoverlap_metric_hit_at_1": _nonoverlap_rate(rows, 'metric_hit_at_1'),
+        "nonoverlap_metric_hit_at_2": _nonoverlap_rate(rows, 'metric_hit_at_2'),
+        "nonoverlap_example_hit_at_2": _nonoverlap_rate(rows, 'example_hit_at_2'),
         "metric_hit_at_1": sum(r["metric_hit_at_1"] for r in rows) / n,
         "metric_hit_at_2": sum(r["metric_hit_at_2"] for r in rows) / n,
         "top1_distractor_rate": sum(r["top1_distractor"] for r in rows) / n,
@@ -77,7 +84,14 @@ def score_mode(mode, cases, catalog, embedder=None):
     }
 
 
+def _nonoverlap_rate(rows, key):
+    subset = [row for row in rows if not row['exact_example_overlap']]
+    return sum(row[key] for row in subset) / len(subset) if subset else None
+
+
 def main(split="dev"):
+    if split not in {'dev', 'holdout'}:
+        raise SystemExit('split must be dev or holdout')
     cases = load_cases(split)
     if not cases:
         raise SystemExit(f"No cases for split={split}")
@@ -90,6 +104,8 @@ def main(split="dev"):
         "purpose": "scaled retrieval diagnostic with distractors; not end-to-end LLM evaluation",
         "dataset": "retrieval-scale-v1",
         "split": split,
+        "scorer_version": "retrieval-scale-v2-overlap-audited",
+        "dataset_sha256": hashlib.sha256((DATASET / 'cases.json').read_bytes()).hexdigest(),
         "corpus_version": CORPUS_VERSION,
         "corpus_counts": {"examples": len(corpus["examples"]), "distractors": len(corpus["distractors"])},
         "catalog_source": "synthetic three-metric catalog; live requests use authorized Java catalog",

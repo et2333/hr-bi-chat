@@ -19,6 +19,9 @@ class ConversationPlanner(ModeFixturePlanner):
         else:
             original = await super().complete_query_draft(system, user)
             draft = json.loads(original.text)
+            if '研发部' in q:
+                # Deliberately guess one homonym: the real guard must still ask.
+                draft['organization'] = {'kind': 'catalog_id', 'org_id': '9', 'source_text': '研发部'}
             for word in ['上月', '本月', '近30天']:
                 if word in q:
                     draft['time_expression'] = word

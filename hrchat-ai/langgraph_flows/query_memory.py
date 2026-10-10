@@ -79,13 +79,20 @@ def selection_draft(memory):
         return None
     pending = memory.get("pending") or {}
     option = choice.get("option_id")
-    allowed = [o["option_id"] for q in pending.get("questions", []) if q["question_id"] == choice.get("question_id")
-               for o in q.get("options", [])]
+    question = next((q for q in pending.get("questions", [])
+                     if q.get("question_id") == choice.get("question_id")), None)
+    allowed = [o["option_id"] for o in (question or {}).get("options", [])]
     if option not in allowed:
         raise PlanRejected("invalid_selection", "澄清选项已失效，请重新提问", "failed")
-    if option in PERIOD_OPTIONS:
-        text = PERIOD_OPTIONS[option]
+    slot = (question or {}).get("slot") or ("time_range" if option in PERIOD_OPTIONS else "metric")
+    if slot == "time_range" or option in PERIOD_OPTIONS:
+        text = PERIOD_OPTIONS.get(option) or option
         return ContextQueryDraft(decision="execute", time_expression=text), text
+    if slot == "organization":
+        # Catalog ID was offered by the prior AMBIGUOUS clarify card; not model-guessed.
+        return (ContextQueryDraft(decision="execute",
+                    organization=CatalogOrganization(kind="catalog_id", org_id=option, source_text=option)),
+                option)
     return ContextQueryDraft(decision="execute", metric_codes=[option], metric_text=option), option
 
 

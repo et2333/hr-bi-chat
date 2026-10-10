@@ -103,9 +103,12 @@ headcount 是时点人数，time_type=as_of；不指定时间为当前。hire/le
 
 
 class PlanRejected(ValueError):
-    def __init__(self, reason, message, decision="unsupported"):
+    def __init__(self, reason, message, decision="unsupported", *, options=None, slot=None):
         super().__init__(message)
         self.reason, self.message, self.decision = reason, message, decision
+        # Optional clarify card payload (e.g. ambiguous organizations).
+        self.options = list(options or [])
+        self.slot = slot
 
 
 def validate_plan(plan: QueryPlan, metadata: dict, *, turn_id: str):

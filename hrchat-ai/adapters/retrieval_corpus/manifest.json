@@ -1,5 +1,5 @@
 {
-  "corpus_version": "retrieval-corpus-v2",
+  "corpus_version": "retrieval-corpus-v2.1",
   "plan": "R4规模化语义检索数据Mock实施计划",
   "executable_codes": [
     "headcount",
@@ -18,9 +18,10 @@
   ],
   "counts": {
     "examples": 36,
-    "examples_reviewed": 36,
+    "examples_reviewed": 0,
+    "examples_compiler_checked": 36,
     "distractors": 60,
-    "distractors_reviewed": 22
+    "distractors_reviewed": 0
   },
   "notes": [
     "Distractors never enter Java semantic_query.",
