@@ -17,6 +17,7 @@ def pytest_configure(config):
     patch.setattr(local_env, "LOCAL_ENV_FILE", Path(config._model_env_dir.name) / ".env.local")
     patch.setenv("LLM_PROFILE", "mock")
     patch.setenv("QUERY_BACKEND", "demo")
+    patch.setenv("HRCHAT_RAG_MODE", "off")
 
 
 def pytest_unconfigure(config):
