@@ -93,7 +93,7 @@ import { useAttribution } from '@/composables/useAttribution'
 import { baselineFromInputs, displayPeriod, shiftDate } from '@/utils/analysisPeriod'
 import { analysisClaimText, analysisIssueLabel } from '@/utils/analysisPresentation'
 
-const props = defineProps<{ sourceAskId: string }>()
+const props = defineProps<{ sourceAskId: string; autoOpen?: boolean }>()
 const { context, task, stages, busy, cancelling, disconnected, error, prepare, start, restore, cancel, chooseAgain } = useAttribution(props.sourceAskId)
 const opened = ref(false)
 const baselineStart = ref('')
@@ -114,7 +114,7 @@ watch(context, next => {
   baselineEnd.value = shiftDate(next?.suggestedBaselinePeriod?.end ?? '', -1)
   formError.value = ''
 })
-onMounted(restore)
+onMounted(async () => { await restore(); if (props.autoOpen && !task.value) await open() })
 async function open() { opened.value = true; await prepare() }
 async function confirm() {
   if (!context.value) return

@@ -36,7 +36,7 @@
     <div class="chat-panel">
       <div ref="messageArea" class="message-area">
         <div v-if="chat.turns.length === 0" class="chat-empty">
-          <StateEmpty state="empty" title="开始问数" description="例如：研发中心在职人数、上月离职率是多少？" />
+          <StateEmpty state="empty" title="开始问数" description="例如：上月研发中心在职人数、上月离职人数是多少？" />
         </div>
 
         <div v-for="t in chat.turns" :key="t.id" class="turn-row" :class="t.role">
@@ -44,6 +44,11 @@
           <div v-if="t.role === 'user'" class="user-bubble">{{ t.question }}</div>
           <!-- 助手消息 -->
           <div v-else class="assistant-wrap">
+            <InteractionHistory :entries="t.interactionHistory" />
+            <details v-if="t.progress?.length" class="query-progress">
+              <summary>{{ t.hint || '查看处理阶段' }}</summary>
+              <p v-for="stage in t.progress" :key="stage.stage">{{ stage.message }} · {{ stage.status === 'started' ? '处理中' : stage.status === 'ok' ? '完成' : '已结束' }}<span v-if="stage.elapsed_ms != null">（{{ stage.elapsed_ms }} ms）</span></p>
+            </details>
             <AnswerCard
               :state="t.state"
               :payload="t.payload"
@@ -65,6 +70,7 @@
               @save-report="saveAsReport(t)"
               @typing-done="onTypingDone(t.id)"
             />
+            <QueryUsage :usage="t.payload?.usage ?? t.usage" />
           </div>
         </div>
       </div>
@@ -79,7 +85,7 @@
           @keydown.enter.exact.prevent="send()"
         />
         <div class="input-actions">
-          <span class="input-hint">支持「研发中心在职人数」「上月离职率」等自然语言问句</span>
+          <span class="input-hint">支持在职、入职、离职人数；可继续追问期间、部门、趋势和明细</span>
           <a-button type="primary" :loading="chat.asking" :disabled="!input.trim()" @click="send()">
             发送
           </a-button>
@@ -129,10 +135,12 @@ import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import AnswerCard from '@/components/AnswerCard.vue'
+import InteractionHistory from '@/components/InteractionHistory.vue'
+import QueryUsage from '@/components/QueryUsage.vue'
 import StateEmpty from '@/components/StateEmpty.vue'
 import { chatApi, reportApi } from '@/api'
 import type { ComponentSpec } from '@/api/reports'
-import type { AnswerPayload, ClarifyQuestions, SqlView, TableData } from '@/api/types'
+import type { AnswerPayload, ClarifyQuestions, SqlView, TableData, InteractionEntry, QueryUsage as QueryUsageData } from '@/api/types'
 import { useChatStore, type ChatTurn } from '@/stores/chat'
 import { useAuthStore } from '@/stores/auth'
 import { hasPerm } from '@/layouts/adminMenu'
@@ -208,6 +216,7 @@ async function loadTurns() {
       state: 'completed',
       streamingText: '',
       payload: briefPayload(turn),
+      interactionHistory: turn.interactionHistory,
     })
     if (turn.askId) {
       void hydrateHistoryAnswer(assistantId, turn.askId, turn)
@@ -278,6 +287,19 @@ async function send(question?: string) {
     const event = String(data.event ?? '')
     const payload = (data.payload ?? {}) as Record<string, unknown>
     switch (event) {
+      case 'PROGRESS': {
+        const t = chat.turns.find(t => t.id === turnId)
+        if (!t) break
+        const stages = [...(t.progress ?? [])]
+        const index = stages.findIndex(s => s.stage === payload.stage)
+        const stage = { ...(index < 0 ? {} : stages[index]), ...payload } as NonNullable<ChatTurn['progress']>[number]
+        if (index < 0) stages.push(stage); else stages[index] = stage
+        chat.updateTurn(turnId, { progress: stages, state: 'streaming', ...(payload.message ? { hint: String(payload.message) } : {}) })
+        break
+      }
+      case 'USAGE':
+        chat.updateTurn(turnId, { usage: payload as unknown as QueryUsageData })
+        break
       case 'MESSAGE_DELTA':
         applyDelta(turnId, payload)
         break
@@ -304,6 +326,7 @@ async function send(question?: string) {
   const stream = chatApi.askStream(sessionId, { question: q }, handleFrame)
   await stream.done
   const turn = chat.turns.find((t) => t.id === turnId)
+  if (turn) await refreshInteractionHistory(turn)
   if (turn && turn.state === 'loading') {
     chat.updateTurn(turnId, { state: 'failed', errorMessage: '未收到有效响应' })
   }
@@ -580,23 +603,36 @@ async function submitClarify(t: ChatTurn, answers: Array<{ questionId: string; o
   const sessionId = chat.currentSessionId
   const askId = t.clarify?.askId
   if (sessionId == null || !askId) return
-  chat.updateTurn(t.id, { state: 'loading', clarify: null })
+  chat.updateTurn(t.id, { state: 'loading' })
   chat.asking = true
   const handleFrame = (data: Record<string, unknown>) => {
     const event = String(data.event ?? '')
     const payload = (data.payload ?? {}) as Record<string, unknown>
     if (event === 'MESSAGE_DELTA') {
       applyDelta(t.id, payload)
+    } else if (event === 'INTERRUPT') {
+      chat.updateTurn(t.id, { state: 'clarifying', clarify: normalizeClarify(payload) })
     } else if (event === 'ANSWER_DONE') {
-      chat.updateTurn(t.id, { payload: normalizeAnswerPayload(payload) })
+      chat.updateTurn(t.id, { payload: normalizeAnswerPayload(payload), clarify: null })
       tryFinalize(t.id)
     } else if (event === 'ERROR') {
       handleError(t.id, payload)
     }
   }
   const stream = chatApi.clarifyStream(sessionId, askId, answers, handleFrame)
-  await stream.done
-  chat.asking = false
+  try { await stream.done } finally {
+    chat.asking = false
+    await refreshInteractionHistory(t, askId)
+  }
+}
+
+async function refreshInteractionHistory(t: ChatTurn, originalAskId?: string) {
+  const askId = originalAskId ?? t.clarify?.askId ?? t.payload?.askId
+  if (!askId) return
+  try {
+    const result = await chatApi.getInteractionHistory(askId)
+    chat.updateTurn(t.id, { interactionHistory: result.data as InteractionEntry[] })
+  } catch { /* Keep the current history on transient errors; never invent a choice. */ }
 }
 
 // ---------------- 辅助操作 ----------------

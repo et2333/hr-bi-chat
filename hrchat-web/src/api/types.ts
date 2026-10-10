@@ -37,6 +37,18 @@ export interface TurnView {
   conclusionBrief: string
   askId: string
   createdAt: string
+  interactionHistory?: InteractionEntry[]
+}
+
+export interface InteractionEntry {
+  sequence: number
+  at: string
+  kind: 'request' | 'clarification' | 'selection' | 'outcome'
+  question?: string
+  selected?: string
+  message?: string
+  status?: string
+  options?: Array<{ optionId: string; label: string }>
 }
 
 export interface SqlView {
@@ -61,6 +73,8 @@ export interface SSEFrame {
 
 /** ANSWER_DONE.payload 完整结构 */
 export interface AnswerPayload {
+  analysisPreparation?: { sourceAskId: string; context: Record<string, unknown> } | null
+  usage?: QueryUsage | null
   askId: string
   answerId: string
   status: string
@@ -73,6 +87,13 @@ export interface AnswerPayload {
   caliber: Caliber | null
   followups: string[]
   elapsedMs?: number
+}
+
+export interface QueryUsage {
+  call_count: number
+  unknown_cost_count: number
+  actual_usage_known_sum: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number }
+  known_cost_by_currency: Record<string, string>
 }
 
 export interface Conclusion {
