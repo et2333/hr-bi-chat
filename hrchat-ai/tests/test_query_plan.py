@@ -64,6 +64,11 @@ class Tools:
         self.calls.append(("resolve", context))
         if name == "研发中心":
             return {"status": "RESOLVED", "organization": CATALOG["organizations"][0]}
+        if name == "研发部":
+            return {"status": "AMBIGUOUS", "candidates": [
+                {"org_id": "9", "name": "研发部", "org_code": "RD1-DEV", "label": "研发部（研发一部 / RD1-DEV）"},
+                {"org_id": "10", "name": "研发部", "org_code": "RD2-DEV", "label": "研发部（研发二部 / RD2-DEV）"},
+            ]}
         return {"status": "UNAVAILABLE"}
 
 
@@ -142,7 +147,9 @@ async def test_tool_failure_has_no_demo_fallback(code):
 async def test_ambiguity_only_offers_real_catalog_options():
     result = await run(plan(decision="clarify", reason="ambiguous_metric",
         clarification_options=[{"option_id": "headcount", "label": "forged label"}]))
-    assert result["clarify_questions"][0]["options"][0]["label"] == "在职人数"
+    label = result["clarify_questions"][0]["options"][0]["label"]
+    assert label.startswith("在职人数")  # forged label discarded; optional caliber hint appended
+    assert result["clarify_questions"][0]["slot"] == "metric"
 
 
 async def test_model_failure_records_unknown_attempt():
@@ -182,3 +189,38 @@ async def test_model_cannot_probe_invented_organization_names():
     tools = Tools()
     result = await run(plan(org_scope={"requested_name": "并购筹备组"}), tools=tools)
     assert result["error"] and len(tools.calls) == 1
+
+
+async def test_ambiguous_organization_offers_distinguishable_candidates():
+    tools = Tools()
+    result = await run(plan(org_scope={"requested_name": "研发部"}), tools=tools, question="研发部在职人数")
+    assert result["evidence"]["reason"] == "ambiguous_organization"
+    assert [c[0] for c in tools.calls] == ["catalog", "resolve"]
+    q = result["clarify_questions"][0]
+    assert q["slot"] == "organization"
+    assert {o["option_id"] for o in q["options"]} == {"9", "10"}
+    assert all("研发一部" in o["label"] or "研发二部" in o["label"] for o in q["options"])
+    assert result.get("metric_code") == "headcount"
+    assert not result.get("answer_payload")
+
+
+async def test_ambiguous_organization_selection_continues_with_org_override():
+    tools = Tools()
+    catalog = copy.deepcopy(CATALOG)
+    catalog["organizations"] = list(CATALOG["organizations"]) + [
+        {"org_id": "9", "name": "研发部", "aliases": [], "org_code": "RD1-DEV",
+         "label": "研发部（研发一部 / RD1-DEV）"},
+        {"org_id": "10", "name": "研发部", "aliases": [], "org_code": "RD2-DEV",
+         "label": "研发部（研发二部 / RD2-DEV）"},
+    ]
+    tools = Tools(catalog=catalog)
+    result = await run(
+        plan(org_scope={"requested_name": "研发部"}),
+        tools=tools,
+        question="研发部在职人数",
+        context_override={"org": {"org_id": "9", "include_children": True}},
+        forced_metric_code="headcount",
+    )
+    # UI selection wins over requested_name; Java resolve is not required again.
+    assert result["answer_payload"]["conclusion"]["value"] == 7
+    assert result["evidence"]["query_plan"]["org_scope"]["org_id"] == "9"
