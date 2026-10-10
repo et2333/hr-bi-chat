@@ -27,7 +27,7 @@ const COMPLETED: AnswerPayload = {
 
 describe('components/AnswerCard', () => {
   it('only offers analysis for completed leave_count answers with the function permission', () => {
-    const payload = { ...COMPLETED, caliber: { ...COMPLETED.caliber!, metricCode: 'leave_count' } }
+    const payload = { ...COMPLETED, caliber: { ...COMPLETED.caliber!, metricCode: 'leave_count', queryMode: '汇总' } }
     const options = { global: { plugins: [Antd], stubs: { AttributionPanel: true } } }
     const allowed = mount(AnswerCard, { props: { state: 'completed', payload, canAnalyze: true }, ...options })
     expect(allowed.findComponent({ name: 'AttributionPanel' }).exists()).toBe(true)
@@ -35,6 +35,9 @@ describe('components/AnswerCard', () => {
     expect(denied.findComponent({ name: 'AttributionPanel' }).exists()).toBe(false)
     const other = mount(AnswerCard, { props: { state: 'completed', payload: COMPLETED, canAnalyze: true }, ...options })
     expect(other.findComponent({ name: 'AttributionPanel' }).exists()).toBe(false)
+    const grouped = mount(AnswerCard, { props: { state: 'completed', payload: { ...payload, caliber: { ...payload.caliber, queryMode: '按组织对比' } }, canAnalyze: true }, ...options })
+    expect(grouped.findComponent({ name: 'AttributionPanel' }).exists()).toBe(false)
+    grouped.unmount()
     allowed.unmount(); denied.unmount(); other.unmount()
   })
   it('shows actual adopted conditions including inherited organization and period', () => {

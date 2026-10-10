@@ -257,6 +257,40 @@ class RemoteAgentRuntimeClientTest {
     }
 
     @Test
+    void streamedProgressArrivesBeforeTerminalIsReleased() throws Exception {
+        var delivered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var server = com.sun.net.httpserver.HttpServer.create(new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                out.write("data: {\"event\":\"PROGRESS\",\"payload\":{\"stage\":\"plan\",\"status\":\"started\"}}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                out.flush();
+                try { release.await(5, java.util.concurrent.TimeUnit.SECONDS); }
+                catch (InterruptedException ex) { Thread.currentThread().interrupt(); }
+                out.write("data: {\"event\":\"TERMINAL\",\"payload\":{\"ask_id\":\"a\",\"status\":\"CLARIFYING\",\"questions\":[]}}\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+        });
+        server.start();
+        var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            var live = new RemoteAgentRuntimeClient("http://127.0.0.1:" + server.getAddress().getPort(), "", "fixture", objectMapper, new RestTemplate());
+            var future = executor.submit(() -> live.ask(new AskRequest("人数", "STREAM", null), ctx, null,
+                    event -> delivered.countDown()));
+            org.junit.jupiter.api.Assertions.assertTrue(delivered.await(3, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse(future.isDone(), "progress must not wait for the complete response body");
+            release.countDown();
+            assertEquals("a", future.get(3, java.util.concurrent.TimeUnit.SECONDS).askId());
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            server.stop(0);
+        }
+    }
+
+    @Test
     void javaSnapshotIsForwardedOnlyWithServiceAuthenticationAndFreshInvocation() {
         client.withServiceToken("service-secret");
         when(restTemplate.postForEntity(anyString(), any(), eq(Map.class))).thenReturn(ResponseEntity.ok(
