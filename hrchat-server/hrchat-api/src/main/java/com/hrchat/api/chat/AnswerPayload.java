@@ -18,7 +18,16 @@ public record AnswerPayload(
         Chart chart,
         Caliber caliber,
         List<String> followups,
-        Long elapsedMs) {
+        Long elapsedMs,
+        Map<String, Object> analysisPreparation,
+        Map<String, Object> usage) {
+
+    public AnswerPayload(String askId, String answerId, String status, String intent, boolean degraded,
+                         String degradedTip, Conclusion conclusion, TableData table, Chart chart, Caliber caliber,
+                         List<String> followups, Long elapsedMs) {
+        this(askId, answerId, status, intent, degraded, degradedTip, conclusion, table, chart, caliber,
+                followups, elapsedMs, null, null);
+    }
 
     /** 结论层 */
     public record Conclusion(String type, Object value, String unit, Compare compare) {

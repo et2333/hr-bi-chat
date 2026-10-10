@@ -127,6 +127,29 @@ public class ChatController {
 
     private ResponseEntity<StreamingResponseBody> buildAskResponse(Long sessionId, AskRequest request,
                                                                    String idempotencyKey, UserContext ctx) {
+        if (request.mode() == null || "STREAM".equalsIgnoreCase(request.mode())) {
+            // 开流前完成归属/功能鉴权，避免已写 HTTP 200 后把 HRC-2002 吞成 SSE ERROR。
+            chatService.assertCanAsk(ctx, sessionId);
+            return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
+                    .header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no")
+                    .body(output -> {
+                        ChatStreamWriter writer = new ChatStreamWriter(output, objectMapper);
+                        writer.heartbeat();
+                        try {
+                            withTenant(ctx, () -> {
+                                ChatService.AskOutcome outcome = chatService.ask(ctx, sessionId, request, idempotencyKey, writer);
+                                writer.terminal(outcome.sseBody());
+                                return null;
+                            });
+                        } catch (com.hrchat.common.exception.BizException ex) {
+                            writer.accept(new com.hrchat.api.sse.SseEvent("ERROR", java.util.Map.of(
+                                    "code", ex.getErrorCode().getCode(), "message", ex.getMessage(), "recoverable", false)));
+                        } catch (Exception ex) {
+                            writer.accept(new com.hrchat.api.sse.SseEvent("ERROR", java.util.Map.of(
+                                    "code", "HRS-3002", "message", "查询服务暂不可用，请稍后重试", "recoverable", true)));
+                        }
+                    });
+        }
         ChatService.AskOutcome outcome = chatService.ask(ctx, sessionId, request, idempotencyKey);
         String mode = request.mode() == null || request.mode().isBlank() ? "STREAM" : request.mode().trim().toUpperCase();
         HttpHeaders headers = new HttpHeaders();
@@ -160,6 +183,11 @@ public class ChatController {
     }
 
     // ---------------- 任务状态 / SQL / 表格 / 反馈 ----------------
+
+    @GetMapping("/asks/{askId}/history")
+    public ApiResponse<List<java.util.Map<String, Object>>> history(@PathVariable String askId, @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(chatService.getInteractionHistory(ctx, askId));
+    }
 
     @Operation(summary = "问答任务状态（ANSWER_DONE.payload 兜底拉取）")
     @GetMapping("/asks/{askId}")

@@ -52,6 +52,12 @@ public class ChatAskStore {
         return records.get(askId);
     }
 
+    public AskRecord latestCompletedQuery(Long sessionId, Long userId, String tenantId) {
+        return records.values().stream().filter(r -> sessionId.equals(r.sessionId()) && userId.equals(r.userId())
+                && tenantId.equals(r.tenantId()) && "COMPLETED".equals(r.status()) && "QUERY".equals(r.intent()))
+                .max(java.util.Comparator.comparing(AskRecord::turnId)).orElse(null);
+    }
+
     public void put(AskRecord record) {
         records.put(record.askId(), record);
     }

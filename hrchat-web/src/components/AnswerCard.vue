@@ -96,9 +96,10 @@
       </div>
 
       <AttributionPanel
-        v-if="canAnalyze && payload.askId && payload.caliber?.metricCode === 'leave_count'"
+        v-if="canAnalyze && (payload.analysisPreparation || (payload.askId && payload.caliber?.metricCode === 'leave_count' && payload.caliber?.queryMode !== 'trend' && payload.caliber?.queryMode !== 'org' && payload.caliber?.queryMode !== 'detail'))"
         :key="payload.askId"
-        :source-ask-id="payload.askId"
+        :source-ask-id="payload.analysisPreparation?.sourceAskId ?? payload.askId"
+        :auto-open="!!payload.analysisPreparation"
       />
 
       <!-- 反馈 + 存为报表 -->
@@ -169,7 +170,7 @@ const emit = defineEmits<{
 
 const rated = ref<'UP' | 'DOWN' | null>(null)
 /** 有 askId 才可存报表（Boolean prop 缺省会被编译为 false，故不用可选开关 prop） */
-const saveReportEnabled = computed(() => !!props.payload?.askId)
+const saveReportEnabled = computed(() => !!props.payload?.askId && props.payload.intent === 'QUERY')
 const degradedTip = computed(() => (props.payload?.degraded ? props.payload.degradedTip ?? 'AI 服务暂不可用，已使用模板直查为您生成结果' : ''))
 
 /** 仅流式中的答案正文参与打字机；历史已完成消息直接展示 */

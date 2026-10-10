@@ -17,7 +17,12 @@ import type {
   SqlView,
   TableData,
   TurnView,
+  InteractionEntry,
 } from './types'
+
+export function getInteractionHistory(askId: string) {
+  return get<ApiResponse<InteractionEntry[]>>(`/chat/asks/${askId}/history`)
+}
 
 /** 提问请求体 */
 export interface AskRequest {

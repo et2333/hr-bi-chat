@@ -83,6 +83,8 @@ public class ChatService {
     private final AuditCollector auditCollector;
     private final ObjectMapper objectMapper;
     private final QueryContextStore queryContexts;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hrchat.chat.analysis.AttributionService attributionService;
 
     /** 问句编排结果（SYNC 直接返回 payload；STREAM 返回 SSE 帧文本）。 */
     public record AskOutcome(String askId, String sseBody, AnswerPayload payload, boolean clarifying,
@@ -160,7 +162,7 @@ public class ChatService {
                     answer == null ? "PENDING" : stateCodeToName(answer.getAnswerState()),
                     answer == null ? null : answer.getSummaryText(),
                     answer == null ? null : answer.getResultRef(),
-                    LocalDateTime.of(2026, 9, 1, 0, 0)));
+                    historyTime(t), InteractionHistory.read(t)));
         }
         return views;
     }
@@ -173,6 +175,19 @@ public class ChatService {
      * 提交问句（接口文档 2.2.5）。返回 SSE 帧文本（STREAM）或完整 payload（SYNC）。
      */
     public AskOutcome ask(UserContext ctx, Long sessionId, AskRequest request, String idempotencyKey) {
+        return ask(ctx, sessionId, request, idempotencyKey, null);
+    }
+
+    /**
+     * STREAM 开流前鉴权：会话归属/功能权限失败必须走 HTTP 403，不能落成 SSE ERROR。
+     */
+    public void assertCanAsk(UserContext ctx, Long sessionId) {
+        authzService.checkFunc(ctx, PERM_ASK);
+        requireSession(ctx, sessionId);
+    }
+
+    public AskOutcome ask(UserContext ctx, Long sessionId, AskRequest request, String idempotencyKey,
+                          java.util.function.Consumer<SseEvent> progress) {
         authzService.checkFunc(ctx, PERM_ASK);
         ChtSession session = requireSession(ctx, sessionId);
 
@@ -183,16 +198,19 @@ public class ChatService {
 
         IdempotencyService.Execution<AskOutcome> execution = idempotencyService.execute(ctx, "POST",
                 "/api/v1/chat/sessions/{sessionId}/asks", String.valueOf(sessionId), idempotencyKey,
-                request, AskOutcome.class, () -> executeAsk(ctx, sessionId, request, session));
+                request, AskOutcome.class, () -> executeAsk(ctx, sessionId, request, session, progress));
         AskOutcome value = execution.value();
         return new AskOutcome(value.askId(), value.sseBody(), value.payload(), value.clarifying(),
                 execution.replayed());
     }
 
-    private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session) {
+    private AskOutcome executeAsk(UserContext ctx, Long sessionId, AskRequest request, ChtSession session,
+                                   java.util.function.Consumer<SseEvent> progress) {
         QueryContextStore.Ticket ticket = queryContexts.begin(QueryContextStore.key(ctx, sessionId));
         AgentInvocationContext invocation = buildInvocation(ctx, sessionId, null).withQueryContext(ticket.snapshot());
-        AgentResult result = agentRuntime.ask(request, ctx, invocation);
+        AgentResult result = progress == null ? agentRuntime.ask(request, ctx, invocation)
+                : agentRuntime.ask(request, ctx, invocation, progress);
+        result = preparePublicAnswer(result, ctx, sessionId);
         String askId = result.askId();
         Long turnId = persistTurn(sessionId, ctx, request.question(), result);
         result = recordContextCommit(ticket, result, request.question());
@@ -232,12 +250,30 @@ public class ChatService {
             throw new BizException(ErrorCode.PARAM_MISSING, "answers");
         }
         if (request.answers().size() != 1) throw new BizException(ErrorCode.PARAM_INVALID, "每次仅回答一个澄清问题");
+        ClarifyAnswerRequest.Answer selected = request.answers().get(0);
+        ClarifyQuestion prompt = pending.questions().stream().filter(q -> q.questionId().equals(selected.questionId()))
+                .findFirst().orElseThrow(() -> new BizException(ErrorCode.PARAM_INVALID, "澄清问题已失效"));
+        if (selected.optionIds() == null || selected.optionIds().size() != 1 || prompt.options().stream()
+                .noneMatch(o -> o.optionId().equals(selected.optionIds().get(0))))
+            throw new BizException(ErrorCode.PARAM_INVALID, "请选择当前有效选项");
         boolean taskMemory = askStore.evidence(askId).containsKey("query_context_candidate");
         QueryContextStore.Ticket ticket = taskMemory
                 ? queryContexts.begin(QueryContextStore.key(ctx, sessionId), askId, request.answers().get(0)) : null;
         AgentInvocationContext invocation = buildInvocation(ctx, sessionId, askId);
         if (ticket != null) invocation = invocation.withQueryContext(ticket.snapshot());
-        AgentResult result = agentRuntime.clarify(askId, pending.question(), request.answers().get(0), ctx, invocation);
+        String label = prompt.options().stream().filter(o -> selected.optionIds().contains(o.optionId()))
+                .map(ClarifyQuestion.Option::label).findFirst().orElseThrow();
+        appendHistory(record.turnId(), "selection", Map.of("question", prompt.question(),
+                "questionId", prompt.questionId(), "selected", label, "optionIds", selected.optionIds(), "status", "submitted"));
+        AgentResult result;
+        try {
+            result = agentRuntime.clarify(askId, pending.question(), selected, ctx, invocation);
+        } catch (RuntimeException ex) {
+            appendHistory(record.turnId(), "outcome", Map.of("status", "failed", "message", "确认后处理失败，可重新提问"));
+            throw ex;
+        }
+        result = preparePublicAnswer(result, ctx, sessionId);
+        appendResultHistory(record.turnId(), result);
 
         String status = result.isClarifying()
                 ? SseEvents.ASK_CLARIFYING
@@ -275,6 +311,62 @@ public class ChatService {
     public AnswerPayload getAsk(UserContext ctx, String askId) {
         ChatAskStore.AskRecord record = requireOwnAsk(ctx, askId, null);
         return record.payload();
+    }
+
+    public List<Map<String, Object>> getInteractionHistory(UserContext ctx, String askId) {
+        ChatAskStore.AskRecord record = requireOwnAsk(ctx, askId, null);
+        requireSession(ctx, record.sessionId());
+        return InteractionHistory.read(turnMapper.selectById(record.turnId()));
+    }
+
+    private static LocalDateTime historyTime(ChtTurn turn) {
+        Object at = InteractionHistory.envelope(turn).get("created_at");
+        return at == null ? null : OffsetDateTime.parse(at.toString()).atZoneSameInstant(ZoneId.of("Asia/Shanghai")).toLocalDateTime();
+    }
+
+    @SuppressWarnings("unchecked")
+    private AgentResult preparePublicAnswer(AgentResult result, UserContext ctx, Long sessionId) {
+        AnswerPayload p = result.payload();
+        if (p == null) return result;
+        Map<String, Object> preparation = null;
+        if (result.evidence() != null && result.evidence().containsKey("analysis_request")) {
+            ChatAskStore.AskRecord source = askStore.latestCompletedQuery(sessionId, ctx.getUserId(), ctx.getTenantId());
+            try {
+                if (source == null) throw new BizException(ErrorCode.PARAM_INVALID, "请先查询一个期间的离职人数，再分析变化");
+                Map<String, Object> checked = attributionService.context(ctx, source.askId());
+                preparation = Map.of("sourceAskId", source.askId(), "context", checked);
+            } catch (BizException ex) {
+                return new AgentResult(result.askId(), List.of(new SseEvent("ERROR", Map.of(
+                        "askId", result.askId(), "code", ex.getErrorCode().getCode(), "message", ex.getMessage(), "recoverable", false))),
+                        null, List.of(), null, "ANALYSIS", false, result.elapsedMs()).withEvidence(result.evidence());
+            }
+        }
+        Map<String, Object> usage = result.evidence() != null && result.evidence().get("cost_summary") instanceof Map<?, ?> m
+                ? (Map<String, Object>) m : null;
+        AnswerPayload enriched = new AnswerPayload(p.askId(), p.answerId(), p.status(), p.intent(), p.degraded(),
+                p.degradedTip(), p.conclusion(), p.table(), p.chart(), p.caliber(), p.followups(), p.elapsedMs(), preparation, usage);
+        List<SseEvent> events = result.events().stream().map(e -> "ANSWER_DONE".equals(e.event())
+                ? new SseEvent("ANSWER_DONE", objectMapper.convertValue(enriched, Map.class)) : e).toList();
+        return new AgentResult(result.askId(), events, enriched, result.clarifyQuestions(), result.sql(),
+                result.intent(), result.degraded(), result.elapsedMs()).withEvidence(result.evidence());
+    }
+
+    private void appendHistory(Long turnId, String kind, Map<String, Object> fields) {
+        ChtTurn turn = turnMapper.selectById(turnId);
+        if (turn == null) return;
+        InteractionHistory.append(turn, kind, fields);
+        turnMapper.updateById(turn);
+    }
+
+    private void appendResultHistory(Long turnId, AgentResult result) {
+        if (result.isClarifying()) {
+            for (ClarifyQuestion q : result.clarifyQuestions())
+                appendHistory(turnId, "clarification", Map.of("questionId", q.questionId(), "question", q.question(),
+                        "options", q.options(), "status", "pending"));
+        } else {
+            appendHistory(turnId, "outcome", Map.of("status", result.payload() == null ? "failed" : "completed",
+                    "message", result.payload() == null ? "本次未完成查询" : "本次处理完成"));
+        }
     }
 
     /** 查看查询逻辑（接口文档 2.2.8，权限点 chat:view_sql）。 */
@@ -407,6 +499,10 @@ public class ChatService {
         turn.setTurnSeq(count.intValue() + 1);
         turn.setQuestionText(question);
         turn.setIntentType(intentToCode(result.intent()));
+        InteractionHistory.append(turn, "request", Map.of("question", question));
+        if (result.isClarifying()) for (ClarifyQuestion q : result.clarifyQuestions())
+            InteractionHistory.append(turn, "clarification", Map.of("questionId", q.questionId(),
+                    "question", q.question(), "options", q.options(), "status", "pending"));
         turnMapper.insert(turn);
 
         ChtAnswer answer = new ChtAnswer();

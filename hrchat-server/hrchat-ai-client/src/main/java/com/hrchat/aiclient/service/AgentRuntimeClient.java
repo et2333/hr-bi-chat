@@ -36,6 +36,12 @@ public interface AgentRuntimeClient {
         return ask(request, ctx);
     }
 
+    /** Optional live progress. The returned result remains the authoritative terminal. */
+    default AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation,
+                            java.util.function.Consumer<com.hrchat.api.sse.SseEvent> progress) {
+        return ask(request, ctx, invocation);
+    }
+
     /**
      * 澄清续答：基于原问句 + 用户选项继续原问答流（接口文档 2.2.6）。
      *

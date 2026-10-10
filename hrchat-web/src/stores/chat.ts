@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { AnswerPayload, ClarifyQuestions, ChatSession } from '@/api/types'
+import type { AnswerPayload, ClarifyQuestions, ChatSession, InteractionEntry, QueryUsage } from '@/api/types'
 
 /** 当前会话消息（assistant 为 AnswerCard 数据源） */
 export interface ChatTurn {
@@ -10,6 +10,9 @@ export interface ChatTurn {
   state: 'loading' | 'streaming' | 'clarifying' | 'completed' | 'failed' | 'forbidden' | 'timeout'
   payload?: AnswerPayload | null
   clarify?: ClarifyQuestions | null
+  interactionHistory?: InteractionEntry[]
+  usage?: QueryUsage
+  progress?: Array<{ stage: string; status: string; message?: string; elapsed_ms?: number }>
   /** 答案正文（SUMMARIZING 实际内容，逐字打字机渲染） */
   streamingText?: string
   /** 瞬时进度提示（如“正在解析您的问句…”），不与正文拼接 */
