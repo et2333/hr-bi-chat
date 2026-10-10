@@ -218,6 +218,12 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     }
 
     @Override
+    public AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation,
+            java.util.function.Consumer<com.hrchat.api.sse.SseEvent> progress) {
+        return resolve(ctx).ask(request, ctx, invocation, progress);
+    }
+
+    @Override
     public AgentResult clarify(String askId, String question, ClarifyAnswerRequest.Answer answers, UserContext ctx) {
         return resolve(ctx).clarify(askId, question, answers, ctx);
     }

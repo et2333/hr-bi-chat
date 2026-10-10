@@ -50,7 +50,7 @@ _had_llm_profile = "LLM_PROFILE" in os.environ
 _local_env = dotenv_values(LOCAL_ENV_FILE) if LOCAL_ENV_FILE.is_file() else {}
 # CLI 已加载文件并应用 --model；子进程不能再次用文件覆盖显式启动配置。
 load_local_model_env(override=False)
-LLM_PROFILE = os.getenv("LLM_PROFILE", "mock").strip().lower() or "mock"
+LLM_PROFILE = os.getenv("LLM_PROFILE", "openai").strip().lower() or "openai"
 if (not _had_llm_profile and "LLM_PROFILE" not in _local_env
         and (_local_env.get("OPENAI_API_KEY") or "").strip()):
     LLM_PROFILE = "openai"
@@ -338,9 +338,14 @@ def create_app(
         x_tenant_no: Optional[str] = Header(default=None),
         last_event_id: Optional[str] = Header(default=None),
         x_hrchat_service_token: Optional[str] = Header(default=None),
+        x_hrchat_stream_protocol: Optional[str] = Header(default=None),
     ):
         """提交问句：mode=STREAM 返回 SSE；mode=SYNC 返回固定终态信封。"""
         require_java_context(body.query_context, x_hrchat_service_token, body.invocation_id, body.tool_context_token)
+        internal_stream = x_hrchat_stream_protocol == "terminal-v1"
+        if internal_stream and (not os.getenv("HRCHAT_MCP_SERVICE_TOKEN") or not x_hrchat_service_token
+                or not hmac.compare_digest(os.environ["HRCHAT_MCP_SERVICE_TOKEN"], x_hrchat_service_token)):
+            raise HTTPException(403, "内部流协议仅供受信 Java 服务使用")
         ask_id = "ask_" + uuid.uuid4().hex[:8]
         context_override = body.context_override.model_dump() if body.context_override else None
         store.save_ask(ask_id, {
@@ -356,7 +361,7 @@ def create_app(
             "status": "RUNNING",
         })
 
-        async def run() -> dict:
+        async def run(on_event=None) -> dict:
             runtime = _ensure_runtime(x_tenant_no)
             return await run_ask_flow(
                 question=body.question,
@@ -375,6 +380,7 @@ def create_app(
                 tool_context_token=body.tool_context_token,
                 invocation_id=body.invocation_id,
                 trace_id=body.trace_id,
+                on_event=on_event,
             )
 
         def save_terminal(result):
@@ -401,10 +407,26 @@ def create_app(
             replay_frames = [e.to_frame() for e in replay]
 
         async def flow_events() -> AsyncGenerator[dict[str, Any], None]:
-            result = await run()
-            save_terminal(result)
-            for evt in result["events"]:
-                yield evt
+            queue = asyncio.Queue()
+            async def produce():
+                try:
+                    result = await run(queue.put_nowait)
+                    terminal = save_terminal(result)
+                    for evt in result["events"]:
+                        queue.put_nowait(evt)
+                    if internal_stream:
+                        queue.put_nowait({"event": "TERMINAL", "payload": terminal})
+                finally:
+                    queue.put_nowait(None)
+            task = asyncio.create_task(produce())
+            try:
+                while (evt := await queue.get()) is not None:
+                    yield evt
+                await task
+            finally:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
         async def stream_gen() -> AsyncGenerator[str, None]:
             for frame in replay_frames:

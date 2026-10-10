@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -81,24 +82,60 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
 
     @Override
     public AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation) {
+        return ask(request, ctx, invocation, null);
+    }
+
+    @Override
+    public AgentResult ask(AskRequest request, UserContext ctx, AgentInvocationContext invocation,
+                           java.util.function.Consumer<SseEvent> progress) {
         long start = System.currentTimeMillis();
         String sessionId = resolveSessionId(invocation, null);
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("question", request.question());
-        body.put("mode", "SYNC");
+        body.put("mode", progress == null ? "SYNC" : "STREAM");
         if (request.contextOverride() != null) {
             body.put("context_override", toRemoteContext(request.contextOverride()));
         }
         putInvocationFields(body, invocation);
         HttpHeaders headers = requestHeaders(ctx, invocation);
-        ResponseEntity<Map> resp = restTemplate.postForEntity(
-                baseUrl + "/v1/chat/sessions/" + sessionId + "/asks",
-                new HttpEntity<>(body, headers), Map.class);
-        AgentResult result = parse(resp.getBody(), System.currentTimeMillis() - start);
+        String url = baseUrl + "/v1/chat/sessions/" + sessionId + "/asks";
+        Map<?, ?> terminal = progress == null
+                ? restTemplate.postForEntity(url, new HttpEntity<>(body, headers), Map.class).getBody()
+                : streamTerminal(url, body, headers, progress);
+        AgentResult result = parse(terminal, System.currentTimeMillis() - start);
         if (result.isClarifying()) {
             pendingSessionIds.put(result.askId(), sessionId);
         }
         return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<?, ?> streamTerminal(String url, Map<String, Object> body, HttpHeaders headers,
+                                     java.util.function.Consumer<SseEvent> progress) {
+        return restTemplate.execute(url, org.springframework.http.HttpMethod.POST, request -> {
+            request.getHeaders().putAll(headers);
+            request.getHeaders().setAccept(List.of(MediaType.TEXT_EVENT_STREAM));
+            request.getHeaders().set("X-Hrchat-Stream-Protocol", "terminal-v1");
+            objectMapper.writeValue(request.getBody(), body);
+        }, response -> {
+            var reader = new java.io.BufferedReader(new java.io.InputStreamReader(response.getBody(), java.nio.charset.StandardCharsets.UTF_8));
+            Map<?, ?> terminal = null;
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("data:")) continue;
+                Map<?, ?> frame = objectMapper.readValue(line.substring(5).trim(), Map.class);
+                String event = String.valueOf(frame.get("event"));
+                if (!(frame.get("payload") instanceof Map<?, ?> payload)) continue;
+                if ("TERMINAL".equals(event)) {
+                    if (terminal != null) throw new java.io.IOException("Duplicate terminal");
+                    terminal = payload;
+                } else if (Set.of("PROGRESS", "USAGE").contains(event)) {
+                    progress.accept(new SseEvent(event, (Map<String, Object>) payload));
+                }
+            }
+            if (terminal == null) throw new java.io.IOException("Agent stream ended without terminal");
+            return terminal;
+        });
     }
 
     @Override

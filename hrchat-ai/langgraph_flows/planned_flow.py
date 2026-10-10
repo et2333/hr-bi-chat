@@ -31,11 +31,12 @@ MESSAGES = {
 }
 
 
-def guard_known_capabilities(question):
+def guard_known_capabilities(question, allow_analysis=False):
     """Known unsupported requirements take priority over asking for missing slots."""
     if "主动离职" in question:
         raise PlanRejected("metric_unavailable", MESSAGES["metric_unavailable"])
-    if re.search(r"预测|为什么|原因|归因|性别|职级|司龄|年龄|学历|岗位|男性|女性|男员工|女员工|同比|去年同期", question):
+    if re.search(r"预测|性别|职级|司龄|年龄|学历|岗位|男性|女性|男员工|女员工|同比|去年同期", question) or (
+            not allow_analysis and re.search(r"为什么|原因|归因", question)):
         raise PlanRejected("unsupported_capability", MESSAGES["unsupported_capability"])
 
 
@@ -78,7 +79,7 @@ def guard_request(plan, question, metadata, context, selected):
 async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                            context_override=None, forced_metric_code=None, tool_context_token=None,
                            invocation_id=None, trace_id=None, use_langgraph=True, runtime_evidence=None,
-                           query_context=None, repair_enabled=None, query_timeout_seconds=75.0, **unused):
+                           query_context=None, repair_enabled=None, query_timeout_seconds=75.0, on_event=None, **unused):
     from langgraph_flows.ask_flow import _build_payload, _window_to_dict
     started = time.perf_counter()
     uses_draft = getattr(adapter, "supports_query_draft", False)
@@ -257,10 +258,24 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                 s["events"].append({"event": "ANSWER_DONE", "payload": s["answer_payload"]})
                 return
             else:
-                guard_known_capabilities(question)
+                guard_known_capabilities(question, allow_analysis=True)
                 result = await call_model(s, trace, messages=memory_messages(question, s["catalog"], context_override, query_context))
                 draft = ContextQueryDraft.model_validate_json(result.text)
             s["evidence"]["model_query_draft"] = draft.model_dump(exclude_none=True)
+            if draft.action == "prepare_analysis":
+                if (not re.search(r"分析|变化|变动|为什么|原因|归因", question) or draft.metric_codes
+                        or draft.organization or draft.time_expression or draft.query_mode or draft.clear_slots
+                        or draft.decision != "execute" or draft.unsupported_reason or context_override
+                        or query_context.get("pending")):
+                    raise PlanRejected("analysis_source_required", "请先完成要分析的离职人数单期查询，再确认两期进行变化分析。", "clarify")
+                s["evidence"]["analysis_request"] = {"action": "prepare_analysis", "source": "latest_completed_query"}
+                s["answer_payload"] = {"ask_id": ask_id, "answer_id": "ans_" + ask_id,
+                    "status": "COMPLETED", "intent": "ANALYSIS", "degraded": False,
+                    "conclusion": {"type": "TEXT", "value": "请确认两期后分析部门变化贡献；统计变化不代表真实离职原因。", "unit": None},
+                    "table": {"columns": [], "rows": [], "total": 0, "page": 1, "size": 1},
+                    "caliber": None, "chart": None, "followups": [], "elapsed_ms": 0}
+                s["events"].append({"event": "ANSWER_DONE", "payload": s["answer_payload"]})
+                return
             s["plan"], s["evidence"]["compilation"], s["effective_context"] = compile_contextual(
                 draft, question, s["catalog"], context_override, query_context, ask_id)
             s["evidence"]["query_plan"] = s["plan"].model_dump(exclude_none=True)
@@ -323,7 +338,7 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
             s["answer_payload"] = {
                 "ask_id": ask_id, "answer_id": "ans_" + ask_id, "status": "COMPLETED", "intent": "CHITCHAT",
                 "degraded": False, "degraded_tip": None,
-                "conclusion": {"type": "TEXT", "value": "您好，我可以帮您查询授权范围内的人事指标。", "unit": None, "compare": None},
+                "conclusion": {"type": "TEXT", "value": "您好，当前可查询：" + "、".join(m["name"] for m in s["catalog"]["metrics"]) + "。可继续指定期间、组织或查询方式。", "unit": None, "compare": None},
                 "table": {"columns": [], "rows": [], "total": 0, "page": 1, "size": 1},
                 "chart": None, "caliber": None, "followups": [], "elapsed_ms": 0}
             s["events"].append({"event": "ANSWER_DONE", "payload": s["answer_payload"]})
@@ -366,6 +381,12 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         async def node(s):
             t = time.perf_counter()
             trace = {"stage": name, "ask_id": ask_id, "invocation_id": invocation_id, "trace_id": trace_id}
+            labels = {"retrieve": "正在读取可用业务口径…", "plan_query": "正在理解问题与查询条件…",
+                      "observe_result": "正在检查查询草稿…", "repair_query": "正在修正明确遗漏的条件…",
+                      "validate": "正在核验口径与查询范围…", "tool": "正在查询授权数据…", "present": "正在整理查询结果…"}
+            if on_event:
+                on_event({"event": "PROGRESS", "payload": {"stage": name, "status": "started",
+                          "message": labels[name], "elapsed_ms": int((t - started) * 1000)}})
             try:
                 remaining = budget.remaining()
                 await asyncio.wait_for(fn(s, trace), timeout=remaining)
@@ -412,6 +433,9 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
                 stop(s, "service_error", "查询服务暂不可用，请稍后重试", code="HRS-3002")
             trace["elapsed_ms"] = int((time.perf_counter() - t) * 1000)
             s["evidence"]["trace"].append(trace)
+            if on_event:
+                on_event({"event": "PROGRESS", "payload": {"stage": name, "status": trace["status"],
+                          "elapsed_ms": int((time.perf_counter() - started) * 1000)}})
             return s
         return node
 
@@ -463,6 +487,8 @@ async def run_planned_flow(*, question, session_id, ask_id, adapter, tools,
         if candidate is not None:
             state["evidence"]["query_context_candidate"] = candidate
     state["evidence"]["cost_summary"] = summarize_calls(state["evidence"]["model_calls"])
+    if on_event:
+        on_event({"event": "USAGE", "payload": state["evidence"]["cost_summary"]})
     if state.get("answer_payload"):
         state["answer_payload"]["elapsed_ms"] = state["elapsed_ms"]
     return state
