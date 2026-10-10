@@ -18,6 +18,7 @@ PERIOD_OPTIONS = {"time:THIS_MONTH": "本月", "time:LAST_MONTH": "上月", "tim
 
 
 class ContextQueryDraft(ModelQueryDraft):
+    action: Literal["query", "prepare_analysis"] = "query"
     metric_text: str | None = Field(default=None, max_length=100)
     query_mode: Literal["scalar", "trend", "org", "detail"] | None = None
     mode_text: str | None = Field(default=None, max_length=100)
@@ -62,6 +63,7 @@ question=查看趋势 → {"decision":"execute","metric_codes":[],"metric_text":
 question=离职人数 → {"decision":"execute","metric_codes":["leave_count"],"metric_text":"离职人数","organization":null,"time_expression":null,"query_mode":null,"mode_text":null,"clear_slots":[],"unsupported_reason":null}
 question=全部部门 → {"decision":"execute","metric_codes":[],"metric_text":null,"organization":null,"time_expression":null,"query_mode":null,"mode_text":null,"clear_slots":["organization"],"unsupported_reason":null}
 """
+    system += "\n另有 action 字段，默认 query。用户要求分析刚才答案的变化、哪个部门变动最多或追问为什么变化时，action=prepare_analysis，decision=execute，其余条件留空；只准备分析确认，不能声称已分析原因。若问题同时指定新的指标、组织、期间或筛选，先按 query 提取，不能用旧答案替代新条件。不要输出来源答案 ID，来源由 Java 校验。\n"
     data = json.loads(data)
     # Organization examples deliberately contain no hard-coded tenant names/IDs.
     # The compiler owns history and UI selection. Supplying their values to a
@@ -201,7 +203,7 @@ def compile_contextual(draft, question, catalog, context, memory, turn_id):
         merged["org"] = org
     if window:
         merged["time_range"] = window
-    raw = draft.model_dump(exclude={"metric_text", "mode_text", "clear_slots"})
+    raw = draft.model_dump(exclude={"metric_text", "mode_text", "clear_slots", "action"})
     raw.update(metric_codes=metric, query_mode=mode)
     if draft.decision not in {"unsupported", "chitchat"}:
         raw["decision"] = "clarify" if len(metric) > 1 else "execute"

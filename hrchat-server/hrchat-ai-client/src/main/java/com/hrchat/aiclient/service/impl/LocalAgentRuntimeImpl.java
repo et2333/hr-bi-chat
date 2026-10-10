@@ -291,6 +291,8 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             if (detailResult != null) {
                 return detailResult;
             }
+            events.add(errorEvent("HRA-4006", "该指标当前不支持明细，未执行其他统计", false));
+            return new AgentResult(askId, events, null, List.of(), null, SseEvents.INTENT_QUERY, false, elapsed(start));
         }
         if (isOrgCompareQuestion(question)) {
             AgentResult orgResult = runOrgCompare(askId, question, metric, metricCode,
@@ -298,6 +300,8 @@ public class LocalAgentRuntimeImpl implements AgentRuntimeClient {
             if (orgResult != null) {
                 return orgResult;
             }
+            events.add(errorEvent("HRA-4006", "该指标当前不支持按组织对比，未执行其他统计", false));
+            return new AgentResult(askId, events, null, List.of(), null, SseEvents.INTENT_QUERY, false, elapsed(start));
         }
 
         // 趋势查询不能静默回退单值，否则回答的不是用户提出的问题。
