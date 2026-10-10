@@ -128,10 +128,13 @@ public class ChatController {
     private ResponseEntity<StreamingResponseBody> buildAskResponse(Long sessionId, AskRequest request,
                                                                    String idempotencyKey, UserContext ctx) {
         if (request.mode() == null || "STREAM".equalsIgnoreCase(request.mode())) {
+            // 开流前完成归属/功能鉴权，避免已写 HTTP 200 后把 HRC-2002 吞成 SSE ERROR。
+            chatService.assertCanAsk(ctx, sessionId);
             return ResponseEntity.ok().contentType(MediaType.TEXT_EVENT_STREAM)
                     .header("Cache-Control", "no-cache").header("X-Accel-Buffering", "no")
                     .body(output -> {
                         ChatStreamWriter writer = new ChatStreamWriter(output, objectMapper);
+                        writer.heartbeat();
                         try {
                             withTenant(ctx, () -> {
                                 ChatService.AskOutcome outcome = chatService.ask(ctx, sessionId, request, idempotencyKey, writer);

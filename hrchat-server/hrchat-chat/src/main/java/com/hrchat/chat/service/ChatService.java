@@ -178,6 +178,14 @@ public class ChatService {
         return ask(ctx, sessionId, request, idempotencyKey, null);
     }
 
+    /**
+     * STREAM 开流前鉴权：会话归属/功能权限失败必须走 HTTP 403，不能落成 SSE ERROR。
+     */
+    public void assertCanAsk(UserContext ctx, Long sessionId) {
+        authzService.checkFunc(ctx, PERM_ASK);
+        requireSession(ctx, sessionId);
+    }
+
     public AskOutcome ask(UserContext ctx, Long sessionId, AskRequest request, String idempotencyKey,
                           java.util.function.Consumer<SseEvent> progress) {
         authzService.checkFunc(ctx, PERM_ASK);
