@@ -177,6 +177,9 @@ EXECUTABLE_SCORE_BOOST = 1.0 / 61
 
 
 def rank(question, docs, mode, embedder=None, *, prefer_executable=False):
+    # Dense-only is an offline ablation arm; runtime retrieve() keeps its modes.
+    if mode not in {"lexical", "dense", "hybrid"}:
+        raise ValueError("Ranking mode must be lexical, dense or hybrid")
     if not docs:
         return []
     lexical = lexical_scores(question, docs)
@@ -187,11 +190,14 @@ def rank(question, docs, mode, embedder=None, *, prefer_executable=False):
         vectors = (embedder or encoder()).encode(["为这个句子生成表示以用于检索相关文章：" + question] + [d["text"] for d in docs])
         dense = [float(sum(a * b for a, b in zip(vectors[0], v))) for v in vectors[1:]]
         dense_order = sorted(range(len(docs)), key=lambda i: (-dense[i], docs[i]["id"]))
-        scores = Counter()
-        for ordering in (dense_order, [i for i in lexical_order if lexical[i] > 0]):
-            for position, index in enumerate(ordering):
-                scores[index] += 1 / (60 + position + 1)
-        ranked = [(docs[i], scores[i]) for i in sorted(scores, key=lambda i: (-scores[i], docs[i]["id"]))]
+        if mode == "dense":
+            ranked = [(docs[i], dense[i]) for i in dense_order]
+        else:
+            scores = Counter()
+            for ordering in (dense_order, [i for i in lexical_order if lexical[i] > 0]):
+                for position, index in enumerate(ordering):
+                    scores[index] += 1 / (60 + position + 1)
+            ranked = [(docs[i], scores[i]) for i in sorted(scores, key=lambda i: (-scores[i], docs[i]["id"]))]
     if prefer_executable and ranked:
         # Lexical BM25 scores are O(1..20); RRF scores are O(0.01). Scale the boost accordingly.
         peak = max(score for _, score in ranked) or 1.0

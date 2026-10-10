@@ -70,7 +70,9 @@ def main():
                 'retrieval': evidence})
         report['modes'][mode] = {'metric_hit_at_1': sum(r['metric_hit_at_1'] for r in rows) / len(rows),
             'metric_hit_at_2': sum(r['metric_hit_at_2'] for r in rows) / len(rows),
+            'metric_mrr_at_2': sum(r['metric_rr'] for r in rows) / len(rows),
             'metric_mrr': sum(r['metric_rr'] for r in rows) / len(rows),
+            'metric_notes': {'metric_mrr': 'deprecated alias of metric_mrr_at_2'},
             'example_hit_at_2': sum(r['example_hit_at_2'] for r in rows) / len(rows),
             'median_ms': statistics.median(r['retrieval']['elapsed_ms'] for r in rows), 'cases': rows}
     run_id = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')

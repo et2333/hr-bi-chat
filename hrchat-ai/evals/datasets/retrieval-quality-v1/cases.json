@@ -1,0 +1,2420 @@
+{
+  "schema_version": "r5-retrieval-v1",
+  "business_date": "2026-09-28",
+  "provenance": "Assistant-authored synthetic questions and relevance labels; not real users, not independently human-reviewed.",
+  "split_policy": "20 expression families, 10 dev and 10 frozen; never add to retrieval examples. Overlap audit cannot establish semantic independence.",
+  "cases": [
+    {
+      "id": "r5-employment_status-1",
+      "split": "dev",
+      "family": "employment_status",
+      "category": "colloquial",
+      "question": "研发中心眼下还在公司任职的员工总共有几位？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-employment_status-2",
+      "split": "dev",
+      "family": "employment_status",
+      "category": "colloquial",
+      "question": "请给我研发中心此刻仍保持在职状态的员工总人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-employment_status-3",
+      "split": "dev",
+      "family": "employment_status",
+      "category": "colloquial",
+      "question": "研发中心现在实际任职的人员规模是多大？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-completed_onboarding-1",
+      "split": "dev",
+      "family": "completed_onboarding",
+      "category": "colloquial",
+      "question": "上个月研发中心已经办妥入职手续的一共几人？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-completed_onboarding-2",
+      "split": "dev",
+      "family": "completed_onboarding",
+      "category": "colloquial",
+      "question": "研发中心上个月真正加入公司并完成报到的有多少人？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-completed_onboarding-3",
+      "split": "dev",
+      "family": "completed_onboarding",
+      "category": "colloquial",
+      "question": "想看研发中心上月已经入司的人数合计。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-all_departures-1",
+      "split": "dev",
+      "family": "all_departures",
+      "category": "colloquial",
+      "question": "研发中心上个月办结离职手续的总计几人？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-all_departures-2",
+      "split": "dev",
+      "family": "all_departures",
+      "category": "colloquial",
+      "question": "上月研发中心离开公司的员工一共多少位？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-all_departures-3",
+      "split": "dev",
+      "family": "all_departures",
+      "category": "colloquial",
+      "question": "请汇总研发中心上一个月离职的全部人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-department_distribution-1",
+      "split": "dev",
+      "family": "department_distribution",
+      "category": "grouping",
+      "question": "把研发中心当前在职人数按各部门分别列出。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-department_distribution-2",
+      "split": "dev",
+      "family": "department_distribution",
+      "category": "grouping",
+      "question": "研发中心眼下的在岗人数，请分部门对比。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-department_distribution-3",
+      "split": "dev",
+      "family": "department_distribution",
+      "category": "grouping",
+      "question": "分别看看研发中心每个部门目前的在职人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "当前在职人数允许隐式统计时点。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-onboard_roster-1",
+      "split": "dev",
+      "family": "onboard_roster",
+      "category": "detail",
+      "question": "给我研发中心上月入职员工的明细表。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-onboard_roster-2",
+      "split": "dev",
+      "family": "onboard_roster",
+      "category": "detail",
+      "question": "上个月加入研发中心的人，请列出人员明细。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-onboard_roster-3",
+      "split": "dev",
+      "family": "onboard_roster",
+      "category": "detail",
+      "question": "列一下研发中心上一个月新入职人员清单。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_direct-1",
+      "split": "dev",
+      "family": "missing_period_direct",
+      "category": "missing_period",
+      "question": "想知道研发中心离职人数合计。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_direct-2",
+      "split": "dev",
+      "family": "missing_period_direct",
+      "category": "missing_period",
+      "question": "帮我汇总研发中心的离职人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_direct-3",
+      "split": "dev",
+      "family": "missing_period_direct",
+      "category": "missing_period",
+      "question": "研发中心的人员流失数量能查一下吗？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_people-1",
+      "split": "dev",
+      "family": "unspecified_people",
+      "category": "ambiguous_metric",
+      "question": "研发中心的人员数据给我看看。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_people-2",
+      "split": "dev",
+      "family": "unspecified_people",
+      "category": "ambiguous_metric",
+      "question": "想了解研发中心人力情况。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_people-3",
+      "split": "dev",
+      "family": "unspecified_people",
+      "category": "ambiguous_metric",
+      "question": "能不能查一下研发中心人员方面的信息？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-offers_requested-1",
+      "split": "dev",
+      "family": "offers_requested",
+      "category": "unsupported",
+      "question": "研发中心上月发出的录用通知一共有多少份？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-offers_requested-2",
+      "split": "dev",
+      "family": "offers_requested",
+      "category": "unsupported",
+      "question": "请统计研发中心上一个月发出的Offer数量。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-offers_requested-3",
+      "split": "dev",
+      "family": "offers_requested",
+      "category": "unsupported",
+      "question": "研发中心上月的录用通知发出数是多少，不问实际入职。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "hire_offer_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-fte_requested-1",
+      "split": "dev",
+      "family": "fte_requested",
+      "category": "unsupported",
+      "question": "研发中心现在按工时折合全职的FTE人数是多少？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-fte_requested-2",
+      "split": "dev",
+      "family": "fte_requested",
+      "category": "unsupported",
+      "question": "请给出研发中心当前折算全职人数，不是自然人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-fte_requested-3",
+      "split": "dev",
+      "family": "fte_requested",
+      "category": "unsupported",
+      "question": "研发中心目前的在岗FTE总量帮我查一下。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "headcount_fte"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_group-1",
+      "split": "dev",
+      "family": "followup_group",
+      "category": "followup",
+      "question": "刚才的结果分部门列一下。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_group-2",
+      "split": "dev",
+      "family": "followup_group",
+      "category": "followup",
+      "question": "保持刚才的期间，按各部门展示。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_group-3",
+      "split": "dev",
+      "family": "followup_group",
+      "category": "followup",
+      "question": "那就把这些人数改为按组织对比。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "org"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "org",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-actual_not_schedule-1",
+      "split": "frozen",
+      "family": "actual_not_schedule",
+      "category": "contrast",
+      "question": "研发中心本月实际入职的有几位？计划入职排期不算我要的指标。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-actual_not_schedule-2",
+      "split": "frozen",
+      "family": "actual_not_schedule",
+      "category": "contrast",
+      "question": "问本月研发中心已经入职的总人数，不要拿预计入职人数回答。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-actual_not_schedule-3",
+      "split": "frozen",
+      "family": "actual_not_schedule",
+      "category": "contrast",
+      "question": "本月研发中心入职人数合计，请区分实际报到和计划报到。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-total_not_subtype-1",
+      "split": "frozen",
+      "family": "total_not_subtype",
+      "category": "contrast",
+      "question": "研发中心上月离职合计，不是主动离职专项。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-total_not_subtype-2",
+      "split": "frozen",
+      "family": "total_not_subtype",
+      "category": "contrast",
+      "question": "请查研发中心上一个月总离职人数，而非主动离职口径。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-total_not_subtype-3",
+      "split": "frozen",
+      "family": "total_not_subtype",
+      "category": "contrast",
+      "question": "上月研发中心离职总人数，并非主动离职指标。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-monthly_series-1",
+      "split": "frozen",
+      "family": "monthly_series",
+      "category": "trend",
+      "question": "请把研发中心2026年6月至8月离职人数画成按月趋势。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "trend"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "trend",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-06-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-monthly_series-2",
+      "split": "frozen",
+      "family": "monthly_series",
+      "category": "trend",
+      "question": "研发中心从2026年6月到8月离职人数的逐月走势是什么？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "trend"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "trend",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-06-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-monthly_series-3",
+      "split": "frozen",
+      "family": "monthly_series",
+      "category": "trend",
+      "question": "我想看研发中心2026年6至8月份每月离职人数趋势。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "trend"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "trend",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-06-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-specified_snapshot-1",
+      "split": "frozen",
+      "family": "specified_snapshot",
+      "category": "snapshot",
+      "question": "研发中心在2026年8月31日当天的在职人数是多少？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-31",
+          "end": "2026-09-01",
+          "time_type": "as_of"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-specified_snapshot-2",
+      "split": "frozen",
+      "family": "specified_snapshot",
+      "category": "snapshot",
+      "question": "查一下2026年8月31日研发中心仍在职的员工总数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-31",
+          "end": "2026-09-01",
+          "time_type": "as_of"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-specified_snapshot-3",
+      "split": "frozen",
+      "family": "specified_snapshot",
+      "category": "snapshot",
+      "question": "以2026年8月31日为统计时点，研发中心在职人数有多少？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount"
+        ],
+        "example_metric_codes": [
+          "headcount"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "headcount"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-31",
+          "end": "2026-09-01",
+          "time_type": "as_of"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-departed_roster-1",
+      "split": "frozen",
+      "family": "departed_roster",
+      "category": "detail",
+      "question": "研发中心上月离职人员的明细能列出来吗？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-departed_roster-2",
+      "split": "frozen",
+      "family": "departed_roster",
+      "category": "detail",
+      "question": "想看研发中心上个月已离职员工清单。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-departed_roster-3",
+      "split": "frozen",
+      "family": "departed_roster",
+      "category": "detail",
+      "question": "请出一份研发中心上一个月离职员工明细表。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "example_metric_codes": [
+          "leave_count"
+        ],
+        "example_mode": "detail"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "detail",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_indirect-1",
+      "split": "frozen",
+      "family": "missing_period_indirect",
+      "category": "missing_period",
+      "question": "方便给我研发中心入职人数这项统计吗？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_indirect-2",
+      "split": "frozen",
+      "family": "missing_period_indirect",
+      "category": "missing_period",
+      "question": "研发中心新加入公司的员工总人数，我想了解一下。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-missing_period_indirect-3",
+      "split": "frozen",
+      "family": "missing_period_indirect",
+      "category": "missing_period",
+      "question": "关于研发中心入职人员数量，可以帮忙汇总吗？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "hire_count"
+        ],
+        "example_metric_codes": [
+          "hire_count"
+        ],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [
+          "hire_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "time_range"
+        ],
+        "note": "期间为业务日历，右端点不包含。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_report-1",
+      "split": "frozen",
+      "family": "unspecified_report",
+      "category": "ambiguous_metric",
+      "question": "研发中心的人事报表帮忙调一下。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_report-2",
+      "split": "frozen",
+      "family": "unspecified_report",
+      "category": "ambiguous_metric",
+      "question": "我想查询研发中心员工相关统计。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-unspecified_report-3",
+      "split": "frozen",
+      "family": "unspecified_report",
+      "category": "ambiguous_metric",
+      "question": "研发中心的人力数据能展示一下吗？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "headcount",
+          "hire_count",
+          "leave_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "clarify",
+        "metric_codes": [],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": null,
+        "missing_slots": [
+          "metric"
+        ],
+        "note": "三个口径均为待澄清候选；候选覆盖不代表可以执行。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-voluntary_requested-1",
+      "split": "frozen",
+      "family": "voluntary_requested",
+      "category": "unsupported",
+      "question": "研发中心上月主动离职的员工有几人？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-voluntary_requested-2",
+      "split": "frozen",
+      "family": "voluntary_requested",
+      "category": "unsupported",
+      "question": "只统计研发中心上一个月主动流失的人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-voluntary_requested-3",
+      "split": "frozen",
+      "family": "voluntary_requested",
+      "category": "unsupported",
+      "question": "我需要研发中心上月主动离职人数，不要混入其他离职类型。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "leave_voluntary_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-annualized_requested-1",
+      "split": "frozen",
+      "family": "annualized_requested",
+      "category": "unsupported",
+      "question": "研发中心上月年化离职率是多少？",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-annualized_requested-2",
+      "split": "frozen",
+      "family": "annualized_requested",
+      "category": "unsupported",
+      "question": "按年化流失率口径查研发中心上个月的数据。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-annualized_requested-3",
+      "split": "frozen",
+      "family": "annualized_requested",
+      "category": "unsupported",
+      "question": "请给研发中心上一个月的年化流失率，不是离职人数。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": null,
+      "relevance": {
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "unsupported",
+        "metric_codes": [
+          "turnover_annualized"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "识别所请求的不可执行口径；不得用可执行指标替代。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_period-1",
+      "split": "frozen",
+      "family": "followup_period",
+      "category": "followup",
+      "question": "沿用刚才的指标和部门，期间改成这个月。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_period-2",
+      "split": "frozen",
+      "family": "followup_period",
+      "category": "followup",
+      "question": "刚才查的是上月，现在看本月。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    },
+    {
+      "id": "r5-followup_period-3",
+      "split": "frozen",
+      "family": "followup_period",
+      "category": "followup",
+      "question": "部门和指标不动，换成本月的数据。",
+      "context": {
+        "user_id": "hr01",
+        "org_id": "2",
+        "include_children": true,
+        "business_date": "2026-09-28"
+      },
+      "prior_task": {
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-08-01",
+          "end": "2026-09-01",
+          "time_type": "period"
+        }
+      },
+      "relevance": {
+        "metric_codes": [],
+        "example_metric_codes": [],
+        "example_mode": "scalar"
+      },
+      "expected": {
+        "decision": "execute",
+        "metric_codes": [
+          "leave_count"
+        ],
+        "query_mode": "scalar",
+        "org_id": "2",
+        "include_children": true,
+        "time_range": {
+          "start": "2026-09-01",
+          "end": "2026-09-29",
+          "time_type": "period"
+        },
+        "missing_slots": [],
+        "note": "任务期望依赖服务端状态；检索只输入本轮问句，不把金标/历史摘要偷偷加入检索。"
+      },
+      "source": "assistant_authored_synthetic",
+      "human_review": "pending"
+    }
+  ]
+}
