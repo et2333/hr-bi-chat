@@ -1,6 +1,7 @@
 """Permission-scoped metadata and QueryDraft retrieval; no SQL or answer cache.
 
 The current authorized Java catalog is the sole source of executable metrics.
+Distractor metrics enlarge retrieval candidates only and never become executable.
 Document embeddings may be cached, but every search builds its candidate set anew.
 """
 from __future__ import annotations
@@ -18,38 +19,76 @@ import time
 
 MODEL_ID = "BAAI/bge-small-zh-v1.5"
 MODEL_DIR = Path(__file__).resolve().parents[1] / ".models" / "bge-small-zh-v1.5"
-CORPUS_VERSION = "query-draft-examples-v1"
-# Authored development examples, not historical user SQL or held-out eval answers.
-# They intentionally contain no tenant/org IDs, values, or permission grants.
-EXAMPLES = (
-    ("staff_snapshot", "现在有多少人在岗", "headcount", "在岗", None, None, None),
-    ("staff_roster", "在岗人员明细", "headcount", "在岗人员", None, "detail", "明细"),
-    ("staff_trend", "在职人数近三月趋势", "headcount", "在职人数", "近三月", "trend", "趋势"),
-    ("staff_groups", "在职人数按部门对比", "headcount", "在职人数", None, "org", "按部门对比"),
-    ("newcomers", "本月新入职多少人", "hire_count", "新入职", "本月", None, None),
-    ("newcomer_roster", "上月入职人员明细", "hire_count", "入职人员", "上月", "detail", "明细"),
-    ("departures", "近30天人员流失数量", "leave_count", "人员流失数量", "近30天", None, None),
-    ("departure_groups", "本月离职人数按部门对比", "leave_count", "离职人数", "本月", "org", "按部门对比"),
-    ("departure_trend", "近三月离职人数趋势", "leave_count", "离职人数", "近三月", "trend", "趋势"),
-)
+CORPUS_DIR = Path(__file__).resolve().parent / "retrieval_corpus"
+CORPUS_VERSION = "retrieval-corpus-v2"
+
+
+def _load_jsonl(path: Path):
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line:
+            rows.append(json.loads(line))
+    return rows
+
+
+@lru_cache(maxsize=1)
+def load_corpus():
+    examples_path = CORPUS_DIR / "examples_v2.jsonl"
+    distractors_path = CORPUS_DIR / "metrics_distractors.jsonl"
+    if not examples_path.is_file():
+        raise FileNotFoundError(f"Missing retrieval examples: {examples_path}")
+    if not distractors_path.is_file():
+        raise FileNotFoundError(f"Missing retrieval distractors: {distractors_path}")
+    examples = _load_jsonl(examples_path)
+    distractors = _load_jsonl(distractors_path)
+    if not examples:
+        raise ValueError("retrieval examples_v2.jsonl is empty")
+    return {"examples": examples, "distractors": distractors, "version": CORPUS_VERSION}
 
 
 def documents(catalog):
+    """Build per-request docs: live catalog metrics ∪ distractors ∪ matching examples."""
+    corpus = load_corpus()
     metrics = {m["code"]: m for m in catalog["metrics"]}
     docs = []
     for m in metrics.values():
         content = {k: m[k] for k in ("code", "name", "aliases", "definition", "version", "allowed_modes", "requires_period")}
+        content["executable"] = True
         docs.append({"id": "metric:" + m["code"], "kind": "metadata", "code": m["code"],
-                     "version": m["version"], "text": json.dumps(content, ensure_ascii=False), "content": content})
-    for ident, question, code, source, period, mode, mode_text in EXAMPLES:
-        if code not in metrics or (mode or "scalar") not in metrics[code]["allowed_modes"]:
+                     "version": m["version"], "executable": True,
+                     "text": json.dumps(content, ensure_ascii=False), "content": content})
+    for row in corpus["distractors"]:
+        code = row["code"]
+        if code in metrics:
+            # Never shadow an authorized catalog metric with a distractor.
             continue
-        draft = {"action": "query", "decision": "execute", "metric_codes": [code], "metric_text": source,
-                 "organization": None, "time_expression": period, "query_mode": mode, "mode_text": mode_text,
-                 "clear_slots": [], "unsupported_reason": None}
-        docs.append({"id": "example:" + ident, "kind": "example", "code": code,
-                     "version": metrics[code]["version"], "text": question,
-                     "content": {"question": question, "draft": draft}})
+        content = {
+            "code": code,
+            "name": row["name"],
+            "aliases": row.get("aliases") or [],
+            "definition": row["definition"],
+            "version": 0,
+            "allowed_modes": [],
+            "requires_period": False,
+            "executable": False,
+            "role": "retrieval_distractor",
+        }
+        docs.append({"id": "distractor:" + code, "kind": "metadata", "code": code,
+                     "version": 0, "executable": False,
+                     "text": json.dumps(content, ensure_ascii=False), "content": content})
+    for row in corpus["examples"]:
+        draft = row["draft"]
+        codes = draft.get("metric_codes") or []
+        if len(codes) != 1 or codes[0] not in metrics:
+            continue
+        mode = draft.get("query_mode") or "scalar"
+        if mode not in metrics[codes[0]]["allowed_modes"]:
+            continue
+        docs.append({"id": "example:" + row["id"], "kind": "example", "code": codes[0],
+                     "version": metrics[codes[0]]["version"], "executable": True,
+                     "text": row["question"],
+                     "content": {"question": row["question"], "draft": draft}})
     return docs
 
 
@@ -61,7 +100,7 @@ def tokens(text):
 
 def lexical_scores(question, docs):
     terms = [Counter(tokens(d["text"])) for d in docs]
-    df = Counter(t for row in terms for t in row)
+    df = Counter(t for t in (tok for row in terms for tok in row))
     average = sum(sum(row.values()) for row in terms) / max(1, len(terms))
     query = set(tokens(question))
     return [sum(math.log(1 + (len(docs) - df[t] + .5) / (df[t] + .5)) *
@@ -126,18 +165,29 @@ def retrieve(question, catalog, *, mode=None, embedder=None):
         raise ValueError("HRCHAT_RAG_MODE must be off, lexical or hybrid")
     started = time.perf_counter()
     docs = documents(catalog)
-    fingerprint = hashlib.sha256(json.dumps(docs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    executable_metric_count = sum(1 for d in docs if d["kind"] == "metadata" and d.get("executable"))
+    distractor_count = sum(1 for d in docs if d["kind"] == "metadata" and not d.get("executable"))
+    fingerprint = hashlib.sha256(json.dumps(
+        [{"id": d["id"], "code": d["code"], "kind": d["kind"]} for d in docs],
+        ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     evidence = {"mode": mode, "corpus_version": CORPUS_VERSION, "catalog_fingerprint": fingerprint,
-                "candidate_count": len(docs), "model": MODEL_ID if mode == "hybrid" else None,
+                "candidate_count": len(docs),
+                "executable_metric_count": executable_metric_count,
+                "distractor_count": distractor_count,
+                "model": MODEL_ID if mode == "hybrid" else None,
                 "selected": [], "status": "disabled" if mode == "off" else "ok"}
     if mode == "off":
+        evidence["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         return {}, evidence
     try:
         selected = []
         for kind, limit in (("metadata", 2), ("example", 2)):
             selected.extend(rank(question, [d for d in docs if d["kind"] == kind], mode, embedder)[:limit])
-        evidence["selected"] = [{"id": d["id"], "code": d["code"], "version": d["version"], "score": score}
+        evidence["selected"] = [{"id": d["id"], "code": d["code"], "version": d["version"],
+                                 "executable": d.get("executable", True), "score": score}
                                 for d, score in selected]
+        # Planning context may show distractor definitions for disambiguation, but
+        # compile/validate still use catalog.metrics only — never distractor codes.
         context = {"metadata": [d["content"] for d, _ in selected if d["kind"] == "metadata"],
                    "examples": [d["content"] for d, _ in selected if d["kind"] == "example"]}
     except (OSError, ImportError, RuntimeError, ValueError):

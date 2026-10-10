@@ -1,0 +1,19 @@
+{
+  "dataset_id": "retrieval-scale-v1",
+  "purpose": "Scaled retrieval diagnostic with distractors; not end-to-end LLM accuracy",
+  "splits": {
+    "dev": "cases used for first-period reporting and spot checks",
+    "holdout": "reserved; do not tune retrieval parameters against this split before first scored run"
+  },
+  "corpus_version": "retrieval-corpus-v2",
+  "executable_metrics": ["headcount", "hire_count", "leave_count"],
+  "scoring": [
+    "metric_hit_at_1 / metric_hit_at_2 among retrieved metadata",
+    "top1_distractor_rate when top metadata is non-executable",
+    "example_hit_at_2 for mode-matched few-shots when expected_mode set"
+  ],
+  "notes": [
+    "Independent from hr-query-v1 / modes task scores",
+    "Hit@K must not be reported as ask-success rate"
+  ]
+}
