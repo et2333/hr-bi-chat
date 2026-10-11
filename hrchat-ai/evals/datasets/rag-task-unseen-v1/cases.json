@@ -1,0 +1,643 @@
+[
+  {
+    "case_id": "rag-unseen-v1-01",
+    "group_id": "new_trend",
+    "template_id": "new_trend",
+    "scene": "trend",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "在我选定的月份里，研发中心每个月实际在岗的员工规模怎么变化？",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-07-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-07-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-07",
+              "headcount": 15
+            },
+            {
+              "period": "2026-08",
+              "headcount": 17
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-01"
+  },
+  {
+    "case_id": "rag-unseen-v1-02",
+    "group_id": "new_trend",
+    "template_id": "new_trend",
+    "scene": "trend",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "按我选的日期范围，把研发中心每月真正报到加入的同事人数列出来。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-07-01",
+            "end": "2026-09-29"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-07-01/2026-09-28",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-07",
+              "hire_count": 2
+            },
+            {
+              "period": "2026-08",
+              "hire_count": 3
+            },
+            {
+              "period": "2026-09",
+              "hire_count": 1
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "hire_count",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-02"
+  },
+  {
+    "case_id": "rag-unseen-v1-03",
+    "group_id": "new_trend",
+    "template_id": "new_trend",
+    "scene": "trend",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "所选时间里，研发中心每个月离开公司的员工分别有几位？",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "leave_count",
+            "query_mode": "trend",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-09-19",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "period": "2026-08",
+              "leave_count": 1
+            },
+            {
+              "period": "2026-09",
+              "leave_count": 2
+            }
+          ],
+          "columns": [
+            {
+              "key": "period",
+              "masked": false
+            },
+            {
+              "key": "leave_count",
+              "masked": false
+            }
+          ]
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-03"
+  },
+  {
+    "case_id": "rag-unseen-v1-04",
+    "group_id": "new_org",
+    "template_id": "new_org",
+    "scene": "org",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "用选好的日期，研发中心现有员工在各个部门分别有多少？不要只给一个总数。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "org",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "org_name": "研发一部",
+              "headcount": 10
+            },
+            {
+              "org_name": "研发二部",
+              "headcount": 7
+            }
+          ],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "headcount",
+              "masked": false
+            }
+          ],
+          "partition_total": 17
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-06"
+  },
+  {
+    "case_id": "rag-unseen-v1-05",
+    "group_id": "new_org",
+    "template_id": "new_org",
+    "scene": "org",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "所选期间实际加入研发中心的同事，分别落在哪个部门，各有多少人？",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-09-01"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "hire_count",
+            "query_mode": "org",
+            "org_keys": [
+              2,
+              3,
+              4
+            ],
+            "org_id": "2",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-31",
+            "metric_version": 1
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "org_name": "研发一部",
+              "hire_count": 2
+            },
+            {
+              "org_name": "研发二部",
+              "hire_count": 1
+            }
+          ],
+          "columns": [
+            {
+              "key": "org_name",
+              "masked": false
+            },
+            {
+              "key": "hire_count",
+              "masked": false
+            }
+          ],
+          "partition_total": 3
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-07"
+  },
+  {
+    "case_id": "rag-unseen-v1-06",
+    "group_id": "new_detail",
+    "template_id": "new_detail",
+    "scene": "detail",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "turns": [
+      {
+        "question": "用已选日期看看研发二部仍在职的员工，请逐个人列一张名单。",
+        "context_override": {
+          "orgId": "4",
+          "includeChildren": true,
+          "timeRange": {
+            "preset": "CUSTOM",
+            "start": "2026-08-01",
+            "end": "2026-08-20"
+          }
+        },
+        "expected": {
+          "statuses": [
+            "COMPLETED"
+          ],
+          "plan": {
+            "metric_code": "headcount",
+            "query_mode": "detail",
+            "org_keys": [
+              4
+            ],
+            "org_id": "4",
+            "include_children": true,
+            "time_label": "2026-08-01/2026-08-19",
+            "metric_version": 2
+          },
+          "require_execution_evidence": true,
+          "oracle": "literal_seed_records_modes_v1",
+          "rows": [
+            {
+              "emp_no": "E***1",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***3",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***4",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***5",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***6",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "E***7",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            },
+            {
+              "emp_no": "N***2",
+              "emp_name": "****",
+              "org_key": "****",
+              "job_level": "****"
+            }
+          ],
+          "columns": [
+            {
+              "key": "emp_no",
+              "masked": true
+            },
+            {
+              "key": "emp_name",
+              "masked": true
+            },
+            {
+              "key": "org_key",
+              "masked": true
+            },
+            {
+              "key": "job_level",
+              "masked": true
+            }
+          ],
+          "row_limit": 50
+        }
+      }
+    ],
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "oracle_anchor": "hr-modes-v1-11"
+  },
+  {
+    "case_id": "rag-unseen-v1-07",
+    "group_id": "new_clarify",
+    "template_id": "new_clarify",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心离开公司的同事一共有几位？统计哪段时间我还没确定。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "rag-unseen-v1-08",
+    "group_id": "new_clarify",
+    "template_id": "new_clarify",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心报到加入的同事有多少人？先问我需要查哪个时间段。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "rag-unseen-v1-09",
+    "group_id": "new_clarify",
+    "template_id": "new_clarify",
+    "scene": "clarify",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心各部门做个对照，不过我还没决定比较哪个指标。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "CLARIFYING"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "rag-unseen-v1-10",
+    "group_id": "new_unsupported",
+    "template_id": "new_unsupported",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心八月份员工的薪资，给我算平均值。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "rag-unseen-v1-11",
+    "group_id": "new_unsupported",
+    "template_id": "new_unsupported",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心八月份主动辞职的人占全部离职的比例是多少？",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  },
+  {
+    "case_id": "rag-unseen-v1-12",
+    "group_id": "new_unsupported",
+    "template_id": "new_unsupported",
+    "scene": "unsupported",
+    "split": "frozen",
+    "data_version": "h2-v6",
+    "as_of_date": "2026-09-28",
+    "identity_fixture": "hr01",
+    "session_owner": "hr01",
+    "origin": "assistant_authored",
+    "human_review": "pending",
+    "turns": [
+      {
+        "question": "研发中心九月新发出的录用通知有多少份？不统计已报到的人。",
+        "context_override": {
+          "orgId": "2",
+          "includeChildren": true
+        },
+        "expected": {
+          "statuses": [
+            "UNSUPPORTED"
+          ],
+          "no_data": true,
+          "no_execution": true,
+          "require_no_query_trace": true
+        }
+      }
+    ]
+  }
+]

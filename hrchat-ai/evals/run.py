@@ -162,13 +162,13 @@ def main():
         report.update(summary=summarize(cases, results), results=results)
         if policy is not None:
             report["stage_evaluation"] = stage_report(cases, results, summarize, policy)
-        elif args.dataset == MODE_DATASET.name:
+        else:
             # Modes scoring has no stage override file; fingerprint the scorer modules.
             digest = hashlib.sha256()
             for relative in ("evals/scoring.py", "evals/mode_scoring.py", "evals/mode_reference.py"):
                 digest.update(sha_text(ROOT / "hrchat-ai" / relative).encode())
             report["stage_evaluation"] = {
-                "kind": "hr-query-modes-v1",
+                "kind": args.dataset,
                 "sha256": digest.hexdigest(),
                 "files": ["evals/scoring.py", "evals/mode_scoring.py", "evals/mode_reference.py"],
             }

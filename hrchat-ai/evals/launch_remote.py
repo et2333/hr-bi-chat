@@ -68,7 +68,7 @@ def main():
             or args.fixture_smoke or args.memory_smoke or args.repair_smoke or args.repair_real_smoke
             or args.planner_diagnostics or args.model or args.memory != "on" or args.repair == "on"):
         parser.error("Fixture cases require remote hr-query-modes-v1 with memory on; no model/repair/smoke options")
-    if args.dataset == MODE_DATASET.name and (args.runtime != "remote" or args.fixture_smoke
+    if args.dataset != DATASET.name and (args.runtime != "remote" or args.fixture_smoke
             or args.memory_smoke or args.repair_smoke or args.repair_real_smoke):
         parser.error("Mode dataset requires remote execution evidence; use --fixture-cases or real model")
     if args.runtime == "local" and (args.fixture_smoke or args.memory_smoke or args.repair_smoke
