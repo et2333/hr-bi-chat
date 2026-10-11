@@ -38,7 +38,7 @@ beforeEach(() => {
   vi.mocked(reportsApi.getReportAnalysisContext).mockResolvedValue(response(context))
   vi.mocked(reportsApi.startReportAnalysis).mockResolvedValue(response(running))
   vi.mocked(api.getAnalysisTask).mockResolvedValue(response(asTask(running)))
-  vi.mocked(api.streamAnalysis).mockImplementation((_id, _seq, frame, _error) => {
+  vi.mocked(api.streamAnalysis).mockImplementation((_id, _seq, frame) => {
     apiFrame = frame
     return { close, done: new Promise<void>(resolve => { endStream = resolve }) }
   })
