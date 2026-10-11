@@ -117,10 +117,12 @@ def main():
             browser_env = dict(env, HRCHAT_API_TARGET=java_url, S6_FIXTURE_E2E="1")
             # Use the known local package entrypoint, avoiding shell-built commands.
             cli = ROOT / "hrchat-web/node_modules/@playwright/test/cli.js"
-            browser = subprocess.run(["node", str(cli), "test", "e2e/analysis.spec.ts"],
-                                     cwd=ROOT / "hrchat-web", env=browser_env, timeout=180)
+            browser = subprocess.run(
+                ["node", str(cli), "test", "e2e/analysis.spec.ts", "e2e/report-analysis.spec.ts"],
+                cwd=ROOT / "hrchat-web", env=browser_env, timeout=300)
             assert browser.returncode == 0, "Browser analysis acceptance failed"
             results["checks"]["browser_analysis_flow"] = True
+            results["checks"]["browser_report_analysis_flow"] = True
         results["passed"] = True
     finally:
         (run_dir / "report.json").write_text(json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8")

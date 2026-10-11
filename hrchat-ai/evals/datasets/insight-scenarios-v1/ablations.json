@@ -1,0 +1,357 @@
+[
+  {
+    "ablation_id": "AB-01",
+    "scenario": "baseline_absent",
+    "context_full": {
+      "schema_version": "1",
+      "report_id": "r-offset",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "研发两期持平抵消",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "effective_org_ids": [
+        3,
+        4
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "scope_ref": "org:3,4"
+    },
+    "snapshot_full": {
+      "snapshot_id": "snap-is-01",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "categories": [
+        "2026-02",
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            10,
+            10
+          ]
+        }
+      ],
+      "groups_truncated": false,
+      "departments": [
+        {
+          "org_id": 3,
+          "org_name": "研发一部",
+          "baseline_count": 6,
+          "current_count": 5
+        },
+        {
+          "org_id": 4,
+          "org_name": "研发二部",
+          "baseline_count": 4,
+          "current_count": 5
+        }
+      ]
+    },
+    "context_partial": {
+      "schema_version": "1",
+      "report_id": "r-offset",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "研发两期持平抵消",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": null,
+      "effective_org_ids": [
+        3,
+        4
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "scope_ref": "org:3,4"
+    },
+    "snapshot_partial": {
+      "snapshot_id": "snap-is-01",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "categories": [
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            10
+          ]
+        }
+      ],
+      "groups_truncated": false,
+      "departments": [
+        {
+          "org_id": 3,
+          "org_name": "研发一部",
+          "baseline_count": 6,
+          "current_count": 5
+        },
+        {
+          "org_id": 4,
+          "org_name": "研发二部",
+          "baseline_count": 4,
+          "current_count": 5
+        }
+      ]
+    },
+    "expected": {
+      "full_computable": [
+        "absolute_change:overall",
+        "relative_change:overall",
+        "department_contribution:offset"
+      ],
+      "partial_incomputable": [
+        "absolute_change:overall",
+        "relative_change:overall",
+        "point_compare:overall",
+        "continuous_trend:overall",
+        "department_contribution:blocked"
+      ],
+      "partial_absent_fact_ids": []
+    }
+  },
+  {
+    "ablation_id": "AB-02",
+    "scenario": "departments_absent",
+    "context_full": {
+      "schema_version": "1",
+      "report_id": "r-offset",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "研发两期持平抵消",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "effective_org_ids": [
+        3,
+        4
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "scope_ref": "org:3,4"
+    },
+    "snapshot_full": {
+      "snapshot_id": "snap-is-01",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "categories": [
+        "2026-02",
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            10,
+            10
+          ]
+        }
+      ],
+      "groups_truncated": false,
+      "departments": [
+        {
+          "org_id": 3,
+          "org_name": "研发一部",
+          "baseline_count": 6,
+          "current_count": 5
+        },
+        {
+          "org_id": 4,
+          "org_name": "研发二部",
+          "baseline_count": 4,
+          "current_count": 5
+        }
+      ]
+    },
+    "context_partial": {
+      "schema_version": "1",
+      "report_id": "r-offset",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "研发两期持平抵消",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "effective_org_ids": [
+        3,
+        4
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "scope_ref": "org:3,4"
+    },
+    "snapshot_partial": {
+      "snapshot_id": "snap-is-01",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "categories": [
+        "2026-02",
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            10,
+            10
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "expected": {
+      "full_computable": [
+        "department_contribution:offset"
+      ],
+      "partial_incomputable": [],
+      "partial_absent_fact_ids": [
+        "department_contribution:offset",
+        "department_contribution:net_rate"
+      ]
+    }
+  },
+  {
+    "ablation_id": "AB-03",
+    "scenario": "ratio_components",
+    "context_full": {
+      "schema_version": "1",
+      "report_id": "r-ratio",
+      "metric_code": "leave_rate",
+      "metric_version": "1",
+      "metric_name": "离职率",
+      "report_name": "离职率对比",
+      "unit": "%",
+      "metric_kind": "ratio",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "baseline_period": {
+        "start": "2026-01-01",
+        "end": "2026-02-01"
+      },
+      "effective_org_ids": [
+        10
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "scope_ref": "org:10",
+      "ratio_scale": "percent",
+      "numerator_metric_code": "leave_count",
+      "denominator_metric_code": "headcount"
+    },
+    "snapshot_full": {
+      "snapshot_id": "snap-is-04",
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "categories": [
+        "2026-01",
+        "2026-02"
+      ],
+      "series": [
+        {
+          "name": "离职率",
+          "data": [
+            0.2,
+            0.25
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "context_partial": {
+      "schema_version": "1",
+      "report_id": "r-ratio",
+      "metric_code": "leave_rate",
+      "metric_version": "1",
+      "metric_name": "离职率",
+      "report_name": "离职率对比",
+      "unit": "%",
+      "metric_kind": "ratio",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "baseline_period": {
+        "start": "2026-01-01",
+        "end": "2026-02-01"
+      },
+      "effective_org_ids": [
+        10
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "scope_ref": "org:10",
+      "ratio_scale": "percent"
+    },
+    "snapshot_partial": {
+      "snapshot_id": "snap-is-04",
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "categories": [
+        "2026-01",
+        "2026-02"
+      ],
+      "series": [
+        {
+          "name": "离职率",
+          "data": [
+            0.2,
+            0.25
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "expected": {
+      "full_computable": [
+        "percentage_point_change:overall"
+      ],
+      "partial_incomputable": [
+        "percentage_point_change:overall"
+      ],
+      "partial_absent_fact_ids": []
+    }
+  }
+]
