@@ -186,10 +186,7 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
     @Override
     public Map<String, Object> generateInsight(InsightRequest request) {
         try {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("report_name", request.reportName());
-            body.put("metric_name", request.metricName());
-            body.put("summary", request.summary());
+            Map<String, Object> body = toRemoteInsight(request);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             headers.set("X-Tenant-No", tenantNo);
@@ -200,6 +197,112 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
             log.warn("insight 远程调用失败, baseUrl={}, err={}", baseUrl, e.getMessage());
             throw new BizException(ErrorCode.AI_DEGRADED);
         }
+    }
+
+    /**
+     * InsightRequest（camelCase）→ Python {@code /v1/insight} snake_case body。
+     * 富路径带 context+snapshot；旧路径仅 report_name/metric_name/summary。
+     */
+    public static Map<String, Object> toRemoteInsight(InsightRequest request) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        putIfNotNull(body, "report_name", request.reportName());
+        putIfNotNull(body, "metric_name", request.metricName());
+        if (request.summary() != null) {
+            body.put("summary", request.summary());
+        }
+        if (request.context() != null) {
+            body.put("context", toRemoteInsightContext(request.context()));
+        }
+        if (request.snapshot() != null) {
+            body.put("snapshot", toRemoteInsightSnapshot(request.snapshot()));
+        }
+        return body;
+    }
+
+    private static Map<String, Object> toRemoteInsightContext(InsightRequest.InsightContext ctx) {
+        Map<String, Object> remote = new LinkedHashMap<>();
+        putIfNotNull(remote, "schema_version", ctx.schemaVersion());
+        putIfNotNull(remote, "report_id", ctx.reportId());
+        putIfNotNull(remote, "component_id", ctx.componentId());
+        putIfNotNull(remote, "metric_code", ctx.metricCode());
+        putIfNotNull(remote, "metric_version", ctx.metricVersion());
+        putIfNotNull(remote, "metric_name", ctx.metricName());
+        putIfNotNull(remote, "report_name", ctx.reportName());
+        putIfNotNull(remote, "unit", ctx.unit());
+        putIfNotNull(remote, "metric_kind", ctx.metricKind());
+        if (ctx.currentPeriod() != null) {
+            remote.put("current_period", periodMap(ctx.currentPeriod()));
+        }
+        if (ctx.baselinePeriod() != null) {
+            remote.put("baseline_period", periodMap(ctx.baselinePeriod()));
+        }
+        if (ctx.effectiveOrgIds() != null) {
+            remote.put("effective_org_ids", ctx.effectiveOrgIds());
+        }
+        putIfNotNull(remote, "data_version", ctx.dataVersion());
+        putIfNotNull(remote, "view_key", ctx.viewKey());
+        putIfNotNull(remote, "scope_ref", ctx.scopeRef());
+        putIfNotNull(remote, "numerator_metric_code", ctx.numeratorMetricCode());
+        putIfNotNull(remote, "denominator_metric_code", ctx.denominatorMetricCode());
+        return remote;
+    }
+
+    private static Map<String, Object> toRemoteInsightSnapshot(InsightRequest.InsightSnapshot snap) {
+        Map<String, Object> remote = new LinkedHashMap<>();
+        putIfNotNull(remote, "snapshot_id", snap.snapshotId());
+        putIfNotNull(remote, "data_version", snap.dataVersion());
+        putIfNotNull(remote, "view_key", snap.viewKey());
+        if (snap.categories() != null) {
+            remote.put("categories", snap.categories());
+        }
+        if (snap.series() != null) {
+            List<Map<String, Object>> series = new ArrayList<>();
+            for (InsightRequest.SeriesItem item : snap.series()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("name", item.name() == null ? "" : item.name());
+                row.put("data", item.data() == null ? List.of() : item.data());
+                series.add(row);
+            }
+            remote.put("series", series);
+        }
+        if (snap.groups() != null) {
+            List<Map<String, Object>> groups = new ArrayList<>();
+            for (InsightRequest.GroupRow g : snap.groups()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("group_id", g.groupId());
+                row.put("group_name", g.groupName());
+                row.put("value", g.value());
+                groups.add(row);
+            }
+            remote.put("groups", groups);
+        }
+        if (snap.groupsTruncated() != null) {
+            remote.put("groups_truncated", snap.groupsTruncated());
+        }
+        putIfNotNull(remote, "groups_total", snap.groupsTotal());
+        if (snap.departments() != null) {
+            List<Map<String, Object>> departments = new ArrayList<>();
+            for (InsightRequest.DepartmentRow d : snap.departments()) {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("org_id", d.orgId());
+                row.put("org_name", d.orgName());
+                row.put("baseline_count", d.baselineCount());
+                row.put("current_count", d.currentCount());
+                departments.add(row);
+            }
+            remote.put("departments", departments);
+        }
+        if (snap.continuityGaps() != null) {
+            remote.put("continuity_gaps", snap.continuityGaps());
+        }
+        return remote;
+    }
+
+    private static Map<String, Object> periodMap(InsightRequest.Period period) {
+        Map<String, Object> remote = new LinkedHashMap<>();
+        putIfNotNull(remote, "start", period.start());
+        putIfNotNull(remote, "end", period.end());
+        return remote;
     }
 
     /** 解析固定终态信封：COMPLETED / CLARIFYING / FAILED。 */

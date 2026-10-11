@@ -177,6 +177,34 @@ class ReportChartServiceTest {
     }
 
     @Test
+    void buildInsightRequest_usesRichPathWhenContextAndMonthSeriesPresent() {
+        RptReport report = new RptReport();
+        report.setId(7L);
+        report.setReportName("编制对比");
+        report.setCurrentDataVersionId(88L);
+        report.setContextJson("""
+                {"metricCode":"headcount","metricVersion":1,"metricName":"在职人数","unit":"人",
+                "effectiveOrgIds":[10],"queryMode":"trend"}
+                """);
+        ChartDataView chart = new ChartDataView(
+                "LINE",
+                List.of("2026-01", "2026-02"),
+                List.of(new com.hrchat.report.chart.ChartViews.ChartSeries("在职人数", List.of(1, 2))),
+                List.of());
+
+        InsightRequest request = service.buildInsightRequest(
+                report, 7L, 23L, chart, "编制对比", "在职人数");
+
+        assertThat(request.isRich()).isTrue();
+        assertThat(request.context().metricCode()).isEqualTo("headcount");
+        assertThat(request.context().metricKind()).isEqualTo("stock");
+        assertThat(request.context().dataVersion()).isEqualTo("88");
+        assertThat(request.context().currentPeriod().start()).isEqualTo("2026-02-01");
+        assertThat(request.context().baselinePeriod().start()).isEqualTo("2026-01-01");
+        assertThat(request.snapshot().series().get(0).data()).containsExactly(1, 2);
+    }
+
+    @Test
     void chartAnalysis_readsPersistedSnapshotWithoutQueryingBusinessDb() throws Exception {
         RptReport report = new RptReport();
         report.setId(1L);

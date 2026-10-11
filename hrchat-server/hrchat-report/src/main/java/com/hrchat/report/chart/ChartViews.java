@@ -76,8 +76,15 @@ public final class ChartViews {
     public record TableColumn(String key, String title, String dataType) {
     }
 
-    /** AI 洞察解读（P3-C）。 */
-    public record InsightView(String reportName, String metricName, String summary, List<InsightPoint> points) {
+    /**
+     * AI 洞察解读（P3-C / I1）。
+     * status：complete / degraded / failed / legacy；富路径可带 dataVersion/viewKey。
+     */
+    public record InsightView(String reportName, String metricName, String summary, List<InsightPoint> points,
+                              String status, String degradationReason, String dataVersion, String viewKey) {
+        public InsightView(String reportName, String metricName, String summary, List<InsightPoint> points) {
+            this(reportName, metricName, summary, points, null, null, null, null);
+        }
     }
 
     /** 洞察要点（value=均值 / trend=趋势 / extreme=极值）。 */
