@@ -39,7 +39,7 @@ def handle_insight(body: dict | None) -> dict:
 
 
 def _looks_rich(raw: dict) -> bool:
-    return isinstance(raw.get("context"), dict) and isinstance(raw.get("snapshot"), dict)
+    return "context" in raw or "snapshot" in raw
 
 
 def _handle_rich(request: InsightRequest) -> InsightResult:
@@ -107,7 +107,7 @@ def _default_limitations(facts: list[Fact]) -> list[str]:
 def _default_actions(request: InsightRequest) -> list[NextAction]:
     assert request.context is not None
     ctx = request.context
-    if ctx.metric_code == "leave_count" and request.snapshot and request.snapshot.departments:
+    if ctx.metric_code == "leave_count":
         action = resolve_action(NextAction(
             action_id="leave_dept_1",
             capability_id=CAPABILITY_LEAVE_COUNT_DEPT,
@@ -122,17 +122,8 @@ def _default_actions(request: InsightRequest) -> list[NextAction]:
             },
             missing_params=[],
             executable=True,
-        ))
+        ), ctx)
         return [action]
-    if ctx.metric_code == "leave_count":
-        return [resolve_action(NextAction(
-            action_id="leave_dept_confirm",
-            capability_id=CAPABILITY_LEAVE_COUNT_DEPT,
-            question="确认两期与组织范围后分析部门贡献",
-            params={"metric_code": "leave_count"},
-            missing_params=[],
-            executable=True,
-        ))]
     return [suggestion_action(action_id="manual_1", question="结合业务背景人工核查异常点")]
 
 

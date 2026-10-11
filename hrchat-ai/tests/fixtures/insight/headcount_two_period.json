@@ -1,5 +1,6 @@
 {
   "context": {
+    "axis_kind": "time",
     "schema_version": "1",
     "report_id": "r-hc",
     "metric_code": "headcount",
