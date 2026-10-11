@@ -16,9 +16,42 @@ public final class ChartViews {
     private ChartViews() {
     }
 
-    /** 一次授权取数产生的图表与洞察；dataVersion 标识这次共享数据快照。 */
-    public record ChartAnalysisView(String dataVersion, String dimValue,
+    /**
+     * 图表与洞察只读视图（I0：来自持久化数据版本）。
+     *
+     * @param dataVersion   持久化数据版本 id（字符串）
+     * @param viewKey       规范化视图键
+     * @param dimValue      下钻维度值
+     * @param chartStatus   READY / NEED_GENERATE / VIEW_NOT_DERIVABLE / FAILED
+     * @param insightStatus READY / PENDING / NONE / DEGRADED / FAILED
+     * @param chart         图表；未就绪时可空
+     * @param insight       洞察；I0 通常 PENDING
+     */
+    public record ChartAnalysisView(String dataVersion, String viewKey, String dimValue,
+                                    String chartStatus, String insightStatus,
                                     ChartDataView chart, InsightView insight) {
+        /** 兼容旧四参构造（测试/过渡）。 */
+        public ChartAnalysisView(String dataVersion, String dimValue,
+                                 ChartDataView chart, InsightView insight) {
+            this(dataVersion, ViewKeyCompat.rootOrDrill(dimValue), dimValue,
+                    chart == null ? "NEED_GENERATE" : "READY",
+                    insight == null ? "PENDING" : "READY",
+                    chart, insight);
+        }
+    }
+
+    /** 避免 chart 包依赖 service 包的 viewKey 工具。 */
+    private static final class ViewKeyCompat {
+        private ViewKeyCompat() {
+        }
+
+        static String rootOrDrill(String dimValue) {
+            if (dimValue == null || dimValue.isBlank()) {
+                return "root";
+            }
+            return "dim=org|value=" + java.net.URLEncoder.encode(dimValue.trim(),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        }
     }
 
     /** 图表数据。 */

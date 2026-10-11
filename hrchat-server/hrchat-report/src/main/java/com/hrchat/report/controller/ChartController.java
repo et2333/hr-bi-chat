@@ -9,12 +9,15 @@ import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.chart.ChartViews.TableView;
 import com.hrchat.report.service.ReportChartService;
+import com.hrchat.report.service.ReportDataVersionService;
 import com.hrchat.report.service.ReportTableService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,14 +35,35 @@ public class ChartController {
 
     private final ReportChartService chartService;
     private final ReportTableService tableService;
+    private final ReportDataVersionService dataVersionService;
 
-    @Operation(summary = "图表与 AI 洞察共享一次取数和数据版本；支持组织下钻")
+    public static final String IDEMPOTENCY_HEADER = "X-Idempotency-Key";
+
+    @Operation(summary = "只读：当前数据版本下的图表与洞察状态；不触发取数或模型调用")
     @GetMapping("/{reportId}/components/{compId}/chart-analysis")
     public ApiResponse<ChartAnalysisView> chartAnalysis(@PathVariable Long reportId,
                                                         @PathVariable Long compId,
                                                         @RequestParam(required = false) String dimValue,
                                                         @CurrentUser UserContext ctx) {
         return ApiResponse.ok(chartService.chartAnalysis(reportId, compId, dimValue, ctx));
+    }
+
+    @Operation(summary = "确保报表有当前成功数据版本（旧报表打开初始化，幂等）")
+    @PostMapping("/{reportId}/data-versions/ensure")
+    public ApiResponse<ReportDataVersionService.VersionView> ensureDataVersion(
+            @PathVariable Long reportId,
+            @RequestHeader(value = IDEMPOTENCY_HEADER, required = false) String idempotencyKey,
+            @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(dataVersionService.ensureCurrent(ctx, reportId, idempotencyKey));
+    }
+
+    @Operation(summary = "显式刷新报表数据版本（失败保留上一成功版本）")
+    @PostMapping("/{reportId}/data-versions/refresh")
+    public ApiResponse<ReportDataVersionService.VersionView> refreshDataVersion(
+            @PathVariable Long reportId,
+            @RequestHeader(value = IDEMPOTENCY_HEADER, required = false) String idempotencyKey,
+            @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(dataVersionService.refresh(ctx, reportId, idempotencyKey));
     }
 
     @Operation(summary = "图表组件数据（BAR/LINE/PIE；dimValue 非空时组织维度下钻）")
