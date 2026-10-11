@@ -22,6 +22,7 @@ from adapters.model_usage import ModelResult, ModelCallError
 
 _DEFAULT_BASE_URL = "https://api.openai.com/v1"
 _DEFAULT_MODEL = "gpt-4o-mini"
+_DASHSCOPE_JSON_MODELS = {"qwen-turbo", "qwen-plus", "qwen3.6-plus"}
 
 
 class OpenAIClientImpl(ModelAdapter):
@@ -50,8 +51,8 @@ class OpenAIClientImpl(ModelAdapter):
         if urlparse(self.base_url).hostname == "api.deepseek.com":
             self.request_options.update(thinking={"type": "disabled"})
         if (urlparse(self.base_url).hostname == "dashscope.aliyuncs.com"
-                and self.model in {"qwen-turbo", "qwen-plus"}):
-            # Both demo models support hybrid thinking. Non-streaming QueryPlan needs visible JSON.
+                and self.model in _DASHSCOPE_JSON_MODELS):
+            # These models support JSON output in non-thinking mode.
             self.request_options["enable_thinking"] = False
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
@@ -67,9 +68,9 @@ class OpenAIClientImpl(ModelAdapter):
         return await self._complete([{"role": "user", "content": prompt}])
 
     def planning_options(self):
-        # JSON Object is supported by the two verified Model Studio models.
+        # Explicit allowlist: other compatible models may not support JSON mode.
         if (urlparse(self.base_url).hostname == "dashscope.aliyuncs.com"
-                and self.model in {"qwen-turbo", "qwen-plus"}):
+                and self.model in _DASHSCOPE_JSON_MODELS):
             return {"response_format": {"type": "json_object"}}
         return {}
 
