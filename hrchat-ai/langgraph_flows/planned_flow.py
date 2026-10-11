@@ -102,7 +102,10 @@ def guard_request(plan, question, metadata, context, selected, organization_choi
             surfaces.append(name)
             residual = residual.replace(name, " ")
     for phrase in ("按部门对比", "按组织对比", "全部部门", "所有部门", "全部组织", "所有组织", "全公司",
-                   "不限部门", "取消组织条件", "不限制部门", "全部", "各部门"):
+                   "不限部门", "取消组织条件", "不限制部门", "全部", "各个部门", "各部门",
+                   "各个组织", "各组织", "哪个部门", "哪些部门", "哪个组织", "哪些组织"):
+        # Remove only generic grouping words after consuming visible catalog names.
+        # Never strip arbitrary *部门/*部 suffixes: hidden/unknown names must remain.
         residual = residual.replace(phrase, " ")
     if re.search(r"[\u4e00-\u9fffA-Za-z0-9]{1,24}(?:部门|事业群|分公司|事业部|中心|团队|小组|部)", residual):
         raise PlanRejected("unknown_organization", MESSAGES["unknown_organization"], "clarify")
