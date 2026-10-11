@@ -2,6 +2,9 @@ package com.hrchat.report.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.api.report.AskSourceAccess;
+import com.hrchat.api.report.AskSourceReader;
+import com.hrchat.api.report.ReportContext;
 import com.hrchat.authz.entity.SecUser;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
@@ -70,6 +73,7 @@ public class ReportService {
     private final AuthzService authzService;
     private final ObjectMapper objectMapper;
     private final TenantMapper tenantMapper;
+    private final AskSourceReader askSourceReader;
 
     /** 订阅幂等：header → subscriptionId（回放返回原值）。 */
     private final Map<String, Long> subscribeIdempotency = new ConcurrentHashMap<>();
@@ -102,14 +106,38 @@ public class ReportService {
             throw new BizException(ErrorCode.PARAM_MISSING, "components（CUSTOM 需组件定义）");
         }
 
+        ReportContext askContext = null;
+        List<ReportDtos.ComponentSpec> components = request.components();
+        if (sourceType == 1) {
+            if (askSourceReader == null) {
+                throw new BizException(ErrorCode.SYSTEM_BUSY, "来源读取服务不可用");
+            }
+            askContext = askSourceReader.readAuthorizedAsk(
+                    new AskSourceAccess(ctx.getTenantId(), ctx.getUserId(), ctx.getEmpNo()),
+                    request.sourceId().trim());
+            components = ReportComponentDefMerger.merge(askContext, request.components());
+        }
+
         RptReport report = new RptReport();
         report.setReportName(name);
         report.setOwnerId(ctx.getUserId());
         report.setSourceType(sourceType);
-        if (request.sourceId() != null && request.sourceId().length() <= 19
+        if (sourceType == 2 && request.sourceId() != null && request.sourceId().length() <= 19
                 && request.sourceId().chars().allMatch(Character::isDigit)) {
             report.setTemplateId(Long.valueOf(request.sourceId()));
         }
+        if (sourceType == 1) {
+            report.setSourceAskId(request.sourceId().trim());
+            report.setContextJson(toJson(askContext));
+            report.setContextCompleteness(askContext.contextCompleteness());
+            report.setSnapshotReuse(askContext.snapshotReusable() ? 1 : 0);
+            if (askContext.metricVersion() != null) {
+                report.setMetricVersions(askContext.metricCode() + "@" + askContext.metricVersion());
+            }
+        } else {
+            report.setContextCompleteness(sourceType == 3 ? "complete" : "partial");
+        }
+        report.setDefinitionRevision(1);
         report.setParamsJson(toJson(request.params() == null ? Map.of() : request.params()));
         report.setStatus(1);
         report.setTenantId(TenantContextHolder.get());
@@ -119,7 +147,7 @@ public class ReportService {
         report.setUpdatedAt(LocalDateTime.now());
         reportMapper.insert(report);
 
-        saveComponents(report.getId(), request.components());
+        saveComponents(report.getId(), components);
 
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
             subscribeIdempotency.put("report:" + idempotencyKey, report.getId());
@@ -175,9 +203,10 @@ public class ReportService {
 
         List<RptComponent> comps = componentMapper.selectList(new LambdaQueryWrapper<RptComponent>()
                 .eq(RptComponent::getReportId, reportId).orderByAsc(RptComponent::getSortNo));
+        Map<String, Object> storedContext = parseMap(report.getContextJson());
         List<ReportViews.ComponentView> compViews = comps.stream()
                 .map(c -> new ReportViews.ComponentView(c.getId(), compTypeName(c.getCompType()),
-                        c.getChartType(), parseMap(c.getDefJson())))
+                        c.getChartType(), enrichDefPeriod(parseMap(c.getDefJson()), storedContext)))
                 .toList();
 
         List<RptSubscription> subs = listVisibleSubscriptions(ctx, reportId);
@@ -187,9 +216,27 @@ public class ReportService {
         ReportViews.SnapshotView latest = latestSnapshot(reportId);
 
         return new ReportViews.ReportDetail(reportId, report.getReportName(), sourceTypeName(report.getSourceType()),
-                report.getTemplateId(), parseMap(report.getParamsJson()), report.getMetricVersions(),
+                report.getTemplateId(), report.getSourceAskId(), report.getCurrentDataVersionId(),
+                report.getDefinitionRevision() == null ? 1 : report.getDefinitionRevision(),
+                report.getContextCompleteness() == null ? "partial" : report.getContextCompleteness(),
+                parseMap(report.getParamsJson()), report.getMetricVersions(),
                 compViews, "DAILY 08:00", report.getCreatedAt() == null ? "" : TS.format(report.getCreatedAt()),
                 subViews, latest);
+    }
+
+    /** 供版本服务/图表读取：加载报表并校验访问。 */
+    public RptReport requireAccessibleReport(UserContext ctx, Long reportId) {
+        authzService.checkFunc(ctx, PERM_READ);
+        RptReport report = requireReport(reportId);
+        requireAccess(ctx, report);
+        return report;
+    }
+
+    public void updateCurrentDataVersion(Long reportId, Long dataVersionId) {
+        RptReport report = requireReport(reportId);
+        report.setCurrentDataVersionId(dataVersionId);
+        report.setUpdatedAt(LocalDateTime.now());
+        reportMapper.updateById(report);
     }
 
     @Transactional
@@ -660,6 +707,47 @@ public class ReportService {
         } catch (Exception e) {
             return new LinkedHashMap<>();
         }
+    }
+
+    /**
+     * 详情展示时补齐期间字段：旧存报表 def 可能缺 period*，从 context_json.period 回填（不改库）。
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> enrichDefPeriod(Map<String, Object> def, Map<String, Object> context) {
+        if (def == null) {
+            def = new LinkedHashMap<>();
+        } else {
+            def = new LinkedHashMap<>(def);
+        }
+        if (def.get("periodStart") != null || def.get("months") != null || def.get("periodLabel") != null) {
+            return def;
+        }
+        Object periodObj = context == null ? null : context.get("period");
+        if (!(periodObj instanceof Map<?, ?> periodMap)) {
+            return def;
+        }
+        Map<String, Object> period = (Map<String, Object>) periodMap;
+        Object kind = period.get("kind");
+        Object label = period.get("displayLabel");
+        if (label != null && !String.valueOf(label).isBlank()) {
+            def.put("periodLabel", String.valueOf(label));
+        }
+        if ("ROLLING".equalsIgnoreCase(String.valueOf(kind))) {
+            Object months = period.get("rollingParam");
+            if (months != null) {
+                def.put("periodKind", "ROLLING");
+                def.put("months", months);
+            }
+        } else {
+            Object start = period.get("start");
+            Object end = period.get("endExclusive");
+            if (start != null && end != null) {
+                def.put("periodKind", "FIXED");
+                def.put("periodStart", String.valueOf(start));
+                def.put("periodEnd", String.valueOf(end));
+            }
+        }
+        return def;
     }
 
     private String toJson(Object value) {

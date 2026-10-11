@@ -1,6 +1,8 @@
 package com.hrchat.report.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.api.report.AskSourceReader;
+import com.hrchat.api.report.ReportContext;
 import com.hrchat.authz.entity.SecUser;
 import com.hrchat.authz.mapper.SecUserMapper;
 import com.hrchat.authz.model.UserContext;
@@ -67,6 +69,8 @@ class ReportServiceTest {
     private AuthzService authzService;
     @Mock
     private TenantMapper tenantMapper;
+    @Mock
+    private AskSourceReader askSourceReader;
 
     private ReportService service;
     private ReportService tenantService;
@@ -75,9 +79,11 @@ class ReportServiceTest {
     @BeforeEach
     void setUp() {
         service = new ReportService(reportMapper, componentMapper, subscriptionMapper,
-                receiverMapper, snapshotMapper, secUserMapper, authzService, new ObjectMapper(), null);
+                receiverMapper, snapshotMapper, secUserMapper, authzService, new ObjectMapper(), null,
+                askSourceReader);
         tenantService = new ReportService(reportMapper, componentMapper, subscriptionMapper,
-                receiverMapper, snapshotMapper, secUserMapper, authzService, new ObjectMapper(), tenantMapper);
+                receiverMapper, snapshotMapper, secUserMapper, authzService, new ObjectMapper(), tenantMapper,
+                askSourceReader);
         TenantContextHolder.clear();
         hr01 = UserContext.builder()
                 .userId(1L).empNo("hr01").displayName("张雨晴").roles(List.of("HRBP"))
@@ -99,6 +105,51 @@ class ReportServiceTest {
         r.setCreatedAt(LocalDateTime.now());
         r.setUpdatedAt(LocalDateTime.now());
         return r;
+    }
+
+    private UserContext askUser() {
+        return UserContext.builder()
+                .userId(1L).empNo("hr01").displayName("张雨晴").tenantId("t01").roles(List.of("HRBP"))
+                .dataLevel(1)
+                .grantedOrgs(List.of(UserContext.GrantedOrg.builder()
+                        .orgNodeId(35L).orgCode("rd").orgName("研发中心")
+                        .orgPath("/1/35/").scope(3).subtreeOrgKeys(List.of(35L)).build()))
+                .build();
+    }
+
+    @Test
+    void createAsk_persistsSourceAskIdSeparatelyFromTemplateIdAndOverridesMonths() {
+        when(askSourceReader.readAuthorizedAsk(any(), any())).thenReturn(new ReportContext(
+                ReportContext.SCHEMA_VERSION, "ASK", "ask-uuid-1", 11L, "8月离职人数",
+                "leave_count", 1, "离职人数", "人", "breakdown", List.of("org"),
+                new ReportContext.PeriodSpec("FIXED", "2026-08-01", "2026-09-01", null, null,
+                        "2026-08-01", "2026-09-01", "2026-08-01/2026-09-01"),
+                "研发中心", List.of(2L, 3L), Map.of(), "complete", true, "COUNT"));
+        when(reportMapper.insert(any())).thenAnswer(inv -> {
+            RptReport r = inv.getArgument(0);
+            r.setId(10L);
+            return 1;
+        });
+        when(componentMapper.insert(any())).thenReturn(1);
+
+        Long id = service.create(askUser(), new ReportDtos.ReportCreateRequest("ASK", "ask-uuid-1",
+                "8月离职报表", null, null,
+                List.of(new ReportDtos.ComponentSpec("CHART", "LINE",
+                        Map.of("metric", "leave_count", "months", 3, "dimensions", List.of("time")))),
+                Map.of()), null);
+
+        assertEquals(10L, id);
+        verify(reportMapper).insert(argThat(r ->
+                "ask-uuid-1".equals(r.getSourceAskId())
+                        && r.getTemplateId() == null
+                        && Integer.valueOf(1).equals(r.getSnapshotReuse())
+                        && "complete".equals(r.getContextCompleteness())));
+        verify(componentMapper).insert(argThat(c -> {
+            String json = c.getDefJson();
+            return json != null
+                    && json.contains("\"periodStart\":\"2026-08-01\"")
+                    && !json.contains("\"months\":3");
+        }));
     }
 
     @Test

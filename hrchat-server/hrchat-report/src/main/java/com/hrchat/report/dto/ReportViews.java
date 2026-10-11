@@ -31,8 +31,10 @@ public final class ReportViews {
                                String generatedAt, String expireAt) {
     }
 
-    /** 报表详情（含组件、最近快照、订阅状态）。 */
+    /** 报表详情（含组件、最近快照、订阅状态、来源与数据版本）。 */
     public record ReportDetail(Long id, String name, String sourceType, Long templateId,
+                               String sourceAskId, Long currentDataVersionId, int definitionRevision,
+                               String contextCompleteness,
                                Map<String, Object> params, String metricVersions,
                                List<ComponentView> components, String refresh, String createdAt,
                                List<SubscriptionView> subscriptions, SnapshotView latestSnapshot) {

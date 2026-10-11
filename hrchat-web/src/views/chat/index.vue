@@ -96,9 +96,17 @@
     <!-- SQL 弹窗 -->
     <a-modal v-model:open="sqlVisible" title="查询逻辑（SQL 与口径）" :footer="null" width="720px">
       <div v-if="sqlView">
-        <a-alert type="info" show-icon :message="`口径：${sqlView.caliber.metric}`" :description="sqlView.caliber.definition" class="sql-caliber" />
+        <a-alert
+          type="info"
+          show-icon
+          :message="`口径：${sqlView.caliber?.metric || '—'}`"
+          :description="sqlCaliberDescription(sqlView)"
+          class="sql-caliber"
+        />
         <a-tag v-if="isCaliberOnlySql(sqlView.sql)" color="orange" class="sql-mode-tag">口径定义</a-tag>
-        <pre class="sql-code">{{ sqlView.sql }}</pre>
+        <a-tag v-else color="blue" class="sql-mode-tag">执行 SQL</a-tag>
+        <pre v-if="sqlDisplayText(sqlView)" class="sql-code">{{ sqlDisplayText(sqlView) }}</pre>
+        <p v-else class="sql-empty">本次查询未返回可展示的执行 SQL（远程链路仅保留口径定义）。</p>
       </div>
       <a-skeleton v-else active :paragraph="{ rows: 4 }" />
     </a-modal>
@@ -491,11 +499,11 @@ function buildReportComponents(payload: AnswerPayload): ComponentSpec[] {
       },
     })
   }
-  // 有可视化图型则落 CHART；纯标量也默认落 BAR（按组织），保证报表中心可切换柱/线/饼
+  // 展示配置：业务期间/组织由服务端从 ASK 来源覆盖，前端不再默认注入近三月
   const chartType = inferChartType(payload) ?? 'BAR'
   const isTrend = chartType === 'LINE'
   const dimensions = isTrend ? ['time'] : ['org']
-  const chartTitle = isTrend ? `${title}近三月趋势` : title
+  const chartTitle = title
   comps.push({
     compType: 'CHART',
     chartType,
@@ -505,10 +513,9 @@ function buildReportComponents(payload: AnswerPayload): ComponentSpec[] {
       // dimensions：后端正式字段；dims：种子/历史兼容
       dimensions,
       dims: dimensions,
-      ...(isTrend ? { months: 3 } : {}),
     },
   })
-  // 有无明细都落 TABLE 定义，详情页按 dimensions 实时查数
+  // 有无明细都落 TABLE 定义；期间由服务端 ReportContext 写入
   comps.push({
     compType: 'TABLE',
     def: {
@@ -516,7 +523,6 @@ function buildReportComponents(payload: AnswerPayload): ComponentSpec[] {
       title: isTrend ? '月度明细' : '数据明细',
       dimensions,
       dims: dimensions,
-      ...(isTrend ? { months: 3 } : {}),
     },
   })
   return comps
@@ -654,6 +660,21 @@ function isCaliberOnlySql(sql: string | undefined): boolean {
   if (!s) return true
   const upper = s.toUpperCase()
   return !upper.includes('SELECT') && !upper.includes('WITH ')
+}
+
+function sqlCaliberDescription(view: SqlView): string {
+  const parts = [
+    view.caliber?.definition,
+    view.caliber?.time_range ? `期间：${view.caliber.time_range}` : '',
+    view.caliber?.data_updated_at ? `数据时间：${view.caliber.data_updated_at}` : '',
+  ].filter(Boolean)
+  return parts.join(' · ') || '—'
+}
+
+function sqlDisplayText(view: SqlView): string {
+  const sql = (view.sql ?? '').trim()
+  if (sql) return sql
+  return (view.caliber?.definition ?? '').trim()
 }
 
 async function showSql(t: ChatTurn) {
@@ -839,5 +860,15 @@ async function scrollToBottom() {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-all;
+  min-height: 0;
+}
+
+.sql-empty {
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  background: #f5f5f5;
+  color: rgba(0, 0, 0, 0.65);
+  font-size: 13px;
 }
 </style>
