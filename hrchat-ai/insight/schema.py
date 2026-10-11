@@ -8,11 +8,11 @@ from datetime import date
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictFloat, field_validator, model_validator
 
 
 class Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
 class MetricKind(str, Enum):
@@ -73,7 +73,7 @@ class Period(Contract):
 
 class SeriesItem(Contract):
     name: str = ""
-    data: list[float | None] = Field(default_factory=list)
+    data: list[StrictFloat | None] = Field(default_factory=list)
 
 
 class GroupRow(Contract):
@@ -99,6 +99,8 @@ class InsightContext(Contract):
     report_name: str = ""
     unit: str = Field(min_length=1, max_length=40)
     metric_kind: MetricKind
+    axis_kind: Literal["time", "category", "unknown"] = "unknown"
+    ratio_scale: Literal["fraction", "percent"] | None = None
     current_period: Period
     baseline_period: Period | None = None
     effective_org_ids: list[StrictInt] = Field(default_factory=list, max_length=500)
@@ -114,6 +116,8 @@ class InsightContext(Contract):
             raise ValueError("duplicate organisation")
         if self.baseline_period is not None and self.baseline_period == self.current_period:
             raise ValueError("comparison periods must differ")
+        if self.baseline_period and self.baseline_period.end > self.current_period.start:
+            raise ValueError("comparison periods must be ordered and non-overlapping")
         return self
 
 
@@ -251,7 +255,23 @@ class InsightRequest(Contract):
 
     @model_validator(mode="after")
     def version_alignment(self):
+        if (self.context is None) != (self.snapshot is None):
+            raise ValueError("context and snapshot are both required")
         if self.context is not None and self.snapshot is not None:
+            if len(self.snapshot.series) > 1:
+                raise ValueError("multi-series insight is not supported")
+            if any(len(s.data) != len(self.snapshot.categories) for s in self.snapshot.series):
+                raise ValueError("category/series length mismatch")
+            if len(set(self.snapshot.categories)) != len(self.snapshot.categories):
+                raise ValueError("duplicate categories")
+            deps = self.snapshot.departments or []
+            if len({d.org_id for d in deps}) != len(deps):
+                raise ValueError("duplicate departments")
+            if any(d.org_id not in self.context.effective_org_ids for d in deps):
+                raise ValueError("department outside authorized scope")
+            groups = self.snapshot.groups or []
+            if len({g.group_id for g in groups}) != len(groups):
+                raise ValueError("duplicate groups")
             if self.context.data_version != self.snapshot.data_version:
                 raise ValueError("context/snapshot data_version mismatch")
             if self.context.view_key != self.snapshot.view_key:

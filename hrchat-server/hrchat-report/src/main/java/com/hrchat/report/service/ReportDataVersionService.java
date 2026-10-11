@@ -46,8 +46,55 @@ public class ReportDataVersionService {
     private final RptViewSnapshotMapper viewSnapshotMapper;
     private final ObjectMapper objectMapper;
 
-    /** 进程内幂等：key → versionId */
-    private final Map<String, Long> idempotency = new ConcurrentHashMap<>();
+    private ReportTableService tableService;
+    private org.springframework.transaction.support.TransactionTemplate snapshotTransaction;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void configure(ReportTableService tableService,
+                          org.springframework.transaction.PlatformTransactionManager transactionManager) {
+        this.tableService = tableService;
+        this.snapshotTransaction = new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+        snapshotTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+        snapshotTransaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
+        snapshotTransaction.setReadOnly(true);
+    }
+
+    public void requireScope(UserContext ctx, RptReport report, RptDataVersion version) {
+        if (!java.util.Objects.equals(version.getScopeRef(), ReportDataScope.fingerprint(reportScope(ctx, report)))) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN, "当前数据权限与报表快照不一致，请由所有者刷新");
+        }
+    }
+
+    private UserContext reportScope(UserContext ctx, RptReport report) {
+        if (report.getContextJson() == null) return ctx;
+        return ReportDataScope.narrow(ctx, chartService.parseMap(report.getContextJson()));
+    }
+
+    public void requireExportScope(UserContext ctx, Long reportId) {
+        RptReport report = reportService.requireAccessibleReport(ctx, reportId);
+        UserContext effective = reportScope(ctx, report);
+        if (!ReportDataScope.orgs(ctx, 3).containsAll(ReportDataScope.orgs(effective, 1))) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN, "导出权限未覆盖报表全部组织");
+        }
+    }
+
+    public <T> T readSnapshot(UserContext ctx, Long reportId, Long componentId, String viewKey, Class<T> type) {
+        RptReport report = reportService.requireAccessibleReport(ctx, reportId);
+        RptDataVersion version = requireReadyVersion(report);
+        if (version == null) throw new BizException(ErrorCode.PARAM_INVALID, "报表数据尚未生成");
+        requireScope(ctx, report, version);
+        RptViewSnapshot snap = findSnapshot(version.getId(), componentId, viewKey);
+        if (snap == null) throw new BizException(ErrorCode.PARAM_INVALID, "当前版本无法派生该视图");
+        try { return objectMapper.readValue(snap.getChartJson(), type); }
+        catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new BizException(ErrorCode.PARSE_FAILED, "报表快照不可解析");
+        }
+    }
+
+    private void requireGenerator(UserContext ctx, RptReport report) {
+        if (!java.util.Objects.equals(report.getOwnerId(), ctx.getUserId()))
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN, "仅报表所有者可生成或刷新报表");
+    }
 
     public record VersionView(Long dataVersionId, int versionNo, String status, String dataAsOf,
                               String reportGeneratedAt, String failureReason, boolean published) {
@@ -58,22 +105,28 @@ public class ReportDataVersionService {
      */
     @Transactional
     public VersionView ensureCurrent(UserContext ctx, Long reportId, String idempotencyKey) {
+        reportService.lockVersion(reportId);
         RptReport report = reportService.requireAccessibleReport(ctx, reportId);
         if (report.getCurrentDataVersionId() != null) {
             RptDataVersion current = dataVersionMapper.selectById(report.getCurrentDataVersionId());
-            if (current != null && STATUS_READY.equals(current.getStatus())) {
+            if (current != null && STATUS_READY.equals(current.getStatus())
+                    && java.util.Objects.equals(current.getDefinitionRevision(), report.getDefinitionRevision())) {
+                requireScope(ctx, report, current);
                 return toView(current, true);
             }
         }
-        String key = idemKey(ctx, reportId, "ensure", idempotencyKey);
+        requireGenerator(ctx, report);
+        String key = idemKey(ctx, reportId, "ensure:" + report.getDefinitionRevision(), idempotencyKey);
         return generate(ctx, report, key, false);
     }
 
     /** 显式刷新：新建数据版本；失败保留旧成功版本。 */
     @Transactional
     public VersionView refresh(UserContext ctx, Long reportId, String idempotencyKey) {
+        reportService.lockVersion(reportId);
         RptReport report = reportService.requireAccessibleReport(ctx, reportId);
-        String key = idemKey(ctx, reportId, "refresh", idempotencyKey);
+        requireGenerator(ctx, report);
+        String key = idemKey(ctx, reportId, "refresh:" + report.getDefinitionRevision(), idempotencyKey);
         return generate(ctx, report, key, true);
     }
 
@@ -82,7 +135,8 @@ public class ReportDataVersionService {
             return null;
         }
         RptDataVersion version = dataVersionMapper.selectById(report.getCurrentDataVersionId());
-        if (version == null || !STATUS_READY.equals(version.getStatus())) {
+        if (version == null || !STATUS_READY.equals(version.getStatus())
+                || !java.util.Objects.equals(version.getDefinitionRevision(), report.getDefinitionRevision())) {
             return null;
         }
         return version;
@@ -98,20 +152,11 @@ public class ReportDataVersionService {
 
     private VersionView generate(UserContext ctx, RptReport report, String key, boolean forceNew) {
         if (key != null) {
-            Long existingId = idempotency.get(key);
-            if (existingId != null) {
-                RptDataVersion existing = dataVersionMapper.selectById(existingId);
-                if (existing != null) {
-                    return toView(existing, STATUS_READY.equals(existing.getStatus())
-                            && existing.getId().equals(report.getCurrentDataVersionId()));
-                }
-            }
             RptDataVersion byDb = dataVersionMapper.selectOne(new LambdaQueryWrapper<RptDataVersion>()
                     .eq(RptDataVersion::getReportId, report.getId())
                     .eq(RptDataVersion::getIdempotencyKey, key)
                     .last("LIMIT 1"));
             if (byDb != null) {
-                idempotency.put(key, byDb.getId());
                 return toView(byDb, STATUS_READY.equals(byDb.getStatus())
                         && byDb.getId().equals(report.getCurrentDataVersionId()));
             }
@@ -123,26 +168,27 @@ public class ReportDataVersionService {
         version.setVersionNo(nextNo);
         version.setDefinitionRevision(report.getDefinitionRevision() == null ? 1 : report.getDefinitionRevision());
         version.setStatus(STATUS_RUNNING);
-        version.setSnapshotReuse(report.getSnapshotReuse() == null ? 0 : report.getSnapshotReuse());
-        version.setScopeRef(ctx.getPermissionFingerprint());
+        version.setSnapshotReuse(0);
+        version.setScopeRef(ReportDataScope.fingerprint(reportScope(ctx, report)));
         version.setIdempotencyKey(key);
         version.setTenantId(TenantContextHolder.get());
         version.setCreatedAt(LocalDateTime.now());
         version.setCreatedBy(ctx.getEmpNo());
         dataVersionMapper.insert(version);
-        if (key != null) {
-            idempotency.put(key, version.getId());
-        }
 
         try {
-            List<RptComponent> charts = componentMapper.selectList(new LambdaQueryWrapper<RptComponent>()
-                    .eq(RptComponent::getReportId, report.getId())
-                    .eq(RptComponent::getCompType, 1)
-                    .orderByAsc(RptComponent::getSortNo));
+            List<RptComponent> components = componentMapper.selectList(new LambdaQueryWrapper<RptComponent>()
+                    .eq(RptComponent::getReportId, report.getId()).orderByAsc(RptComponent::getSortNo));
             LocalDateTime dataAsOf = LocalDateTime.now();
-            for (RptComponent chart : charts) {
-                materializeComponent(ctx, version.getId(), chart);
-            }
+            java.util.function.Supplier<List<RptViewSnapshot>> freeze = () -> {
+                List<RptViewSnapshot> snapshots = new java.util.ArrayList<>();
+                for (RptComponent component : components) materializeComponent(ctx, version.getId(), component, snapshots);
+                return snapshots;
+            };
+            // Queries share one repeatable-read snapshot. Query failures cannot mark the metadata transaction rollback-only.
+            List<RptViewSnapshot> snapshots = snapshotTransaction == null ? freeze.get()
+                    : snapshotTransaction.execute(status -> freeze.get());
+            for (RptViewSnapshot snap : snapshots) viewSnapshotMapper.insert(snap);
             version.setStatus(STATUS_READY);
             version.setDataAsOf(dataAsOf);
             version.setReportGeneratedAt(LocalDateTime.now());
@@ -157,38 +203,46 @@ public class ReportDataVersionService {
             version.setFailureReason(ex.getMessage() == null ? "生成失败" : trim(ex.getMessage(), 250));
             dataVersionMapper.updateById(version);
             // 失败不覆盖上一成功版本
-            if (!forceNew && report.getCurrentDataVersionId() == null) {
-                throw ex instanceof BizException be ? be
-                        : new BizException(ErrorCode.SYSTEM_BUSY, "报表数据版本生成失败");
-            }
             return toView(version, false);
         }
     }
 
-    private void materializeComponent(UserContext ctx, Long dataVersionId, RptComponent chart) {
+    private void materializeComponent(UserContext ctx, Long dataVersionId, RptComponent chart, List<RptViewSnapshot> snapshots) {
+        if (Integer.valueOf(3).equals(chart.getCompType())) {
+            Object card = chartService.materializeMetricCard(chart, ctx);
+            snapshots.add(snapshot(dataVersionId, chart.getId(), ViewKeySupport.ROOT, card, card));
+            return;
+        }
+        if (Integer.valueOf(2).equals(chart.getCompType())) {
+            Object table = tableService.materializeTable(chart, ctx);
+            snapshots.add(snapshot(dataVersionId, chart.getId(), ViewKeySupport.ROOT, table, table));
+            return;
+        }
+        if (!Integer.valueOf(1).equals(chart.getCompType())) return;
         ChartDataView root = chartService.materializeChart(chart, null, ctx);
-        saveSnapshot(dataVersionId, chart.getId(), ViewKeySupport.ROOT, root, root);
+        snapshots.add(snapshot(dataVersionId, chart.getId(), ViewKeySupport.ROOT, root, root));
         // 首版：为根分类预生成组织下钻快照，保证同版只读
-        if (root.categories() != null && ("BAR".equalsIgnoreCase(root.chartType())
-                || "PIE".equalsIgnoreCase(root.chartType()))) {
-            for (String category : root.categories()) {
+        Map<String, Object> def = chartService.parseMap(chart.getDefJson());
+        if ("org".equals(chartService.resolveDimKey(def))) {
+            List<String> categories = "PIE".equalsIgnoreCase(root.chartType())
+                    ? root.pieData().stream().map(p -> p.name()).toList() : root.categories();
+            for (String category : categories) {
                 if (category == null || category.isBlank()) {
                     continue;
                 }
                 try {
                     ChartDataView drilled = chartService.materializeChart(chart, category, ctx);
-                    saveSnapshot(dataVersionId, chart.getId(), ViewKeySupport.forOrgDrill(category),
-                            drilled, drilled);
+                    snapshots.add(snapshot(dataVersionId, chart.getId(), ViewKeySupport.forOrgDrill(category),
+                            drilled, drilled));
                 } catch (BizException ex) {
-                    // 单个下钻失败不阻断根版本；读取时返回不可派生
-                    log.debug("skip drill snapshot comp={} dim={}: {}", chart.getId(), category, ex.getMessage());
+                    throw ex;
                 }
             }
         }
     }
 
-    private void saveSnapshot(Long dataVersionId, Long componentId, String viewKey,
-                              ChartDataView chart, Object aggregate) {
+    private RptViewSnapshot snapshot(Long dataVersionId, Long componentId, String viewKey,
+                              Object chart, Object aggregate) {
         RptViewSnapshot snap = new RptViewSnapshot();
         snap.setDataVersionId(dataVersionId);
         snap.setComponentId(componentId);
@@ -196,7 +250,7 @@ public class ReportDataVersionService {
         snap.setChartJson(toJson(chart));
         snap.setAggregateJson(toJson(aggregate));
         snap.setCreatedAt(LocalDateTime.now());
-        viewSnapshotMapper.insert(snap);
+        return snap;
     }
 
     private int nextVersionNo(Long reportId) {
@@ -212,7 +266,11 @@ public class ReportDataVersionService {
             return null;
         }
         String tenant = ctx.getTenantId() == null ? "_" : ctx.getTenantId();
-        return tenant + ":" + reportId + ":" + action + ":" + raw.trim();
+        String source = tenant + ":" + reportId + ":" + action + ":" + raw.trim();
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(source.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
     }
 
     private VersionView toView(RptDataVersion v, boolean published) {
@@ -236,6 +294,6 @@ public class ReportDataVersionService {
 
     /** 调试/测试辅助：导出幂等缓存状态。 */
     Map<String, Object> debugIdempotency() {
-        return new LinkedHashMap<>(idempotency);
+        return Map.of();
     }
 }

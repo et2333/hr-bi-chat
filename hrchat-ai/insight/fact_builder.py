@@ -27,11 +27,17 @@ def build_fact_bundle(context: InsightContext, snapshot: Snapshot) -> FactBundle
     unit = context.unit
     scope = context.scope_ref
 
-    facts.extend(_absolute_and_relative(context, snap_id, values, categories, unit, scope))
-    facts.extend(_point_compare(context, snap_id, values, categories, unit, scope))
-    facts.extend(_percentage_point(context, snap_id, values, categories, scope))
-    facts.extend(_period_over_period(snap_id, values, categories, unit, scope))
-    facts.extend(_continuous_trend(snapshot, snap_id, values, categories, scope))
+    temporal = context.axis_kind == "time" and _ordered_months(categories)
+    if temporal:
+        facts.extend(_absolute_and_relative(context, snap_id, values, categories, unit, scope))
+        facts.extend(_point_compare(context, snap_id, values, categories, unit, scope))
+        facts.extend(_percentage_point(context, snap_id, values, categories, scope))
+        facts.extend(_period_over_period(snap_id, values, categories, unit, scope))
+        facts.extend(_continuous_trend(snapshot, snap_id, values, categories, scope))
+    else:
+        facts.append(Fact(fact_id="continuous_trend:overall", fact_type=FactType.CONTINUOUS_TREND,
+                          snapshot_id=snap_id, scope_ref=scope, computable=False,
+                          incomputable_reason="non_temporal_axis", basis="requires_ordered_time_axis"))
     facts.extend(_tied_extremes(snap_id, values, categories, unit, scope))
     facts.extend(_stock_sum_guard(context, snap_id, values, unit, scope))
     facts.extend(_rank_share(snapshot, snap_id, unit, scope))
@@ -45,6 +51,13 @@ def build_fact_bundle(context: InsightContext, snapshot: Snapshot) -> FactBundle
         metric_kind=context.metric_kind,
         unit=unit,
         facts=facts,
+    )
+
+
+def _ordered_months(categories: list[str]) -> bool:
+    keys = [_month_key(c) for c in categories]
+    return bool(keys) and all(k is not None and 1 <= k[1] <= 12 for k in keys) and all(
+        keys[i] > keys[i - 1] for i in range(1, len(keys))
     )
 
 
@@ -222,7 +235,12 @@ def _percentage_point(
             incomputable_reason="missing_value",
             basis="ratio_endpoints",
         )]
-    pp = (current - baseline) * 100 if abs(current) <= 1 and abs(baseline) <= 1 else current - baseline
+    scale = context.ratio_scale or ("percent" if context.unit == "%" else None)
+    if scale is None:
+        return [Fact(fact_id="percentage_point_change:overall", fact_type=FactType.PERCENTAGE_POINT_CHANGE,
+                     snapshot_id=snap_id, scope_ref=scope, computable=False,
+                     incomputable_reason="ratio_scale_missing", basis="requires_explicit_scale")]
+    pp = (current - baseline) * (100 if scale == "fraction" else 1)
     return [Fact(
         fact_id="percentage_point_change:overall",
         fact_type=FactType.PERCENTAGE_POINT_CHANGE,
@@ -292,7 +310,7 @@ def _has_continuity_gap(categories: list[str], explicit_gaps: Iterable[str]) -> 
         return True
     keys = [_month_key(c) for c in categories]
     if any(k is None for k in keys) or len(keys) < 2:
-        return False
+        return True
     for i in range(1, len(keys)):
         y0, m0 = keys[i - 1]  # type: ignore[misc]
         y1, m1 = keys[i]  # type: ignore[misc]
@@ -444,6 +462,7 @@ def _rank_share(snapshot: Snapshot, snap_id: str, unit: str, scope: str) -> list
     facts: list[Fact] = []
     ranked = sorted(groups, key=lambda g: (-g.value, g.group_id))
     for idx, g in enumerate(ranked, start=1):
+        idx = 1 + sum(other.value > g.value for other in ranked)
         share = None
         computable = True
         reason = None
@@ -484,6 +503,15 @@ def _department_contribution(
     deps = snapshot.departments or []
     if not deps:
         return []
+    values, categories = _primary_series(snapshot)
+    baseline_value, current_value, *_ = _endpoints(values, categories)
+    if (context.metric_code != "leave_count" or context.baseline_period is None
+            or baseline_value != sum(d.baseline_count for d in deps)
+            or current_value != sum(d.current_count for d in deps)
+            or {d.org_id for d in deps} != set(context.effective_org_ids)):
+        return [Fact(fact_id="department_contribution:blocked", fact_type=FactType.DEPARTMENT_CONTRIBUTION,
+                     snapshot_id=snap_id, scope_ref=scope, computable=False,
+                     incomputable_reason="department_totals_or_scope_mismatch", basis="requires_complete_partition")]
     facts: list[Fact] = []
     current = sum(d.current_count for d in deps)
     baseline = sum(d.baseline_count for d in deps)

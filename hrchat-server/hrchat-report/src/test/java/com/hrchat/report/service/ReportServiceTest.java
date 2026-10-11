@@ -142,7 +142,7 @@ class ReportServiceTest {
         verify(reportMapper).insert(argThat(r ->
                 "ask-uuid-1".equals(r.getSourceAskId())
                         && r.getTemplateId() == null
-                        && Integer.valueOf(1).equals(r.getSnapshotReuse())
+                        && Integer.valueOf(0).equals(r.getSnapshotReuse())
                         && "complete".equals(r.getContextCompleteness())));
         verify(componentMapper).insert(argThat(c -> {
             String json = c.getDefJson();

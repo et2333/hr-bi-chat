@@ -125,6 +125,7 @@ def test_ratio_without_components_not_computable():
         report_name="比率",
         unit="%",
         metric_kind=MetricKind.RATIO,
+        axis_kind="time",
         current_period=Period(start="2026-02-01", end="2026-03-01"),
         baseline_period=Period(start="2026-01-01", end="2026-02-01"),
         effective_org_ids=[1],

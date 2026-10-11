@@ -130,7 +130,7 @@ public class ReportService {
             report.setSourceAskId(request.sourceId().trim());
             report.setContextJson(toJson(askContext));
             report.setContextCompleteness(askContext.contextCompleteness());
-            report.setSnapshotReuse(askContext.snapshotReusable() ? 1 : 0);
+            report.setSnapshotReuse(0);
             if (askContext.metricVersion() != null) {
                 report.setMetricVersions(askContext.metricCode() + "@" + askContext.metricVersion());
             }
@@ -221,7 +221,7 @@ public class ReportService {
                 report.getContextCompleteness() == null ? "partial" : report.getContextCompleteness(),
                 parseMap(report.getParamsJson()), report.getMetricVersions(),
                 compViews, "DAILY 08:00", report.getCreatedAt() == null ? "" : TS.format(report.getCreatedAt()),
-                subViews, latest);
+                subViews, latest, java.util.Objects.equals(ctx.getUserId(), report.getOwnerId()));
     }
 
     /** 供版本服务/图表读取：加载报表并校验访问。 */
@@ -239,9 +239,14 @@ public class ReportService {
         reportMapper.updateById(report);
     }
 
+    public void lockVersion(Long reportId) {
+        reportMapper.lockVersion(reportId);
+    }
+
     @Transactional
     public void patch(UserContext ctx, Long reportId, ReportDtos.ReportPatchRequest request) {
         authzService.checkFunc(ctx, PERM_MANAGE);
+        lockVersion(reportId);
         RptReport report = requireOwner(ctx, reportId);
         if (request.name() != null && !request.name().isBlank()) {
             if (request.name().trim().length() > 64) {
@@ -253,9 +258,22 @@ public class ReportService {
         report.setUpdatedAt(LocalDateTime.now());
         reportMapper.updateById(report);
         if (request.components() != null) {
+            reportMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<RptReport>()
+                    .eq(RptReport::getId, reportId)
+                    .set(RptReport::getDefinitionRevision, (report.getDefinitionRevision() == null ? 1 : report.getDefinitionRevision()) + 1)
+                    .set(RptReport::getCurrentDataVersionId, null));
             componentMapper.delete(new LambdaQueryWrapper<RptComponent>()
                     .eq(RptComponent::getReportId, reportId));
-            saveComponents(reportId, request.components());
+            List<ReportDtos.ComponentSpec> specs = request.components();
+            if (report.getSourceAskId() != null && report.getContextJson() != null) {
+                try {
+                    specs = ReportComponentDefMerger.merge(objectMapper.readValue(report.getContextJson(),
+                            com.hrchat.api.report.ReportContext.class), specs);
+                } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+                    throw new BizException(ErrorCode.PARSE_FAILED, "报表来源口径不可解析");
+                }
+            }
+            saveComponents(reportId, specs);
         }
     }
 

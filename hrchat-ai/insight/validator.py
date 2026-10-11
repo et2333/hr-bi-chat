@@ -5,7 +5,7 @@ Blocks unsupported actions and definite department contribution without evidence
 """
 from __future__ import annotations
 
-from insight.capabilities import is_supported_capability, resolve_action
+from insight.capabilities import is_supported_capability, resolve_action, action_param_errors
 from insight.schema import (
     ClaimKind,
     FactBundle,
@@ -65,11 +65,11 @@ def validate_draft(
 
     accepted_actions: list[NextAction] = []
     for action in draft.next_actions:
-        action_errors = _check_action(action)
+        action_errors = _check_action(action, context)
         if action_errors:
             errors.extend(action_errors)
             continue
-        resolved = resolve_action(action)
+        resolved = resolve_action(action, context)
         if resolved.capability_id == "manual_review":
             accepted_actions.append(resolved.model_copy(update={"executable": False}))
         else:
@@ -118,25 +118,35 @@ def _check_claim(
                 claim_id=claim.claim_id,
             ))
 
-    if claim.scope_ref is not None and claim.scope_ref != context.scope_ref:
-        # Also reject org ids outside effective scope.
-        allowed = {f"org:{i}" for i in context.effective_org_ids}
-        allowed.add(context.scope_ref)
-        if claim.scope_ref not in allowed and not _scope_subset(claim.scope_ref, context):
-            errors.append(ValidationIssue(
-                kind=ValidationErrorKind.OUT_OF_SCOPE,
-                message=f"scope not authorized: {claim.scope_ref}",
-                fixable=False,
-                claim_id=claim.claim_id,
-            ))
-
-    if claim.unit is not None and claim.unit not in {context.unit, "ratio", "share", "pp", "%"}:
-        errors.append(ValidationIssue(
-            kind=ValidationErrorKind.UNIT_MISMATCH,
-            message=f"unit mismatch: {claim.unit}",
-            fixable=True,
-            claim_id=claim.claim_id,
-        ))
+    refs = [fact_index[fid] for fid in claim.fact_ids if fid in fact_index]
+    if claim.scope_ref is not None and any(f.scope_ref != claim.scope_ref for f in refs):
+        errors.append(ValidationIssue(kind=ValidationErrorKind.OUT_OF_SCOPE,
+            message="claim scope differs from its evidence", fixable=False, claim_id=claim.claim_id))
+    if claim.unit is not None and any(f.unit != claim.unit for f in refs):
+        errors.append(ValidationIssue(kind=ValidationErrorKind.UNIT_MISMATCH,
+            message="claim unit differs from its evidence", fixable=True, claim_id=claim.claim_id))
+    typed = {
+        "absolute_increase": (FactType.ABSOLUTE_CHANGE, 1),
+        "absolute_decrease": (FactType.ABSOLUTE_CHANGE, -1),
+        "relative_increase": (FactType.RELATIVE_CHANGE, 1),
+        "relative_decrease": (FactType.RELATIVE_CHANGE, -1),
+        "point_higher": (FactType.ABSOLUTE_CHANGE, 1),
+        "point_lower": (FactType.ABSOLUTE_CHANGE, -1),
+    }
+    supported = True
+    if claim.predicate in typed:
+        fact_type, sign = typed[claim.predicate]
+        supported = any(f.computable and f.fact_type == fact_type and f.value is not None
+                        and f.value * sign > 0 for f in refs)
+    elif claim.predicate == "tied_extreme":
+        supported = any(f.computable and f.fact_type == FactType.TIED_EXTREME for f in refs)
+    elif claim.predicate == "offsetting_departments":
+        supported = any(f.computable and f.contribution_kind == "offset" and f.value and f.value > 0 for f in refs)
+    elif claim.predicate == "department_net_contribution":
+        supported = any(f.computable and f.contribution_kind == "department_delta" for f in refs)
+    if not supported:
+        errors.append(ValidationIssue(kind=ValidationErrorKind.BAD_PREDICATE,
+            message="predicate not supported by fact type/sign", fixable=False, claim_id=claim.claim_id))
 
     if claim.predicate not in _ALLOWED_PREDICATES:
         errors.append(ValidationIssue(
@@ -168,7 +178,7 @@ def _scope_subset(claim_scope: str, context: InsightContext) -> bool:
     return False
 
 
-def _check_action(action: NextAction) -> list[ValidationIssue]:
+def _check_action(action: NextAction, context: InsightContext) -> list[ValidationIssue]:
     if action.capability_id == "manual_review":
         if action.executable:
             return [ValidationIssue(
@@ -192,4 +202,7 @@ def _check_action(action: NextAction) -> list[ValidationIssue]:
             fixable=True,
             action_id=action.action_id,
         )]
-    return []
+    return [ValidationIssue(kind=ValidationErrorKind.BAD_ACTION_PARAMS, message=error,
+                            fixable=False, action_id=action.action_id)
+            for error in action_param_errors(action, context)]
+

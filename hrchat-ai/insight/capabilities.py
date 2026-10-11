@@ -5,7 +5,8 @@ Non-executable suggestions must not become clickable auto-actions.
 """
 from __future__ import annotations
 
-from insight.schema import NextAction
+from insight.schema import NextAction, InsightContext, Period
+from pydantic import ValidationError
 
 CAPABILITY_LEAVE_COUNT_DEPT = "leave_count_department_contribution"
 
@@ -32,7 +33,7 @@ def list_capabilities() -> list[dict]:
     ]
 
 
-def resolve_action(action: NextAction) -> NextAction:
+def resolve_action(action: NextAction, context: InsightContext | None = None) -> NextAction:
     """Fill missing_params and clear executable when confirmation is required."""
     meta = CAPABILITIES.get(action.capability_id)
     if meta is None:
@@ -43,7 +44,7 @@ def resolve_action(action: NextAction) -> NextAction:
     for p in action.missing_params:
         if p not in missing:
             missing.append(p)
-    executable = bool(meta.get("executable")) and not missing
+    executable = bool(meta.get("executable")) and not missing and context is not None and not action_param_errors(action, context)
     return action.model_copy(update={"missing_params": missing, "executable": executable})
 
 
@@ -71,3 +72,31 @@ def _missing(value) -> bool:
     if isinstance(value, (list, dict, tuple, set)) and len(value) == 0:
         return True
     return False
+
+
+def action_param_errors(action: NextAction, context: InsightContext) -> list[str]:
+    if action.capability_id != CAPABILITY_LEAVE_COUNT_DEPT:
+        return []
+    params = action.params
+    errors = []
+    if context.metric_code != "leave_count" or params.get("metric_code", "leave_count") != "leave_count":
+        errors.append("capability only supports leave_count")
+    required = set(CAPABILITIES[CAPABILITY_LEAVE_COUNT_DEPT]["required_params"])
+    if set(params) - required:
+        errors.append("unknown action parameters")
+    for name, expected in (("current_period", context.current_period), ("baseline_period", context.baseline_period)):
+        raw = params.get(name)
+        if _missing(raw):
+            continue
+        try:
+            period = Period.model_validate(raw)
+            if expected is None or period != expected:
+                errors.append(f"{name} does not match trusted context")
+        except (ValidationError, TypeError):
+            errors.append(f"invalid {name}")
+    ids = params.get("effective_org_ids")
+    if not _missing(ids):
+        if (not isinstance(ids, list) or any(type(i) is not int or i <= 0 for i in ids)
+                or len(set(ids)) != len(ids) or set(ids) != set(context.effective_org_ids)):
+            errors.append("organization scope does not match trusted context")
+    return errors
