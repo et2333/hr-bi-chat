@@ -204,6 +204,7 @@ export interface ReportDetail {
   currentDataVersionId?: number | null
   definitionRevision?: number
   contextCompleteness?: string
+  canRefresh?: boolean
   params: Record<string, unknown>
   metricVersions?: string | null
   components: ComponentView[]

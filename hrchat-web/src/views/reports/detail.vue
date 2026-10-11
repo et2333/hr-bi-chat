@@ -15,7 +15,8 @@
             <template #icon><ArrowLeftOutlined /></template>
             返回
           </a-button>
-          <a-button type="primary" @click="openExport">
+          <a-button v-if="report?.canRefresh" :loading="refreshing" :disabled="loading" @click="refreshData">刷新报表</a-button>
+          <a-button type="primary" :disabled="!report?.currentDataVersionId || refreshing" @click="openExport">
             <template #icon><DownloadOutlined /></template>
             导出
           </a-button>
@@ -515,6 +516,8 @@ const exportTask = ref<{ exportId: string; status: string; rowCount: number; dow
 
 const downloadHref = computed(() => (exportTask.value ? reportApi.downloadExport(exportTask.value.exportId) : ''))
 
+const refreshing = ref(false)
+
 onMounted(loadDetail)
 
 async function loadDetail() {
@@ -524,8 +527,12 @@ async function loadDetail() {
     report.value = res.data
     subscriptions.value = res.data.subscriptions
     // 旧报表/无版本：打开详情时幂等初始化数据版本（不暗中刷新已有成功版本）
-    if (!res.data.currentDataVersionId) {
-      await reportApi.ensureReportDataVersion(reportId, `ensure-${reportId}`)
+    if (!res.data.currentDataVersionId && res.data.canRefresh !== false) {
+      const generated = await reportApi.ensureReportDataVersion(reportId, `ensure-${reportId}-${res.data.definitionRevision ?? 1}`)
+      if (generated.data.status !== 'READY' || !generated.data.published) {
+        message.error('报表生成失败，请点击“刷新报表”重试')
+        return
+      }
       const refreshed = await reportApi.getReport(reportId)
       report.value = refreshed.data
     }
@@ -534,6 +541,23 @@ async function loadDetail() {
     message.error(e instanceof Error ? e.message : '加载报表详情失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function refreshData() {
+  refreshing.value = true
+  try {
+    const result = await reportApi.refreshReportDataVersion(reportId, `refresh-${reportId}-${crypto.randomUUID()}`)
+    if (result.data.status !== 'READY' || !result.data.published) {
+      message.error('刷新失败，保留上一成功版本')
+      return
+    }
+    await loadDetail()
+    message.success('报表已刷新')
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : '刷新报表失败')
+  } finally {
+    refreshing.value = false
   }
 }
 
