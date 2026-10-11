@@ -16,6 +16,11 @@ public final class ChartViews {
     private ChartViews() {
     }
 
+    /** 一次授权取数产生的图表与洞察；dataVersion 标识这次共享数据快照。 */
+    public record ChartAnalysisView(String dataVersion, String dimValue,
+                                    ChartDataView chart, InsightView insight) {
+    }
+
     /** 图表数据。 */
     public record ChartDataView(String chartType, List<String> categories,
                                 List<ChartSeries> series, List<ChartPieDatum> pieData) {

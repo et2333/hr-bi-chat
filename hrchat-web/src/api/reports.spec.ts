@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createExport, getChartData, getDimValues, getInsight, getTableData } from './reports'
+import { createExport, getChartAnalysis, getChartData, getDimValues, getInsight, getTableData } from './reports'
 import { get, post } from './http'
 
 vi.mock('./http', () => ({
@@ -9,6 +9,14 @@ vi.mock('./http', () => ({
 }))
 
 describe('api/reports', () => {
+  it('统一图文端点透传下钻条件，回溯根级清除条件', () => {
+    getChartAnalysis(7, 23, '研发中心')
+    expect(get).toHaveBeenLastCalledWith('/reports/7/components/23/chart-analysis', {
+      params: { dimValue: '研发中心' },
+    })
+    getChartAnalysis(7, 23)
+    expect(get).toHaveBeenLastCalledWith('/reports/7/components/23/chart-analysis', { params: undefined })
+  })
   it('getChartData 请求 chart-data 端点（无下钻不带 dimValue）', () => {
     getChartData(7, 23)
     expect(get).toHaveBeenCalledWith('/reports/7/components/23/chart-data', { params: undefined })

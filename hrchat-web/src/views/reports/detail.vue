@@ -259,7 +259,8 @@ import { message } from 'ant-design-vue'
 import { ArrowLeftOutlined, BulbOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { reportApi } from '@/api'
 import type { ComponentView, ReportDetail, SnapshotView, SubscriptionView } from '@/api/types'
-import type { ChartDataView, InsightView, MetricCardView, TableView } from '@/api/reports'
+import type { MetricCardView, TableView } from '@/api/reports'
+import { useReportChartAnalysis } from '@/composables/useReportChartAnalysis'
 import ChartRenderer, { type ChartType } from '@/components/ChartRenderer.vue'
 import MetricCard from '@/components/MetricCard.vue'
 
@@ -272,26 +273,13 @@ const subscriptions = ref<SubscriptionView[]>([])
 const snapshots = ref<SnapshotView[]>([])
 const loading = ref(false)
 
-// 图表组件数据（异步拉取，key 为 componentId）
-interface ChartState {
-  loading: boolean
-  data: ChartDataView | null
-}
-const chartStates = ref<Record<number, ChartState>>({})
+// 图表与洞察从服务端共享快照同步更新。
+const { chartStates, insightStates, loadChartData, loadInsight } = useReportChartAnalysis(reportId, (e) => {
+  message.error(e instanceof Error ? e.message : '图表数据加载失败')
+})
 
-function chartStateOf(componentId: number): ChartState | undefined {
+function chartStateOf(componentId: number) {
   return chartStates.value[componentId]
-}
-
-async function loadChartData(componentId: number, dimValue?: string) {
-  chartStates.value[componentId] = { loading: true, data: null }
-  try {
-    const res = await reportApi.getChartData(reportId, componentId, dimValue)
-    chartStates.value[componentId] = { loading: false, data: res.data }
-  } catch (e) {
-    chartStates.value[componentId] = { loading: false, data: null }
-    message.error(e instanceof Error ? e.message : '图表数据加载失败')
-  }
 }
 
 interface MetricCardState {
@@ -368,26 +356,8 @@ function drillTo(componentId: number, level: number, next?: string) {
   loadChartData(componentId, dimValue)
 }
 
-/** AI 洞察（仅 BAR/LINE 图表组件加载） */
-interface InsightState {
-  loading: boolean
-  data: InsightView | null
-  error: boolean
-}
-const insightStates = ref<Record<number, InsightState>>({})
-
-function insightStateOf(componentId: number): InsightState | undefined {
+function insightStateOf(componentId: number) {
   return insightStates.value[componentId]
-}
-
-async function loadInsight(componentId: number) {
-  insightStates.value[componentId] = { loading: true, data: null, error: false }
-  try {
-    const res = await reportApi.getInsight(reportId, componentId)
-    insightStates.value[componentId] = { loading: false, data: res.data, error: false }
-  } catch {
-    insightStates.value[componentId] = { loading: false, data: null, error: true }
-  }
 }
 
 /** 明细表状态：服务端筛选/排序/分页 */
@@ -514,14 +484,13 @@ function applyTableFilter(componentId: number, vals: string[]) {
   loadTableData(componentId)
 }
 
-/** 后端 chart-data 端点仅支持 BAR/LINE/PIE；TABLE 走明细表端点；BAR/LINE 附带加载洞察（chartType 兼容小写，如模板里的 "bar"） */
+/** 图表与洞察统一加载；TABLE 走独立明细表端点。 */
 async function loadCharts(components: ComponentView[]) {
   const charts = components.filter(
     (c) => c.compType === 'CHART' && ['BAR', 'LINE', 'PIE'].includes((c.chartType ?? '').toUpperCase()),
   )
   await Promise.all([
     ...charts.map((c) => loadChartData(c.componentId)),
-    ...charts.filter((c) => (c.chartType ?? '').toUpperCase() !== 'PIE').map((c) => loadInsight(c.componentId)),
     ...components.filter((c) => c.compType === 'TABLE').map((c) => initTable(c.componentId)),
     ...components.filter((c) => c.compType === 'METRIC_CARD').map((c) => loadMetricCardData(c.componentId)),
   ])

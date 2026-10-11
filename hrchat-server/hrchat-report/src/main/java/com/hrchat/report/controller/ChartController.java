@@ -4,6 +4,7 @@ import com.hrchat.authz.model.CurrentUser;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.api.ApiResponse;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
+import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.chart.ChartViews.TableView;
@@ -31,6 +32,15 @@ public class ChartController {
 
     private final ReportChartService chartService;
     private final ReportTableService tableService;
+
+    @Operation(summary = "图表与 AI 洞察共享一次取数和数据版本；支持组织下钻")
+    @GetMapping("/{reportId}/components/{compId}/chart-analysis")
+    public ApiResponse<ChartAnalysisView> chartAnalysis(@PathVariable Long reportId,
+                                                        @PathVariable Long compId,
+                                                        @RequestParam(required = false) String dimValue,
+                                                        @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(chartService.chartAnalysis(reportId, compId, dimValue, ctx));
+    }
 
     @Operation(summary = "图表组件数据（BAR/LINE/PIE；dimValue 非空时组织维度下钻）")
     @GetMapping("/{reportId}/components/{compId}/chart-data")
