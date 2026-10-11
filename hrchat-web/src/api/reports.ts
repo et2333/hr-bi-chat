@@ -1,4 +1,5 @@
 import { get, post, del as deleteReq } from './http'
+import type { AnalysisPeriod, AnalysisTask } from './attribution'
 import type {
   ApiResponse,
   ExportTaskView,
@@ -51,15 +52,53 @@ export interface ChartDataView {
   pieData: Array<{ name: string; value: number }>
 }
 
-/** 只读图文视图：来自持久化数据版本，GET 不触发取数。 */
+/** 洞察任务状态：与后端 InsightTaskView.status 对齐。 */
+export type InsightStatus =
+  | 'NONE'
+  | 'PENDING'
+  | 'RUNNING'
+  | 'COMPLETE'
+  | 'DEGRADED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'INTERRUPTED'
+
+/** 只读图文视图：来自持久化数据版本，GET 不触发取数（也不触发模型调用）。 */
 export interface ChartAnalysisView {
   dataVersion: string | null
   viewKey: string
   dimValue: string | null
   chartStatus: 'READY' | 'NEED_GENERATE' | 'VIEW_NOT_DERIVABLE' | 'FAILED' | string
-  insightStatus: 'READY' | 'PENDING' | 'NONE' | 'DEGRADED' | 'FAILED' | string
+  insightStatus: InsightStatus
+  /** 当前视图绑定的洞察任务与其尝试次数；无任务时为 null */
+  taskId: number | null
+  attempt: number | null
   chart: ChartDataView | null
   insight: InsightView | null
+}
+
+/** 洞察可执行的后续问数动作（后端 InsightView.actions）。 */
+export interface InsightAction {
+  actionId: string
+  capabilityId: string
+  question: string
+  executable: boolean
+}
+
+/** 洞察任务视图（两个 POST 端点返回；幂等写入 + 异步生成）。 */
+export interface InsightTaskView {
+  taskId: number
+  attempt: number
+  status: InsightStatus
+  dataVersion: string
+  viewKey: string
+  scopeRef: string | null
+  insightRevision: string
+  degradationReason: string | null
+  failureReason: string | null
+  insightGeneratedAt: string | null
+  insight: InsightView | null
+  generation: Record<string, unknown> | null
 }
 
 export interface DataVersionView {
@@ -75,6 +114,66 @@ export interface DataVersionView {
 export function getChartAnalysis(reportId: number, componentId: number, dimValue?: string) {
   return get<ApiResponse<ChartAnalysisView>>(`/reports/${reportId}/components/${componentId}/chart-analysis`, {
     params: dimValue ? { dimValue } : undefined,
+  })
+}
+
+/** 幂等确保当前视图的洞察任务（仅在图表就绪但尚无洞察时调用），可能入队生成。 */
+export function postInsightTask(reportId: number, componentId: number, dimValue?: string) {
+  return post<ApiResponse<InsightTaskView>>(`/reports/${reportId}/components/${componentId}/insight-tasks`, null, {
+    params: dimValue ? { dimValue } : undefined,
+  })
+}
+
+/** 复用同一快照重试指定洞察任务（attempt 递增）。 */
+export function retryInsightTask(reportId: number, componentId: number, taskId: number) {
+  return post<ApiResponse<InsightTaskView>>(
+    `/reports/${reportId}/components/${componentId}/insight-tasks/${taskId}/retry`,
+    null,
+  )
+}
+
+/** 报表来源可信分析范围（后端 publicContext + 报表字段），不含推荐动作能力信息。 */
+export interface ReportAnalysisContext {
+  sourceType: 'REPORT'
+  sourceAskId: null
+  sourceReportId: number
+  sourceDataVersionId: number
+  metricCode: string
+  metricName: string
+  unit: string
+  scopeLabel: string
+  currentPeriod: AnalysisPeriod
+  suggestedBaselinePeriod: AnalysisPeriod | null
+}
+
+/** 报表进一步分析预填（I3-2）：可信范围 + 推荐动作能力校验与缺失参数。 */
+export interface ReportAnalysisPrefill extends ReportAnalysisContext {
+  scopeOrgIds: number[]
+  capabilityId: string
+  supported: boolean
+  executable: boolean
+  missingParams: string[]
+}
+
+export type ReportAnalysisTask = AnalysisTask<ReportAnalysisContext>
+
+export interface ReportAnalysisStartRequest {
+  dataVersionId: number
+  baselinePeriod: AnalysisPeriod
+  mode?: 'deterministic' | 'single' | 'dual'
+}
+
+/** 预填并校验推荐动作；页面确认参数后才创建任务。 */
+export function getReportAnalysisContext(reportId: number, dataVersionId: number, capabilityId?: string) {
+  return get<ApiResponse<ReportAnalysisPrefill>>(`/reports/${reportId}/analysis/context`, {
+    params: capabilityId ? { dataVersionId, capabilityId } : { dataVersionId },
+  })
+}
+
+/** 用户确认后创建报表来源分析任务（幂等）；进度/取消/事件复用既有任务端点。 */
+export function startReportAnalysis(reportId: number, body: ReportAnalysisStartRequest, idempotencyKey: string) {
+  return post<ApiResponse<ReportAnalysisTask>>(`/reports/${reportId}/analysis`, body, {
+    headers: { [IDEMPOTENCY_HEADER]: idempotencyKey },
   })
 }
 
@@ -114,6 +213,10 @@ export interface InsightView {
   metricName: string
   summary: string
   points: Array<{ type: string; label: string }>
+  /** 生成局限/免责说明 */
+  limitations: string[]
+  /** 可执行的后续问数动作 */
+  actions: InsightAction[]
   status?: string | null
   degradationReason?: string | null
   dataVersion?: string | null

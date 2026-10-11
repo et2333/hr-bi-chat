@@ -3,14 +3,17 @@ import type { ApiResponse } from './types'
 
 /** All API periods use an exclusive end; the form displays inclusive dates. */
 export interface AnalysisPeriod { start: string; end: string }
-export interface AnalysisContext {
-  sourceAskId: string
-  metricCode: 'leave_count'
+/** 与来源无关的可信分析范围：ASK 与 REPORT 两种来源共用同一套展示字段。 */
+export interface AnalysisScope {
+  metricCode: string
   metricName: string
   unit: string
   scopeLabel: string
   currentPeriod: AnalysisPeriod
   suggestedBaselinePeriod: AnalysisPeriod | null
+}
+export interface AnalysisContext extends AnalysisScope {
+  sourceAskId: string
 }
 export type AnalysisStatus = 'RUNNING' | 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'CANCELLED'
 export type AnalysisMode = 'deterministic' | 'dual'
@@ -47,13 +50,20 @@ export interface AnalysisEvent {
   event: string
   payload: Record<string, unknown>
 }
-export interface AnalysisTask {
+export interface AnalysisTask<C = AnalysisContext> {
   taskId: string
-  sourceAskId: string
+  sourceAskId: string | null
   status: AnalysisStatus
-  context: AnalysisContext & { baselinePeriod?: AnalysisPeriod }
+  context: C & { baselinePeriod?: AnalysisPeriod }
   result: AnalysisResult | null
   events: AnalysisEvent[]
+}
+
+/** 组件层只依赖与来源无关的展示字段。 */
+export interface AnalysisTaskView {
+  status: AnalysisStatus
+  context: AnalysisScope & { baselinePeriod?: AnalysisPeriod }
+  result: AnalysisResult | null
 }
 
 export function getAnalysisContext(askId: string) {

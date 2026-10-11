@@ -29,14 +29,15 @@ public final class ChartViews {
      */
     public record ChartAnalysisView(String dataVersion, String viewKey, String dimValue,
                                     String chartStatus, String insightStatus,
-                                    ChartDataView chart, InsightView insight) {
+                                    ChartDataView chart, InsightView insight,
+                                    Long taskId, Integer attempt) {
         /** 兼容旧四参构造（测试/过渡）。 */
         public ChartAnalysisView(String dataVersion, String dimValue,
                                  ChartDataView chart, InsightView insight) {
             this(dataVersion, ViewKeyCompat.rootOrDrill(dimValue), dimValue,
                     chart == null ? "NEED_GENERATE" : "READY",
                     insight == null ? "PENDING" : "READY",
-                    chart, insight);
+                    chart, insight, null, null);
         }
     }
 
@@ -77,14 +78,33 @@ public final class ChartViews {
     }
 
     /**
-     * AI 洞察解读（P3-C / I1）。
-     * status：complete / degraded / failed / legacy；富路径可带 dataVersion/viewKey。
+     * AI 洞察解读（P3-C / I1 / I2）。
+     * status：complete / degraded / failed / legacy；富路径可带 dataVersion/viewKey、
+     * limitations 与可执行推荐动作。
      */
     public record InsightView(String reportName, String metricName, String summary, List<InsightPoint> points,
-                              String status, String degradationReason, String dataVersion, String viewKey) {
+                              String status, String degradationReason, String dataVersion, String viewKey,
+                              List<String> limitations, List<InsightAction> actions) {
         public InsightView(String reportName, String metricName, String summary, List<InsightPoint> points) {
-            this(reportName, metricName, summary, points, null, null, null, null);
+            this(reportName, metricName, summary, points, null, null, null, null, List.of(), List.of());
         }
+
+        public InsightView(String reportName, String metricName, String summary, List<InsightPoint> points,
+                          String status, String degradationReason, String dataVersion, String viewKey) {
+            this(reportName, metricName, summary, points, status, degradationReason, dataVersion, viewKey,
+                    List.of(), List.of());
+        }
+    }
+
+    /** 有效推荐动作（能力目录内，executable=false 时仅作人工核查建议）。 */
+    public record InsightAction(String actionId, String capabilityId, String question, Boolean executable) {
+    }
+
+    /** 洞察任务状态视图（I2；读取只查状态/结果，不触发模型）。 */
+    public record InsightTaskView(Long taskId, Integer attempt, String status, String dataVersion, String viewKey,
+                                  String scopeRef, String insightRevision, String degradationReason,
+                                  String failureReason, String insightGeneratedAt,
+                                  InsightView insight, Map<String, Object> generation) {
     }
 
     /** 洞察要点（value=均值 / trend=趋势 / extreme=极值）。 */

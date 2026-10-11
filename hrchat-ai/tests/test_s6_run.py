@@ -88,3 +88,18 @@ def test_old_trace_without_program_input_is_not_counted_as_new_reviewer_discover
     observed = behavior_observations(result, [])
     assert observed["reviewer_removed_unknown_origin"] == ["legacy"]
     assert observed["reviewer_other_removed_unverified"] == []
+
+
+@pytest.mark.asyncio
+async def test_dual_ablation_isolates_reviewer_value_to_coverage_repair():
+    from evals import s6_dual_ablation
+
+    report = await s6_dual_ablation.run()
+    assert report["passed"], report["checks"]
+    by = {(row["omit_changed"], row["mode"]): row for row in report["arms"]}
+    # Complete Analyst: dual changes nothing but adds one review call.
+    assert by[(False, "single")]["changed_departments_cited"] == by[(False, "dual")]["changed_departments_cited"]
+    # Omitted coverage: only dual repairs the program-identified gap, from existing facts.
+    assert by[(True, "single")]["changed_departments_cited"] == 0
+    assert by[(True, "dual")]["changed_departments_cited"] == by[(True, "dual")]["changed_departments_available"] > 0
+    assert by[(True, "dual")]["model_calls"] - by[(True, "single")]["model_calls"] == 1

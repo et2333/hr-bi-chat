@@ -16,6 +16,8 @@ import com.hrchat.report.mapper.RptDataVersionMapper;
 import com.hrchat.report.mapper.RptViewSnapshotMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +51,10 @@ public class ReportDataVersionService {
     private ReportTableService tableService;
     private org.springframework.transaction.support.TransactionTemplate snapshotTransaction;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    /** I2：版本发布后创建洞察任务；懒加载打破与图表/洞察服务的循环依赖。 */
+    private InsightTaskService insightTaskService;
+
+    @Autowired
     public void configure(ReportTableService tableService,
                           org.springframework.transaction.PlatformTransactionManager transactionManager) {
         this.tableService = tableService;
@@ -57,6 +62,11 @@ public class ReportDataVersionService {
         snapshotTransaction.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         snapshotTransaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_REPEATABLE_READ);
         snapshotTransaction.setReadOnly(true);
+    }
+
+    @Autowired
+    public void setInsightTaskService(@Lazy InsightTaskService insightTaskService) {
+        this.insightTaskService = insightTaskService;
     }
 
     public void requireScope(UserContext ctx, RptReport report, RptDataVersion version) {
@@ -195,6 +205,8 @@ public class ReportDataVersionService {
             dataVersionMapper.updateById(version);
             reportService.updateCurrentDataVersion(report.getId(), version.getId());
             report.setCurrentDataVersionId(version.getId());
+            // 洞察任务失败不影响图表版本；入队在事务提交后执行
+            scheduleInsightTasks(report, version, components);
             return toView(version, true);
         } catch (RuntimeException ex) {
             log.warn("report data version failed reportId={} versionId={}: {}",
@@ -204,6 +216,19 @@ public class ReportDataVersionService {
             dataVersionMapper.updateById(version);
             // 失败不覆盖上一成功版本
             return toView(version, false);
+        }
+    }
+
+    /** 版本 READY 后为图表组件创建/取得洞察任务；失败仅记录，不抛出以保护图表版本。 */
+    private void scheduleInsightTasks(RptReport report, RptDataVersion version, List<RptComponent> components) {
+        if (insightTaskService == null) {
+            return;
+        }
+        try {
+            insightTaskService.ensureAndSchedule(report, version, components, version.getCreatedBy());
+        } catch (RuntimeException ex) {
+            log.warn("schedule insight tasks failed reportId={} versionId={}: {}",
+                    report.getId(), version.getId(), ex.getMessage());
         }
     }
 

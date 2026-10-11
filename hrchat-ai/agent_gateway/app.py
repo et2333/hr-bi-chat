@@ -323,11 +323,11 @@ def create_app(
         return _runtime_view(runtime, tenant_no)
 
     @app.post("/v1/insight")
-    async def insight(body: dict):
-        """报表 AI 洞察：富上下文走 FactBuilder 程序路径；否则保留旧模板解读。"""
-        from insight.service import handle_insight
+    async def insight(body: dict, x_tenant_no: Optional[str] = Header(default=None)):
+        """报表 AI 洞察：富上下文走轻量生成（租户适配器）；否则保留旧模板解读。"""
+        from insight.service import handle_insight_async
 
-        return handle_insight(body or {})
+        return await handle_insight_async(body or {}, get_current_adapter(x_tenant_no))
 
     @app.post("/v1/chat/sessions/{session_id}/asks")
     async def submit_ask(

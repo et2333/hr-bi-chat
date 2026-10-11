@@ -49,12 +49,19 @@
                   <a-radio-button value="LINE">折线</a-radio-button>
                   <a-radio-button value="PIE">饼图</a-radio-button>
                 </a-radio-group>
-                <a-breadcrumb v-if="drillPathOf(c.componentId).length" class="drill-breadcrumb">
-                  <a-breadcrumb-item v-for="(seg, i) in drillPathOf(c.componentId)" :key="i">
-                    <a @click="drillTo(c.componentId, i)">{{ seg }}</a>
-                  </a-breadcrumb-item>
-                </a-breadcrumb>
-                <a-tag v-if="drillPathOf(c.componentId).length" color="orange" class="drill-tag">组织下钻</a-tag>
+                <template v-if="drillPathOf(c.componentId).length">
+                  <a-button size="small" class="drill-back" @click="drillUp(c.componentId)">返回</a-button>
+                  <a-breadcrumb class="drill-breadcrumb">
+                    <a-breadcrumb-item>
+                      <a @click="drillTo(c.componentId, 0)">全部</a>
+                    </a-breadcrumb-item>
+                    <a-breadcrumb-item v-for="(seg, i) in drillPathOf(c.componentId)" :key="i">
+                      <a v-if="i < drillPathOf(c.componentId).length - 1" @click="drillTo(c.componentId, i + 1)">{{ seg }}</a>
+                      <span v-else>{{ seg }}</span>
+                    </a-breadcrumb-item>
+                  </a-breadcrumb>
+                  <a-tag color="orange" class="drill-tag">组织下钻</a-tag>
+                </template>
               </div>
               <div class="comp-chart">
                 <a-skeleton v-if="chartStateOf(c.componentId)?.loading" active :paragraph="{ rows: 4 }" />
@@ -83,26 +90,51 @@
                 <a-spin :spinning="insightStateOf(c.componentId)!.loading" size="small">
                   <div class="insight-head">
                     <span class="insight-title"><BulbOutlined /> AI 洞察</span>
-                    <a-button v-if="insightStateOf(c.componentId)!.error" size="small" type="link" @click="loadInsight(c.componentId)">
-                      重试
-                    </a-button>
+                    <a-space size="small">
+                      <a-tag :color="insightStatusColor(insightStateOf(c.componentId)!.status)">
+                        {{ insightStatusName(insightStateOf(c.componentId)!.status) }}
+                      </a-tag>
+                      <a-button
+                        v-if="canRetryInsight(c.componentId)"
+                        size="small"
+                        type="link"
+                        @click="retryInsight(c.componentId)"
+                      >
+                        重试
+                      </a-button>
+                      <a-button size="small" type="link" :disabled="refreshing" @click="refreshData">刷新数据</a-button>
+                    </a-space>
                   </div>
                   <template v-if="insightStateOf(c.componentId)!.data">
                     <p class="insight-summary">{{ insightStateOf(c.componentId)!.data!.summary }}</p>
-                    <ul class="insight-points">
+                    <ul v-if="insightStateOf(c.componentId)!.data!.points.length" class="insight-points">
                       <li v-for="(pt, i) in insightStateOf(c.componentId)!.data!.points" :key="i">· {{ pt.label }}</li>
                     </ul>
+                    <ul v-if="insightStateOf(c.componentId)!.data!.limitations?.length" class="insight-limitations">
+                      <li v-for="(item, i) in insightStateOf(c.componentId)!.data!.limitations" :key="i">{{ item }}</li>
+                    </ul>
+                    <div v-if="insightStateOf(c.componentId)!.data!.actions?.length" class="insight-actions">
+                      <a-tag
+                        v-for="act in insightStateOf(c.componentId)!.data!.actions"
+                        :key="act.actionId"
+                        :color="isAnalyzable(act) ? 'blue' : 'default'"
+                        :class="{ 'action-clickable': isAnalyzable(act) }"
+                        :title="isAnalyzable(act) ? '点击在侧边面板中确认并分析' : undefined"
+                        @click="openReportAnalysis(act)"
+                      >
+                        {{ act.question }}
+                      </a-tag>
+                    </div>
                   </template>
-                  <p v-else-if="insightStateOf(c.componentId)!.loading" class="insight-loading">洞察生成中…</p>
                   <p
-                    v-else-if="insightStateOf(c.componentId)!.status === 'PENDING'"
-                    class="insight-pending"
-                  >洞察待生成（I0 尚未接入模型解读）</p>
-                  <p
-                    v-else-if="insightStateOf(c.componentId)!.status === 'NONE'"
-                    class="insight-pending"
-                  >当前图型无洞察</p>
-                  <p v-else-if="insightStateOf(c.componentId)!.error" class="insight-error">洞察加载失败</p>
+                    v-else-if="insightStateOf(c.componentId)!.status === 'PENDING' || insightStateOf(c.componentId)!.status === 'RUNNING'"
+                    class="insight-loading"
+                  >洞察生成中…</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.status === 'NONE'" class="insight-pending">洞察待生成…</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.status === 'FAILED'" class="insight-error">洞察生成失败，可重试</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.status === 'INTERRUPTED'" class="insight-error">洞察生成已中断，可重试</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.status === 'CANCELLED'" class="insight-error">洞察已取消，可重试</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.loading" class="insight-loading">洞察加载中…</p>
                   <p v-else class="insight-pending">洞察暂不可用</p>
                 </a-spin>
               </div>
@@ -243,6 +275,14 @@
         </a-button>
       </div>
     </a-modal>
+
+    <!-- 进一步分析侧边面板：由支持推荐动作打开，收起不取消，切换主图不影响运行中任务 -->
+    <ReportAnalysisPanel
+      v-model:open="analysisOpen"
+      :report-id="reportId"
+      :data-version-id="analysisDataVersionId"
+      :capability-id="analysisCapabilityId"
+    />
   </div>
 </template>
 
@@ -253,10 +293,12 @@ import { message } from 'ant-design-vue'
 import { ArrowLeftOutlined, BulbOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { reportApi } from '@/api'
 import type { ComponentView, ReportDetail, SubscriptionView } from '@/api/types'
-import type { MetricCardView, TableView } from '@/api/reports'
+import type { MetricCardView, TableView, InsightAction } from '@/api/reports'
 import { useReportChartAnalysis } from '@/composables/useReportChartAnalysis'
 import ChartRenderer, { type ChartType } from '@/components/ChartRenderer.vue'
 import MetricCard from '@/components/MetricCard.vue'
+import ReportAnalysisPanel from '@/components/ReportAnalysisPanel.vue'
+import { REPORT_ANALYSIS_CAPABILITY } from '@/utils/reportAnalysis'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,8 +308,25 @@ const report = ref<ReportDetail | null>(null)
 const subscriptions = ref<SubscriptionView[]>([])
 const loading = ref(false)
 
+/** 进一步分析侧边面板：由支持推荐动作打开，运行中任务与主图/基础洞察互不影响。 */
+const analysisOpen = ref(false)
+const analysisCapabilityId = ref('')
+const analysisDataVersionId = ref(0)
+
+/** 仅首轮开放能力且报表已有成功版本的推荐动作可点击打开分析面板。 */
+function isAnalyzable(act: InsightAction): boolean {
+  return act.capabilityId === REPORT_ANALYSIS_CAPABILITY && !!report.value?.currentDataVersionId
+}
+
+function openReportAnalysis(act: InsightAction) {
+  if (!isAnalyzable(act)) return
+  analysisCapabilityId.value = act.capabilityId
+  analysisDataVersionId.value = report.value?.currentDataVersionId ?? 0
+  analysisOpen.value = true
+}
+
 // 图表与洞察从服务端共享快照同步更新。
-const { chartStates, insightStates, loadChartData, loadInsight } = useReportChartAnalysis(reportId, (e) => {
+const { chartStates, insightStates, loadChartData, retryInsight } = useReportChartAnalysis(reportId, (e) => {
   message.error(e instanceof Error ? e.message : '图表数据加载失败')
 })
 
@@ -349,8 +408,47 @@ function drillTo(componentId: number, level: number, next?: string) {
   loadChartData(componentId, dimValue)
 }
 
+/** 返回上一级；已在第一级时回到根视图（等价于点「全部」）。 */
+function drillUp(componentId: number) {
+  const path = drillStates.value[componentId] ?? []
+  drillTo(componentId, Math.max(0, path.length - 1))
+}
+
 function insightStateOf(componentId: number) {
   return insightStates.value[componentId]
+}
+
+/** 洞察状态中文名与配色（待生成/进行中/完成/降级/失败）。 */
+function insightStatusName(status?: string): string {
+  return {
+    NONE: '待生成',
+    PENDING: '进行中',
+    RUNNING: '进行中',
+    COMPLETE: '完成',
+    DEGRADED: '降级',
+    FAILED: '失败',
+    INTERRUPTED: '已中断',
+    CANCELLED: '已取消',
+  }[status ?? ''] ?? (status ?? '')
+}
+
+function insightStatusColor(status?: string): string {
+  return {
+    COMPLETE: 'green',
+    DEGRADED: 'orange',
+    FAILED: 'red',
+    INTERRUPTED: 'red',
+    CANCELLED: 'default',
+    RUNNING: 'blue',
+    PENDING: 'blue',
+    NONE: 'default',
+  }[status ?? ''] ?? 'default'
+}
+
+/** 仅失败/中断/取消/降级提供「重试」；成功或进行中不展示。 */
+function canRetryInsight(componentId: number): boolean {
+  const status = insightStateOf(componentId)?.status
+  return status === 'FAILED' || status === 'INTERRUPTED' || status === 'CANCELLED' || status === 'DEGRADED'
 }
 
 /** 明细表状态：服务端筛选/排序/分页 */
@@ -479,6 +577,8 @@ function applyTableFilter(componentId: number, vals: string[]) {
 
 /** 图表与洞察统一加载；TABLE 走独立明细表端点。 */
 async function loadCharts(components: ComponentView[]) {
+  // 全量加载即为根视图：同步清空下钻路径，避免刷新后面包屑与图表不一致
+  drillStates.value = {}
   const charts = components.filter(
     (c) => c.compType === 'CHART' && ['BAR', 'LINE', 'PIE'].includes((c.chartType ?? '').toUpperCase()),
   )
@@ -713,6 +813,15 @@ function formatDateTime(iso: string): string {
   margin-left: 4px;
 }
 
+.drill-breadcrumb a {
+  color: #1677ff;
+  cursor: pointer;
+}
+
+.drill-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
 .drill-tag {
   margin-left: auto;
 }
@@ -758,6 +867,24 @@ function formatDateTime(iso: string): string {
   padding-left: 16px;
   font-size: 12px;
   color: rgba(0, 0, 0, 0.65);
+}
+
+.insight-limitations {
+  margin: 6px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.insight-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.insight-actions .action-clickable {
+  cursor: pointer;
 }
 
 .insight-loading,

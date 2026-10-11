@@ -21,21 +21,48 @@ def handle_insight(body: dict | None) -> dict:
     """Route POST /v1/insight body to rich programmatic path or legacy template."""
     raw = body or {}
     if _looks_rich(raw):
-        try:
-            request = InsightRequest.model_validate(raw)
-        except Exception as exc:  # noqa: BLE001 — surface as degraded insight, not 500
-            return InsightResult(
-                report_name=str(raw.get("report_name") or ""),
-                metric_name=str(raw.get("metric_name") or ""),
-                summary=f"洞察请求不符合契约：{exc}",
-                points=[],
-                status=InsightStatus.FAILED,
-                degradation_reason="invalid_rich_request",
-            ).model_dump(mode="json")
+        request, error = _validate_rich(raw)
+        if error is not None:
+            return error
         if request.is_rich():
             return _handle_rich(request).model_dump(mode="json")
 
     return _handle_legacy(raw)
+
+
+async def handle_insight_async(body: dict | None, adapter=None) -> dict:
+    """Async generation entrypoint used by the HTTP route.
+
+    Uses the tenant model adapter for the lightweight generation chain when one is
+    supplied; without an adapter it preserves the programmatic degradation path.
+    """
+    raw = body or {}
+    if _looks_rich(raw):
+        request, error = _validate_rich(raw)
+        if error is not None:
+            return error
+        if request.is_rich():
+            if adapter is None:
+                return _handle_rich(request).model_dump(mode="json")
+            from insight.generation import generate_insight
+
+            return (await generate_insight(request, adapter)).model_dump(mode="json")
+
+    return _handle_legacy(raw)
+
+
+def _validate_rich(raw: dict) -> tuple[InsightRequest | None, dict | None]:
+    try:
+        return InsightRequest.model_validate(raw), None
+    except Exception as exc:  # noqa: BLE001 — surface as degraded insight, not 500
+        return None, InsightResult(
+            report_name=str(raw.get("report_name") or ""),
+            metric_name=str(raw.get("metric_name") or ""),
+            summary=f"洞察请求不符合契约：{exc}",
+            points=[],
+            status=InsightStatus.FAILED,
+            degradation_reason="invalid_rich_request",
+        ).model_dump(mode="json")
 
 
 def _looks_rich(raw: dict) -> bool:

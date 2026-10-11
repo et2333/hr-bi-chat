@@ -39,14 +39,18 @@ def test_rich_payload_returns_facts_and_degraded_result():
     assert "next_actions" in result
 
 
-def test_rich_payload_via_http_endpoint():
+def test_rich_payload_via_http_endpoint_generates_once():
     client = TestClient(create_app())
     body = json.loads((FIXTURES / "headcount_two_period.json").read_text(encoding="utf-8"))
     resp = client.post("/v1/insight", json=body)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "degraded"
+    # 富上下文经租户适配器（mock 脚本模型）产出一次调用后的洞察。
+    assert data["status"] == "complete"
     assert data["facts"]
+    assert data["data_version"] == "dv-hc-1"
+    assert data["generation"]["call_count"] == 1
+    assert data["claims"]
 
 
 def test_legacy_payload_still_template_compatible():

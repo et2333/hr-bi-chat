@@ -127,7 +127,8 @@ class AttributionTeam:
 
     async def plan_node(self, state):
         data = {k: v for k, v in self.context.model_dump(mode="json").items()
-                if k not in {"tenant_no", "scope_ref", "source_ask_id", "source_turn_id", "task_id"}}
+                if k not in {"tenant_no", "scope_ref", "source_type", "source_ask_id", "source_turn_id",
+                             "source_report_id", "source_data_version_id", "task_id"}}
         self.plan = (AnalysisPlan(method="department_contribution", steps=["compare_totals", "department_delta", "check_closure"])
                      if self.request.mode == "deterministic" else await self.role("AnalystPlan", AnalysisPlan, data))
         return {}

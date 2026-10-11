@@ -1,0 +1,558 @@
+[
+  {
+    "case_id": "IS-01",
+    "split": "dev",
+    "scenario": "rd_offset_flat",
+    "context": {
+      "schema_version": "1",
+      "report_id": "r-offset",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "研发两期持平抵消",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "effective_org_ids": [
+        3,
+        4
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "scope_ref": "org:3,4"
+    },
+    "snapshot": {
+      "snapshot_id": "snap-is-01",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|rd",
+      "categories": [
+        "2026-02",
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            10,
+            10
+          ]
+        }
+      ],
+      "groups_truncated": false,
+      "departments": [
+        {
+          "org_id": 3,
+          "org_name": "研发一部",
+          "baseline_count": 6,
+          "current_count": 5
+        },
+        {
+          "org_id": 4,
+          "org_name": "研发二部",
+          "baseline_count": 4,
+          "current_count": 5
+        }
+      ]
+    },
+    "expected": {
+      "facts": {
+        "absolute_change:overall": {
+          "fact_type": "absolute_change",
+          "computable": true,
+          "preferred": true
+        },
+        "relative_change:overall": {
+          "fact_type": "relative_change",
+          "computable": true,
+          "preferred": false
+        },
+        "point_compare:overall": {
+          "fact_type": "point_compare",
+          "computable": true,
+          "preferred": false
+        },
+        "period_over_period:2026-02:2026-03": {
+          "fact_type": "period_over_period",
+          "computable": true,
+          "preferred": false
+        },
+        "continuous_trend:overall": {
+          "fact_type": "continuous_trend",
+          "computable": false,
+          "preferred": false
+        },
+        "tied_extreme:max": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:min": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "department_contribution:offset": {
+          "fact_type": "department_contribution",
+          "computable": true,
+          "preferred": false
+        },
+        "department_contribution:net_rate": {
+          "fact_type": "department_contribution",
+          "computable": false,
+          "preferred": false
+        }
+      },
+      "must_cover_fact_types": [
+        "department_contribution",
+        "absolute_change"
+      ],
+      "forbidden_predicates": [
+        "department_net_contribution",
+        "relative_increase",
+        "relative_decrease",
+        "absolute_increase",
+        "absolute_decrease"
+      ],
+      "forbidden_claim_kinds": [],
+      "forbidden_fact_ids": [],
+      "action": {
+        "capability_id": "leave_count_department_contribution",
+        "executable": true
+      }
+    }
+  },
+  {
+    "case_id": "IS-02",
+    "split": "dev",
+    "scenario": "small_base_change",
+    "context": {
+      "schema_version": "1",
+      "report_id": "r-small",
+      "metric_code": "headcount",
+      "metric_version": "1",
+      "metric_name": "在职人数",
+      "report_name": "小基数变化",
+      "unit": "人",
+      "metric_kind": "stock",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "baseline_period": {
+        "start": "2026-01-01",
+        "end": "2026-02-01"
+      },
+      "effective_org_ids": [
+        10
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "scope_ref": "org:10"
+    },
+    "snapshot": {
+      "snapshot_id": "snap-is-02",
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "categories": [
+        "2026-01",
+        "2026-02"
+      ],
+      "series": [
+        {
+          "name": "在职人数",
+          "data": [
+            1,
+            2
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "expected": {
+      "facts": {
+        "absolute_change:overall": {
+          "fact_type": "absolute_change",
+          "computable": true,
+          "preferred": true
+        },
+        "relative_change:overall": {
+          "fact_type": "relative_change",
+          "computable": true,
+          "preferred": false
+        },
+        "point_compare:overall": {
+          "fact_type": "point_compare",
+          "computable": true,
+          "preferred": false
+        },
+        "period_over_period:2026-01:2026-02": {
+          "fact_type": "period_over_period",
+          "computable": true,
+          "preferred": false
+        },
+        "continuous_trend:overall": {
+          "fact_type": "continuous_trend",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:max": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:min": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "cross_period_sum:blocked": {
+          "fact_type": "cross_period_sum",
+          "computable": false,
+          "preferred": false
+        }
+      },
+      "must_cover_fact_types": [
+        "absolute_change"
+      ],
+      "forbidden_predicates": [
+        "relative_decrease",
+        "absolute_decrease"
+      ],
+      "forbidden_claim_kinds": [],
+      "forbidden_fact_ids": [],
+      "action": {
+        "capability_id": "manual_review",
+        "executable": false
+      }
+    }
+  },
+  {
+    "case_id": "IS-03",
+    "split": "dev",
+    "scenario": "missing_month",
+    "context": {
+      "schema_version": "1",
+      "report_id": "r-mm",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "缺月序列",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-04-01",
+        "end": "2026-05-01"
+      },
+      "baseline_period": {
+        "start": "2026-01-01",
+        "end": "2026-02-01"
+      },
+      "effective_org_ids": [
+        10
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "scope_ref": "org:10"
+    },
+    "snapshot": {
+      "snapshot_id": "snap-is-03",
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "categories": [
+        "2026-01",
+        "2026-03",
+        "2026-04"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            2,
+            5,
+            8
+          ]
+        }
+      ],
+      "groups_truncated": false,
+      "continuity_gaps": [
+        "2026-02"
+      ]
+    },
+    "expected": {
+      "facts": {
+        "absolute_change:overall": {
+          "fact_type": "absolute_change",
+          "computable": true,
+          "preferred": true
+        },
+        "relative_change:overall": {
+          "fact_type": "relative_change",
+          "computable": true,
+          "preferred": false
+        },
+        "point_compare:overall": {
+          "fact_type": "point_compare",
+          "computable": true,
+          "preferred": false
+        },
+        "period_over_period:2026-01:2026-03": {
+          "fact_type": "period_over_period",
+          "computable": true,
+          "preferred": false
+        },
+        "period_over_period:2026-03:2026-04": {
+          "fact_type": "period_over_period",
+          "computable": true,
+          "preferred": false
+        },
+        "continuous_trend:overall": {
+          "fact_type": "continuous_trend",
+          "computable": false,
+          "preferred": false
+        },
+        "tied_extreme:max": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:min": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        }
+      },
+      "must_cover_fact_types": [
+        "absolute_change"
+      ],
+      "forbidden_predicates": [
+        "relative_decrease",
+        "absolute_decrease"
+      ],
+      "forbidden_claim_kinds": [],
+      "forbidden_fact_ids": [
+        "continuous_trend:overall"
+      ],
+      "action": {
+        "capability_id": "leave_count_department_contribution",
+        "executable": true
+      }
+    }
+  },
+  {
+    "case_id": "IS-04",
+    "split": "frozen",
+    "scenario": "ratio_insufficient",
+    "context": {
+      "schema_version": "1",
+      "report_id": "r-ratio",
+      "metric_code": "leave_rate",
+      "metric_version": "1",
+      "metric_name": "离职率",
+      "report_name": "离职率对比",
+      "unit": "%",
+      "metric_kind": "ratio",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-02-01",
+        "end": "2026-03-01"
+      },
+      "baseline_period": {
+        "start": "2026-01-01",
+        "end": "2026-02-01"
+      },
+      "effective_org_ids": [
+        10
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "scope_ref": "org:10",
+      "ratio_scale": "percent"
+    },
+    "snapshot": {
+      "snapshot_id": "snap-is-04",
+      "data_version": "dv-is-v1",
+      "view_key": "month|org:10",
+      "categories": [
+        "2026-01",
+        "2026-02"
+      ],
+      "series": [
+        {
+          "name": "离职率",
+          "data": [
+            0.2,
+            0.25
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "expected": {
+      "facts": {
+        "absolute_change:overall": {
+          "fact_type": "absolute_change",
+          "computable": true,
+          "preferred": false
+        },
+        "relative_change:overall": {
+          "fact_type": "relative_change",
+          "computable": true,
+          "preferred": true
+        },
+        "point_compare:overall": {
+          "fact_type": "point_compare",
+          "computable": true,
+          "preferred": false
+        },
+        "percentage_point_change:overall": {
+          "fact_type": "percentage_point_change",
+          "computable": false,
+          "preferred": false
+        },
+        "period_over_period:2026-01:2026-02": {
+          "fact_type": "period_over_period",
+          "computable": true,
+          "preferred": false
+        },
+        "continuous_trend:overall": {
+          "fact_type": "continuous_trend",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:max": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:min": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        }
+      },
+      "must_cover_fact_types": [
+        "relative_change"
+      ],
+      "forbidden_predicates": [
+        "point_higher",
+        "point_lower"
+      ],
+      "forbidden_claim_kinds": [],
+      "forbidden_fact_ids": [
+        "percentage_point_change:overall"
+      ],
+      "action": {
+        "capability_id": "manual_review",
+        "executable": false
+      }
+    }
+  },
+  {
+    "case_id": "IS-05",
+    "split": "frozen",
+    "scenario": "partial_context",
+    "context": {
+      "schema_version": "1",
+      "report_id": "r-partial",
+      "metric_code": "leave_count",
+      "metric_version": "1",
+      "metric_name": "离职人数",
+      "report_name": "上下文不完整",
+      "unit": "人",
+      "metric_kind": "flow",
+      "axis_kind": "time",
+      "current_period": {
+        "start": "2026-03-01",
+        "end": "2026-04-01"
+      },
+      "baseline_period": null,
+      "effective_org_ids": [
+        3
+      ],
+      "data_version": "dv-is-v1",
+      "view_key": "dept|org:3",
+      "scope_ref": "org:3"
+    },
+    "snapshot": {
+      "snapshot_id": "snap-is-05",
+      "data_version": "dv-is-v1",
+      "view_key": "dept|org:3",
+      "categories": [
+        "2026-03"
+      ],
+      "series": [
+        {
+          "name": "离职人数",
+          "data": [
+            5
+          ]
+        }
+      ],
+      "groups_truncated": false
+    },
+    "expected": {
+      "facts": {
+        "absolute_change:overall": {
+          "fact_type": "absolute_change",
+          "computable": false,
+          "preferred": false
+        },
+        "relative_change:overall": {
+          "fact_type": "relative_change",
+          "computable": false,
+          "preferred": false
+        },
+        "point_compare:overall": {
+          "fact_type": "point_compare",
+          "computable": false,
+          "preferred": false
+        },
+        "continuous_trend:overall": {
+          "fact_type": "continuous_trend",
+          "computable": false,
+          "preferred": false
+        },
+        "tied_extreme:max": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        },
+        "tied_extreme:min": {
+          "fact_type": "tied_extreme",
+          "computable": true,
+          "preferred": false
+        }
+      },
+      "must_cover_fact_types": [],
+      "forbidden_predicates": [
+        "absolute_increase",
+        "absolute_decrease",
+        "relative_increase",
+        "relative_decrease",
+        "point_higher",
+        "point_lower"
+      ],
+      "forbidden_claim_kinds": [],
+      "forbidden_fact_ids": [
+        "absolute_change:overall",
+        "relative_change:overall",
+        "point_compare:overall",
+        "continuous_trend:overall"
+      ],
+      "action": {
+        "capability_id": "leave_count_department_contribution",
+        "executable": false
+      }
+    }
+  }
+]

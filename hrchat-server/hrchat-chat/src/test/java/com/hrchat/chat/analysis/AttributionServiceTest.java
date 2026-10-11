@@ -17,16 +17,19 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.io.ByteArrayOutputStream;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -48,6 +52,7 @@ class AttributionServiceTest {
     @Mock private ToolContextTokenService tokens;
     @Mock private AnalysisSnapshotService snapshots;
     @Mock private AnalysisRuntimeClient runtime;
+    @Mock private com.hrchat.chat.mapper.ChtAnalysisTaskMapper taskStore;
 
     private ChatAskStore asks;
     private AttributionService service;
@@ -57,7 +62,7 @@ class AttributionServiceTest {
     void setUp() {
         asks = new ChatAskStore();
         service = new AttributionService(asks, sessions, authz, users, semantic, tokens, snapshots, runtime,
-                new ObjectMapper(), true, 65);
+                new ObjectMapper(), taskStore, true, 65);
         hr01 = user("fp-hr01");
         lenient().when(users.resolve(eq("hr01"), eq("t01"), any())).thenReturn(hr01);
         lenient().when(tokens.issue(any(), any(), any())).thenReturn("analysis-token");
@@ -157,6 +162,45 @@ class AttributionServiceTest {
         when(users.resolve(eq("hr01"), eq("t01"), any())).thenReturn(user("permissions-changed"));
         assertThrows(BizException.class, () -> service.read(hr01, id));
         assertThrows(BizException.class, () -> service.read(hr01, id)); // no stale-result fallback
+    }
+
+    @Test
+    void runningTask_terminatesWhenPermissionChangesMidFlight() throws Exception {
+        seedCompletedAsk("ask1");
+        CountDownLatch firstDelivered = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            BiConsumer<String, Map<String, Object>> consumer = invocation.getArgument(2);
+            consumer.accept("PLAN_UPDATE", Map.of("stage", "plan", "status", "RUNNING"));
+            firstDelivered.countDown();
+            // Permission is revoked while the task is still RUNNING. Every streamed
+            // event re-authorizes against the freshly resolved user, so the next
+            // in-flight event (standing in for a model/tool step) must be denied.
+            when(users.resolve(eq("hr01"), eq("t01"), any())).thenReturn(user("permissions-changed"));
+            consumer.accept("TOOL_CALL_START", Map.of("tool", "analysis_evidence", "detail", "department"));
+            return null;
+        }).when(runtime).stream(anyString(), any(), any());
+
+        Map<String, Object> started = service.start(hr01, "ask1",
+                new AttributionService.StartRequest(new AttributionService.Period("2026-08-01", "2026-09-01"), "dual"),
+                "midflight-revoke");
+        String taskId = String.valueOf(started.get("taskId"));
+        assertTrue(firstDelivered.await(5, TimeUnit.SECONDS));
+
+        // Propagation: the running task is cancelled and its terminal state is
+        // persisted as FAILED with the permission-change reason.
+        verify(runtime, timeout(5000)).cancel(eq(taskId), any());
+        ArgumentCaptor<String> persisted = ArgumentCaptor.forClass(String.class);
+        verify(taskStore, timeout(5000)).finish(eq(taskId), eq("FAILED"), persisted.capture(), any());
+        assertTrue(persisted.getValue().contains("analysis_permission_or_source_changed"),
+                "terminal reason must explain the revocation, got: " + persisted.getValue());
+
+        // No stale analysis output survives; later reads and in-flight tool calls stay denied.
+        assertThrows(BizException.class, () -> service.read(hr01, taskId));
+        BizException toolCall = assertThrows(BizException.class, () -> service.call(hr01,
+                Map.of("task_id", taskId, "detail", "daily"),
+                Map.of("invocation_id", "analysis:" + taskId, "tool_call_id", "tc-after-revoke")));
+        assertEquals(ErrorCode.FUNC_FORBIDDEN, toolCall.getErrorCode());
     }
 
     @Test

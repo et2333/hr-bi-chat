@@ -1,0 +1,26 @@
+{
+  "schema_version": "1",
+  "version": "insight-scenarios-v1",
+  "case_count": 5,
+  "ablation_count": 3,
+  "cases_sha256": "b41c9be289d9211081945bb3feb5dc39f36843b94d9cb9cc5e407bc5024a3e87",
+  "ablations_sha256": "3fcdfd2449067ac02d674de8b6519f5736212cea92b28f40d4b1c67a5ed66c99",
+  "splits": {
+    "dev": 3,
+    "frozen": 2
+  },
+  "scenarios": [
+    "rd_offset_flat",
+    "small_base_change",
+    "missing_month",
+    "ratio_insufficient",
+    "partial_context"
+  ],
+  "scope": "light-weight insight over a trusted snapshot; single metric, no causal inference",
+  "limits": {
+    "max_model_calls": 2,
+    "timeout_seconds": 60
+  },
+  "expectation_note": "Expected facts are hand-audited from the metric semantics, not copied from the production builder; tests re-check builder agreement.",
+  "privacy_note": "Synthetic HR aggregates only; no real employee or tenant data."
+}

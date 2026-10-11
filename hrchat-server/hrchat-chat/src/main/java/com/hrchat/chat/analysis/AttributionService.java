@@ -1,21 +1,30 @@
 package com.hrchat.chat.analysis;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.api.mcp.McpEnvelope;
+import com.hrchat.api.report.AskSourceAccess;
+import com.hrchat.api.report.ReportContext;
+import com.hrchat.api.report.ReportSourceReader;
 import com.hrchat.authz.mcp.McpToolHandler;
 import com.hrchat.authz.mcp.ToolContextTokenService;
 import com.hrchat.authz.model.UserContext;
 import com.hrchat.authz.service.AuthzService;
 import com.hrchat.authz.service.UserContextService;
 import com.hrchat.authz.tenant.TenantContextHolder;
+import com.hrchat.chat.entity.ChtAnalysisTask;
 import com.hrchat.chat.entity.ChtSession;
+import com.hrchat.chat.mapper.ChtAnalysisTaskMapper;
 import com.hrchat.chat.mapper.ChtSessionMapper;
 import com.hrchat.chat.store.ChatAskStore;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.semantic.dto.MetricDetail;
 import com.hrchat.semantic.service.SemanticMetaService;
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -23,11 +32,13 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
 /** Single-process analysis tasks. Every retrieval reauthorizes; no persisted permission snapshot grants access. */
+@Slf4j
 @Service
 public class AttributionService implements McpToolHandler {
     public record Period(String start, String end) {
@@ -41,12 +52,21 @@ public class AttributionService implements McpToolHandler {
         }
     }
     public record StartRequest(Period baselinePeriod, String mode) { }
-    private record Source(ChatAskStore.AskRecord ask, MetricDetail metric, Map<String, String> current,
-                          List<Long> orgs, String fingerprint) { }
-    private record Idempotent(String askId, StartRequest request, String taskId) { }
+    private record Source(Origin origin, ChatAskStore.AskRecord ask, MetricDetail metric, Map<String, String> current,
+                          List<Long> orgs, String fingerprint, String scopeLabel, Long turnId) { }
+    /** 分析来源：ASK（问答轮次）或 REPORT（报表数据版本）。 */
+    private record Origin(String type, String askId, Long reportId, Long dataVersionId) {
+        static Origin ask(String askId) { return new Origin("ASK", askId, null, null); }
+        static Origin report(Long reportId, Long dataVersionId) { return new Origin("REPORT", null, reportId, dataVersionId); }
+        String key() { return "ASK".equals(type) ? "ask:" + askId : "report:" + reportId + ":" + dataVersionId; }
+    }
+    private record Idempotent(String sourceKey, StartRequest request, String taskId) { }
     private static final Set<String> TERMINAL = Set.of("COMPLETED", "PARTIAL", "FAILED", "CANCELLED");
+    /** 首轮支持的分析能力：离职人数两期部门贡献（对齐 Python insight.capabilities）。 */
+    private static final String CAPABILITY_LEAVE_COUNT_DEPT = "leave_count_department_contribution";
     private static final class Task {
-        String id, empNo, tenant, askId, invocation, fingerprint, status = "RUNNING";
+        String id, empNo, tenant, invocation, fingerprint, status = "RUNNING";
+        Origin origin;
         Long userId;
         List<Long> orgs;
         int metricVersion;
@@ -72,24 +92,83 @@ public class AttributionService implements McpToolHandler {
     private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor();
     private final Map<String, Task> tasks = new ConcurrentHashMap<>();
     private final Map<String, Idempotent> keys = new HashMap<>();
+    private final ChtAnalysisTaskMapper taskStore;
+    private ReportSourceReader reportSourceReader;
+
+    @Autowired(required = false)
+    public void setReportSourceReader(ReportSourceReader reportSourceReader) { this.reportSourceReader = reportSourceReader; }
 
     public AttributionService(ChatAskStore asks, ChtSessionMapper sessions, AuthzService authz,
             UserContextService users, SemanticMetaService semantic, ToolContextTokenService tokens,
             AnalysisSnapshotService snapshots, AnalysisRuntimeClient runtime, ObjectMapper mapper,
+            ChtAnalysisTaskMapper taskStore,
             @Value("${hrchat.analysis.enabled:true}") boolean enabled,
             @Value("${hrchat.analysis.timeout-seconds:65}") long timeoutSeconds) {
         this.asks = asks; this.sessions = sessions; this.authz = authz; this.users = users;
         this.semantic = semantic; this.tokens = tokens; this.snapshots = snapshots;
-        this.runtime = runtime; this.mapper = mapper; this.enabled = enabled;
+        this.runtime = runtime; this.mapper = mapper; this.taskStore = taskStore; this.enabled = enabled;
         if (timeoutSeconds < 1 || timeoutSeconds > 120) throw new IllegalArgumentException("analysis timeout");
         this.timeoutSeconds = timeoutSeconds;
     }
 
+    /** 重启处置：残留未完成尝试标中断，允许显式重试；进程内事件流不恢复。 */
+    @PostConstruct
+    void interruptOnStartup() {
+        try {
+            int n = taskStore.interruptRunning();
+            if (n > 0) log.info("startup: marked {} unfinished analysis tasks as INTERRUPTED", n);
+        } catch (RuntimeException ex) {
+            log.warn("startup interrupt analysis tasks failed: {}", ex.getMessage());
+        }
+    }
+
     public Map<String, Object> context(UserContext user, String askId) {
-        return publicContext(source(fresh(user), askId));
+        return publicContext(askSource(fresh(user), askId));
+    }
+
+    /** 报表来源预填上下文（供后续预填接口使用）。 */
+    public Map<String, Object> context(UserContext user, Long reportId, Long dataVersionId) {
+        return publicContext(reportSource(fresh(user), reportId, dataVersionId));
+    }
+
+    /**
+     * 报表分析预填：返回可信指标/组织/本期基期/来源版本，并校验推荐动作能力与缺失参数。
+     * 首轮仅支持离职人数两期部门贡献；页面确认参数后才创建任务。
+     */
+    public Map<String, Object> prefillFromReport(UserContext user, Long reportId, Long dataVersionId, String capabilityId) {
+        Source source = reportSource(fresh(user), reportId, dataVersionId);
+        Map<String, Object> out = publicContext(source);
+        out.put("scopeOrgIds", source.orgs());
+        return applyCapability(out, capabilityId);
+    }
+
+    /** 校验推荐动作能力目录并计算缺失参数；不改写 ASK 预填输出的既有键值。 */
+    private static Map<String, Object> applyCapability(Map<String, Object> context, String capabilityId) {
+        String capability = capabilityId == null || capabilityId.isBlank() ? CAPABILITY_LEAVE_COUNT_DEPT : capabilityId;
+        boolean supported = CAPABILITY_LEAVE_COUNT_DEPT.equals(capability);
+        List<String> missing = new ArrayList<>();
+        if (supported) {
+            if (context.get("metricCode") == null) missing.add("metric_code");
+            if (context.get("currentPeriod") == null) missing.add("current_period");
+            if (context.get("suggestedBaselinePeriod") == null) missing.add("baseline_period");
+        }
+        context.put("capabilityId", capability);
+        context.put("supported", supported);
+        context.put("executable", supported && missing.isEmpty());
+        context.put("missingParams", missing);
+        return context;
     }
 
     public synchronized Map<String, Object> start(UserContext user, String askId, StartRequest request, String key) {
+        return start(user, Origin.ask(askId), request, key);
+    }
+
+    public synchronized Map<String, Object> startFromReport(UserContext user, Long reportId, Long dataVersionId,
+            StartRequest request, String key) {
+        return start(user, Origin.report(reportId, dataVersionId), request, key);
+    }
+
+    private Map<String, Object> start(UserContext user, Origin origin, StartRequest request, String key) {
         if (!enabled) throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "分析功能未启用");
         if (key == null || key.isBlank() || key.length() > 128 || request == null || request.baselinePeriod() == null)
             throw new BizException(ErrorCode.PARAM_INVALID, "分析参数或幂等键");
@@ -99,13 +178,13 @@ public class AttributionService implements McpToolHandler {
         request = new StartRequest(request.baselinePeriod(), mode);
         Map<String, String> baseline = request.baselinePeriod().checked();
         user = fresh(user);
-        Source source = source(user, askId);
+        Source source = source(user, origin);
         if (baseline.equals(source.current())) throw new BizException(ErrorCode.PARAM_INVALID, "两期不能相同");
         prune();
         String scopedKey = user.getTenantId() + ":" + user.getUserId() + ":" + key;
         Idempotent previous = keys.get(scopedKey);
         if (previous != null) {
-            if (!previous.askId().equals(askId) || !previous.request().equals(request))
+            if (!previous.sourceKey().equals(origin.key()) || !previous.request().equals(request))
                 throw new BizException(ErrorCode.IDEMPOTENCY_CONFLICT);
             return read(user, previous.taskId());
         }
@@ -114,27 +193,41 @@ public class AttributionService implements McpToolHandler {
         Task task = new Task();
         task.id = "analysis_" + UUID.randomUUID(); task.invocation = "analysis:" + task.id;
         task.empNo = user.getEmpNo(); task.userId = user.getUserId(); task.tenant = user.getTenantId();
-        task.askId = askId; task.orgs = source.orgs(); task.fingerprint = source.fingerprint();
+        task.origin = origin; task.orgs = source.orgs(); task.fingerprint = source.fingerprint();
         task.metricVersion = source.metric().effectiveVersion();
         task.snapshot = snapshots.freeze(user, task.orgs, task.metricVersion, source.current(), baseline, "snapshot:" + task.id);
         task.context = new LinkedHashMap<>(publicContext(source));
         task.context.put("baselinePeriod", baseline);
+        Map<String, Object> trusted = trusted(task, source, baseline);
+        task.body = Map.of("analysis_context", trusted, "invocation_id", task.invocation,
+                "tool_context_token", tokens.issue(task.empNo, task.tenant, task.invocation), "mode", mode);
+        tasks.put(task.id, task);
+        keys.put(scopedKey, new Idempotent(origin.key(), request, task.id));
+        persistCreated(task, mode);
+        publish(task, "PLAN_UPDATE", Map.of("stage", "queued", "message", "两期已确认，正在准备分析", "status", "RUNNING"));
+        task.deadline = timer.schedule(() -> terminate(task, "FAILED", "analysis_deadline_exceeded"), timeoutSeconds, TimeUnit.SECONDS);
+        task.worker = workers.submit(() -> execute(task));
+        return view(task);
+    }
+
+    private Map<String, Object> trusted(Task task, Source source, Map<String, String> baseline) {
         Map<String, Object> trusted = new LinkedHashMap<>();
         trusted.put("schema_version", "1"); trusted.put("task_id", task.id);
-        trusted.put("source_ask_id", askId); trusted.put("source_turn_id", String.valueOf(source.ask().turnId()));
+        if ("REPORT".equals(source.origin().type())) {
+            trusted.put("source_type", "REPORT");
+            trusted.put("source_report_id", source.origin().reportId());
+            trusted.put("source_data_version_id", source.origin().dataVersionId());
+        } else {
+            trusted.put("source_type", "ASK");
+            trusted.put("source_ask_id", source.origin().askId());
+            trusted.put("source_turn_id", String.valueOf(source.turnId()));
+        }
         trusted.put("tenant_no", task.tenant); trusted.put("metric_code", "leave_count");
         trusted.put("metric_version", String.valueOf(task.metricVersion)); trusted.put("unit", "人");
         trusted.put("current_period", source.current()); trusted.put("baseline_period", baseline);
         trusted.put("effective_org_ids", task.orgs); trusted.put("data_version", "snapshot:" + task.id);
         trusted.put("scope_ref", task.fingerprint);
-        task.body = Map.of("analysis_context", trusted, "invocation_id", task.invocation,
-                "tool_context_token", tokens.issue(task.empNo, task.tenant, task.invocation), "mode", mode);
-        tasks.put(task.id, task);
-        keys.put(scopedKey, new Idempotent(askId, request, task.id));
-        publish(task, "PLAN_UPDATE", Map.of("stage", "queued", "message", "两期已确认，正在准备分析", "status", "RUNNING"));
-        task.deadline = timer.schedule(() -> terminate(task, "FAILED", "analysis_deadline_exceeded"), timeoutSeconds, TimeUnit.SECONDS);
-        task.worker = workers.submit(() -> execute(task));
-        return view(task);
+        return trusted;
     }
 
     private void execute(Task task) {
@@ -182,6 +275,8 @@ public class AttributionService implements McpToolHandler {
     }
 
     private void publish(Task task, String event, Map<String, Object> payload) {
+        String terminalStatus = null;
+        Map<String, Object> terminalResult = null;
         synchronized (task) {
             if (!"RUNNING".equals(task.status)) return;
             if (task.events.size() >= 128) throw new IllegalStateException("analysis event limit");
@@ -190,9 +285,11 @@ public class AttributionService implements McpToolHandler {
             if ("FINAL".equals(event) || "ERROR".equals(event)) {
                 task.status = String.valueOf(payload.get("status")); task.result = safe; task.finished = System.nanoTime();
                 if (task.deadline != null) task.deadline.cancel(false);
+                terminalStatus = task.status; terminalResult = safe;
             }
             task.notifyAll();
         }
+        if (terminalStatus != null) persistTerminal(task.id, terminalStatus, terminalResult);
     }
 
     public void validateCursor(String id, long after) {
@@ -257,7 +354,7 @@ public class AttributionService implements McpToolHandler {
         if (!Objects.equals(task.userId, user.getUserId()) || !Objects.equals(task.tenant, user.getTenantId()))
             throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         try {
-            Source now = source(user, task.askId);
+            Source now = source(user, task.origin);
             if (task.revoked || !Objects.equals(task.fingerprint, now.fingerprint()) || !task.orgs.equals(now.orgs())
                     || task.metricVersion != now.metric().effectiveVersion()) throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         } catch (BizException e) {
@@ -267,7 +364,13 @@ public class AttributionService implements McpToolHandler {
         }
     }
 
-    private Source source(UserContext user, String askId) {
+    private Source source(UserContext user, Origin origin) {
+        return "ASK".equals(origin.type())
+                ? askSource(user, origin.askId())
+                : reportSource(user, origin.reportId(), origin.dataVersionId());
+    }
+
+    private Source askSource(UserContext user, String askId) {
         authz.checkFunc(user, "chat:attribution");
         ChatAskStore.AskRecord ask = asks.get(askId);
         if (ask == null || !Objects.equals(ask.userId(), user.getUserId()) || !Objects.equals(ask.tenantId(), user.getTenantId()))
@@ -297,19 +400,62 @@ public class AttributionService implements McpToolHandler {
         if (user.getGrantedOrgs() != null) user.getGrantedOrgs().stream().filter(g -> g.getScope() != null && g.getScope() >= 1)
                 .forEach(g -> allowed.addAll(g.getSubtreeOrgKeys()));
         if (orgs.size() != raw.size() || !allowed.containsAll(orgs)) throw new BizException(ErrorCode.FUNC_FORBIDDEN);
-        return new Source(ask, metric, period, orgs, user.getPermissionFingerprint());
+        String scopeLabel = ask.payload() != null && ask.payload().caliber() != null
+                ? Objects.toString(ask.payload().caliber().organization(), "原答案授权范围") : "原答案授权范围";
+        return new Source(Origin.ask(askId), ask, metric, period, orgs, user.getPermissionFingerprint(), scopeLabel, ask.turnId());
+    }
+
+    private Source reportSource(UserContext user, Long reportId, Long dataVersionId) {
+        authz.checkFunc(user, "chat:attribution");
+        if (reportSourceReader == null) throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "报表分析来源不可用");
+        ReportContext ctx = reportSourceReader.readAuthorizedReport(
+                new AskSourceAccess(user.getTenantId(), user.getUserId(), user.getEmpNo()), reportId, dataVersionId);
+        if (!"leave_count".equals(ctx.metricCode())) throw new BizException(ErrorCode.PARAM_INVALID, "仅支持离职人数指标");
+        MetricDetail metric = semantic.getMetricByCode("leave_count");
+        String formula = metric.formulaExpr() == null ? "" : metric.formulaExpr().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        if (!Objects.equals(metric.status(), 1) || metric.permLevel() != null && metric.permLevel() > user.getDataLevel())
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        if (!formula.equals("selectcount(*)fromfact_emp_changewherechange_typein(5,6)"))
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标口径已变化或不支持当前拆解，请重新查询");
+        if (ctx.metricVersion() != null && !ctx.metricVersion().equals(metric.effectiveVersion()))
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标版本与报表来源不一致");
+        ReportContext.PeriodSpec spec = ctx.period();
+        if (spec == null) throw new BizException(ErrorCode.PARAM_INVALID, "报表来源期间缺失");
+        String pStart = spec.resolvedStart() != null ? spec.resolvedStart() : spec.start();
+        String pEnd = spec.resolvedEndExclusive() != null ? spec.resolvedEndExclusive() : spec.endExclusive();
+        Map<String, String> period = new Period(pStart, pEnd).checked();
+        Set<Long> allowed = new HashSet<>();
+        if (user.getGrantedOrgs() != null) user.getGrantedOrgs().stream().filter(g -> g.getScope() != null && g.getScope() >= 1)
+                .forEach(g -> allowed.addAll(g.getSubtreeOrgKeys()));
+        List<Long> effective = ctx.effectiveOrgIds();
+        List<Long> orgs;
+        if (effective != null && !effective.isEmpty()) {
+            orgs = effective.stream().distinct().sorted().toList();
+            if (!allowed.containsAll(orgs)) throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        } else {
+            orgs = allowed.stream().distinct().sorted().toList();
+            if (orgs.isEmpty() || orgs.size() > 500) throw new BizException(ErrorCode.PARAM_INVALID, "报表授权组织范围缺失");
+        }
+        String fingerprint = user.getPermissionFingerprint() + "|report:" + reportId + ":" + dataVersionId;
+        String scopeLabel = ctx.organizationLabel() == null || ctx.organizationLabel().isBlank()
+                ? "报表授权范围" : ctx.organizationLabel();
+        return new Source(Origin.report(reportId, dataVersionId), null, metric, period, orgs, fingerprint, scopeLabel, null);
     }
 
     private Map<String, Object> publicContext(Source source) {
         Map<String, Object> result = new LinkedHashMap<>();
-        result.put("sourceAskId", source.ask().askId()); result.put("metricCode", "leave_count");
+        result.put("sourceAskId", source.origin().askId()); result.put("metricCode", "leave_count");
         result.put("metricName", source.metric().name()); result.put("unit", "人");
-        result.put("scopeLabel", source.ask().payload() != null && source.ask().payload().caliber() != null
-                ? Objects.toString(source.ask().payload().caliber().organization(), "原答案授权范围") : "原答案授权范围");
+        result.put("scopeLabel", source.scopeLabel());
         result.put("currentPeriod", source.current());
         LocalDate start = LocalDate.parse(source.current().get("start")), end = LocalDate.parse(source.current().get("end"));
         result.put("suggestedBaselinePeriod", start.getDayOfMonth() == 1 && end.equals(start.plusMonths(1))
                 ? Map.of("start", start.minusMonths(1).toString(), "end", start.toString()) : null);
+        if ("REPORT".equals(source.origin().type())) {
+            result.put("sourceType", "REPORT");
+            result.put("sourceReportId", source.origin().reportId());
+            result.put("sourceDataVersionId", source.origin().dataVersionId());
+        }
         return result;
     }
 
@@ -323,13 +469,94 @@ public class AttributionService implements McpToolHandler {
     }
     private Task requireTask(String id) {
         Task task = tasks.get(id);
-        if (task == null) throw new BizException(ErrorCode.API_DEPRECATED, "分析任务已失效，请重新发起");
+        if (task != null) return task;
+        Task restored = restore(id);
+        if (restored == null) throw new BizException(ErrorCode.API_DEPRECATED, "分析任务已失效，请重新发起");
+        Task prior = tasks.putIfAbsent(id, restored);
+        return prior != null ? prior : restored;
+    }
+
+    /** 创建任务即落库：来源、可信上下文与有效组织范围，供重启后读取与重新鉴权。 */
+    private void persistCreated(Task task, String mode) {
+        ChtAnalysisTask row = new ChtAnalysisTask();
+        row.setTaskId(task.id);
+        row.setTenantId(task.tenant);
+        row.setUserId(task.userId);
+        row.setEmpNo(task.empNo);
+        row.setOriginType(task.origin.type());
+        row.setSourceAskId(task.origin.askId());
+        row.setSourceReportId(task.origin.reportId());
+        row.setSourceDataVersionId(task.origin.dataVersionId());
+        row.setScopeRef(task.fingerprint);
+        row.setMetricVersion(task.metricVersion);
+        row.setMode(mode);
+        row.setStatus(ChtAnalysisTask.RUNNING);
+        row.setContextJson(toJson(task.context));
+        row.setOrgsJson(toJson(task.orgs));
+        row.setCreatedAt(LocalDateTime.now());
+        try {
+            taskStore.insert(row);
+        } catch (RuntimeException ex) {
+            // 落库失败不影响本次分析，仅失去重启后恢复能力。
+            log.warn("persist analysis task failed taskId={}: {}", task.id, ex.getMessage());
+        }
+    }
+
+    /** 终态条件更新：仅当库中行仍执行中时写入，避免迟到结果覆盖当前状态。 */
+    private void persistTerminal(String taskId, String status, Map<String, Object> result) {
+        try {
+            taskStore.finish(taskId, status, toJson(result), LocalDateTime.now());
+        } catch (RuntimeException ex) {
+            log.warn("persist analysis terminal failed taskId={}: {}", taskId, ex.getMessage());
+        }
+    }
+
+    /**
+     * 内存未命中时从库恢复：仅恢复 REPORT 来源（其来源为持久化的报表数据版本）。
+     * ASK 来源的问答记录仅在进程内，无法重新鉴权，按失效处理；残留执行中一律按中断展示。
+     */
+    private Task restore(String id) {
+        ChtAnalysisTask row = taskStore.selectById(id);
+        if (row == null || !"REPORT".equals(row.getOriginType())) return null;
+        Task task = new Task();
+        task.id = row.getTaskId();
+        task.invocation = "analysis:" + task.id;
+        task.empNo = row.getEmpNo();
+        task.userId = row.getUserId();
+        task.tenant = row.getTenantId();
+        task.fingerprint = row.getScopeRef();
+        task.metricVersion = row.getMetricVersion() == null ? 0 : row.getMetricVersion();
+        task.origin = Origin.report(row.getSourceReportId(), row.getSourceDataVersionId());
+        task.orgs = parseOrgs(row.getOrgsJson());
+        task.context = parseObject(row.getContextJson());
+        task.status = ChtAnalysisTask.RUNNING.equals(row.getStatus()) ? ChtAnalysisTask.INTERRUPTED : row.getStatus();
+        task.result = parseObject(row.getResultJson());
+        task.finished = System.nanoTime();
         return task;
+    }
+
+    private String toJson(Object value) {
+        if (value == null) return null;
+        try { return mapper.writeValueAsString(value); } catch (Exception e) { return null; }
+    }
+
+    private Map<String, Object> parseObject(String json) {
+        if (json == null || json.isBlank()) return null;
+        try { return mapper.readValue(json, new TypeReference<Map<String, Object>>() { }); }
+        catch (Exception e) { return null; }
+    }
+
+    private List<Long> parseOrgs(String json) {
+        if (json == null || json.isBlank()) return List.of();
+        try {
+            List<?> raw = mapper.readValue(json, new TypeReference<List<Object>>() { });
+            return raw.stream().filter(v -> v instanceof Number).map(v -> ((Number) v).longValue()).toList();
+        } catch (Exception e) { return List.of(); }
     }
     private static Map<String, Object> view(Task task) {
         synchronized (task) {
             Map<String, Object> out = new LinkedHashMap<>();
-            out.put("taskId", task.id); out.put("sourceAskId", task.askId); out.put("status", task.status);
+            out.put("taskId", task.id); out.put("sourceAskId", task.origin.askId()); out.put("status", task.status);
             out.put("context", task.context); out.put("result", task.result); out.put("events", List.copyOf(task.events));
             return out;
         }

@@ -17,6 +17,7 @@ import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
 import com.hrchat.report.chart.ChartViews.ChartPieDatum;
 import com.hrchat.report.chart.ChartViews.ChartSeries;
 import com.hrchat.report.chart.ChartViews.InsightPoint;
+import com.hrchat.report.chart.ChartViews.InsightTaskView;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.entity.RptComponent;
@@ -92,6 +93,9 @@ public class ReportChartService {
     /** 与版本服务互引，懒加载打破循环。 */
     private ReportDataVersionService dataVersionService;
 
+    /** I2：读取持久化洞察任务状态；懒加载打破循环。 */
+    private InsightTaskService insightTaskService;
+
     /** 与问数链路对齐的演示「今天」，用于近 N 月趋势窗口。 */
     @Value("${hrchat.demo.now:2026-09-28}")
     private LocalDate demoNow = LocalDate.of(2026, 9, 28);
@@ -99,6 +103,11 @@ public class ReportChartService {
     @Autowired
     public void setDataVersionService(@Lazy ReportDataVersionService dataVersionService) {
         this.dataVersionService = dataVersionService;
+    }
+
+    @Autowired
+    public void setInsightTaskService(@Lazy InsightTaskService insightTaskService) {
+        this.insightTaskService = insightTaskService;
     }
 
     /**
@@ -344,7 +353,7 @@ public class ReportChartService {
         }
         RptDataVersion version = dataVersionService.requireReadyVersion(report);
         if (version == null) {
-            return new ChartAnalysisView(null, viewKey, drill, "NEED_GENERATE", "PENDING", null, null);
+            return new ChartAnalysisView(null, viewKey, drill, "NEED_GENERATE", "PENDING", null, null, null, null);
         }
         // 读取快照前再次核验权限（撤权后拒绝复用）
         reportService.requireViewAccess(ctx, reportId);
@@ -352,12 +361,16 @@ public class ReportChartService {
         RptViewSnapshot snap = dataVersionService.findSnapshot(version.getId(), compId, viewKey);
         if (snap == null || snap.getChartJson() == null) {
             return new ChartAnalysisView(String.valueOf(version.getId()), viewKey, drill,
-                    ViewKeySupport.STATUS_NOT_DERIVABLE, "PENDING", null, null);
+                    ViewKeySupport.STATUS_NOT_DERIVABLE, "PENDING", null, null, null, null);
         }
         ChartDataView chart = parseChart(snap.getChartJson());
-        String insightStatus = "PIE".equalsIgnoreCase(chart.chartType()) ? "NONE" : "PENDING";
+        InsightTaskView task = insightTaskService == null ? null
+                : insightTaskService.readForView(report, version, compId, viewKey);
+        String insightStatus = task != null ? task.status()
+                : ("PIE".equalsIgnoreCase(chart.chartType()) ? "NONE" : "PENDING");
         return new ChartAnalysisView(String.valueOf(version.getId()), viewKey, drill,
-                "READY", insightStatus, chart, null);
+                "READY", insightStatus, chart, task == null ? null : task.insight(),
+                task == null ? null : task.taskId(), task == null ? null : task.attempt());
     }
 
     /** 版本生成时授权取数并物化视图（非 GET 只读路径）。 */
@@ -424,10 +437,53 @@ public class ReportChartService {
     }
 
     /**
-     * I1：有版本/上下文/序列时组装富 InsightRequest；否则旧三字段模板路径。
+     * I1/I2：有版本/上下文/序列时组装富 InsightRequest；否则旧三字段模板路径。
+     * 兼容旧调用：按当前成功版本派生数据版本与快照键；实时数据一律使用 live 标识，
+     * 绝不复用持久化快照 ID 表示实时数据（I2 修复）。
      */
     InsightRequest buildInsightRequest(RptReport report, Long reportId, Long componentId,
                                        ChartDataView chart, String reportName, String metricName) {
+        String viewKey = ViewKeySupport.root();
+        String dataVersion = report == null || report.getCurrentDataVersionId() == null
+                ? "live-" + reportId : String.valueOf(report.getCurrentDataVersionId());
+        Long snapshotId = null;
+        String scopeRef = null;
+        if (dataVersionService != null && report != null && report.getCurrentDataVersionId() != null) {
+            try {
+                RptDataVersion version = dataVersionService.requireReadyVersion(report);
+                if (version != null && componentId != null) {
+                    RptViewSnapshot snap = dataVersionService.findSnapshot(version.getId(), componentId, viewKey);
+                    if (snap != null) {
+                        snapshotId = snap.getId();
+                    }
+                    if (version.getScopeRef() != null && !version.getScopeRef().isBlank()) {
+                        scopeRef = version.getScopeRef();
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // 版本不可用时仍可用 live 标识走富路径计算
+            }
+        }
+        return buildRichRequest(report, reportId, componentId, chart, reportName, metricName,
+                dataVersion, snapshotId, viewKey, scopeRef);
+    }
+
+    /**
+     * I2 任务路径：由持久化数据版本与快照显式提供键，保证 dataVersion 与 snapshotId 同源，
+     * 实时数据不复用持久化快照 ID。
+     */
+    InsightRequest buildInsightRequest(RptReport report, Long reportId, Long componentId,
+                                       ChartDataView chart, String reportName, String metricName,
+                                       RptDataVersion version, Long snapshotId, String viewKey) {
+        String dataVersion = version == null ? "live-" + reportId : String.valueOf(version.getId());
+        String scopeRef = version == null ? null : version.getScopeRef();
+        return buildRichRequest(report, reportId, componentId, chart, reportName, metricName,
+                dataVersion, snapshotId, viewKey, scopeRef);
+    }
+
+    private InsightRequest buildRichRequest(RptReport report, Long reportId, Long componentId,
+                                            ChartDataView chart, String reportName, String metricName,
+                                            String dataVersion, Long snapshotId, String viewKey, String scopeRef) {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("categories", chart.categories() == null ? List.of() : chart.categories());
         List<Number> seriesData = new ArrayList<>();
@@ -447,27 +503,8 @@ public class ReportChartService {
             return new InsightRequest(reportName, metricName, summary);
         }
 
-        String viewKey = ViewKeySupport.root();
-        String dataVersion = report.getCurrentDataVersionId() == null
-                ? "live-" + reportId : String.valueOf(report.getCurrentDataVersionId());
-        String snapshotId = "live-" + reportId + "-" + viewKey;
-        if (dataVersionService != null && report.getCurrentDataVersionId() != null) {
-            try {
-                RptDataVersion version = dataVersionService.requireReadyVersion(report);
-                if (version != null) {
-                    dataVersion = String.valueOf(version.getId());
-                    if (componentId != null) {
-                        RptViewSnapshot snap = dataVersionService.findSnapshot(
-                                version.getId(), componentId, viewKey);
-                        if (snap != null && snap.getId() != null) {
-                            snapshotId = String.valueOf(snap.getId());
-                        }
-                    }
-                }
-            } catch (RuntimeException ignored) {
-                // 版本不可用时仍可用 live 标识走富路径计算
-            }
-        }
+        String snapshotRef = snapshotId == null
+                ? "live-" + reportId + "-" + viewKey : String.valueOf(snapshotId);
 
         InsightRequest.Period current = resolvePeriod(stored, chart.categories(), true);
         InsightRequest.Period baseline = isTimeAxis(stored)
@@ -484,17 +521,8 @@ public class ReportChartService {
         String metricVersion = stored.get("metricVersion") == null
                 ? "unknown" : String.valueOf(stored.get("metricVersion"));
         List<Long> orgIds = toLongList(stored.get("effectiveOrgIds"));
-        String scopeRef = orgIds.isEmpty() ? "default" : "org:" + orgIds.get(0);
-        if (report.getCurrentDataVersionId() != null && dataVersionService != null) {
-            try {
-                RptDataVersion version = dataVersionService.requireReadyVersion(report);
-                if (version != null && version.getScopeRef() != null && !version.getScopeRef().isBlank()) {
-                    scopeRef = version.getScopeRef();
-                }
-            } catch (RuntimeException ignored) {
-                // keep default scope
-            }
-        }
+        String resolvedScope = scopeRef == null || scopeRef.isBlank()
+                ? (orgIds.isEmpty() ? "default" : "org:" + orgIds.get(0)) : scopeRef;
 
         String resolvedMetricName = asString(stored.get("metricName"));
         if (resolvedMetricName == null || resolvedMetricName.isBlank()) {
@@ -517,13 +545,13 @@ public class ReportChartService {
                 orgIds,
                 dataVersion,
                 viewKey,
-                scopeRef,
+                resolvedScope,
                 null,
                 null,
                 isTimeAxis(stored) ? "time" : "category",
                 "%".equals(unit) ? "percent" : null);
         InsightRequest.InsightSnapshot snapshot = new InsightRequest.InsightSnapshot(
-                snapshotId,
+                snapshotRef,
                 dataVersion,
                 viewKey,
                 chart.categories(),
