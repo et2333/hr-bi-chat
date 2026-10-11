@@ -13,7 +13,11 @@ const result: AnalysisResult = { status: 'PARTIAL', mode: 'dual',
   summary: { current_total: 4, baseline_total: 4, delta: 0, closure_verified: true },
   contributions: [{ org_id: 101, org_name: '研发一部', current_count: 3, baseline_count: 1, delta: 2 },
     { org_id: 102, org_name: '研发二部', current_count: 1, baseline_count: 3, delta: -2 }],
-  facts: {}, claims: [{ claim_id: 'h1', kind: 'unverified_hypothesis', hypothesis: 'timing_concentration', evidence_ids: ['ev_department'] }],
+  structure: { increase: 2, decrease: 2, offset: 2, absolute_movement: 4, net_delta: 0,
+    largest_increase_org_ids: [101], largest_decrease_org_ids: [102], largest_absolute_org_ids: [101, 102], baseline_zero: false },
+  facts: { 'structure:offset': { increase: 2, decrease: 2, offset: 2, absolute_movement: 4, net_delta: 0 },
+    'structure:concentration': { tied_department_count: 2, tied_absolute_delta: 4, absolute_movement: 4 } },
+  claims: [{ claim_id: 'h1', kind: 'unverified_hypothesis', hypothesis: 'timing_concentration', evidence_ids: ['ev_department'] }],
   evidence: [{ evidence_id: 'ev_department', status: 'verified', metric_version: '1', data_version: 'snapshot1', query: { detail: 'department' } }],
   data_quality: ['统计贡献不等于真实离职原因。'], unresolved: ['supplement_limit_reached'], disclaimer: '辅助分析，仅供参考', usage: {},
 }
@@ -67,6 +71,8 @@ describe('AttributionPanel', () => {
     expect(wrapper.get('[role="status"]').text()).toBe('部分完成')
     expect(wrapper.text()).toContain('以下仅展示已经核对的数据')
     expect(wrapper.text()).toContain('总量未变化')
+    expect(wrapper.get('[data-testid="structure-insights"]').text()).toContain('2 人的增减相互抵消')
+    expect(wrapper.get('[data-testid="structure-insights"]').text()).toContain('增加最多：研发一部')
     expect(wrapper.get('tbody').text()).toContain('+2')
     expect(wrapper.get('tbody').text()).toContain('-2')
     expect(wrapper.text()).toContain('ev_department')

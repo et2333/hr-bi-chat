@@ -8,7 +8,8 @@ from evals import s6_real
 
 @pytest.mark.parametrize("exit_code", [0, 1])
 def test_cli_preserves_acceptance_failure_exit_code(monkeypatch, exit_code):
-    async def fake_run(model, cases):
+    async def fake_run(model, cases, *, prepare_only=False):
+        assert prepare_only is False
         assert model == "qwen-plus" and cases == ["S6-01", "S6-03"]
         return exit_code
 

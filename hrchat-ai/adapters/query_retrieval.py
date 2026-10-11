@@ -74,8 +74,10 @@ def attach_prompt_distractors(catalog):
     return catalog
 
 
-def documents(catalog, *, include_distractors=False):
+def documents(catalog, *, include_distractors=False, text_style="legacy"):
     """Build per-request docs: live catalog metrics ∪ distractors ∪ matching examples."""
+    if text_style not in {"legacy", "semantic"}:
+        raise ValueError("Retrieval text style must be legacy or semantic")
     corpus = load_corpus()
     metrics = {m["code"]: m for m in catalog["metrics"]}
     docs = []
@@ -118,6 +120,15 @@ def documents(catalog, *, include_distractors=False):
                      "version": metrics[codes[0]]["version"], "executable": True,
                      "text": row["question"],
                      "content": {"question": row["question"], "draft": draft}})
+    if text_style == "semantic":
+        for doc in docs:
+            if doc["kind"] == "metadata":
+                content = doc["content"]
+                # Index business meaning; keep the full original contract in
+                # content for the planner and authority checks. No gold labels.
+                definition = re.sub(r"^模拟口径[：:]", "", content["definition"])
+                definition = re.sub(r"[，,]本PoC不可查询$", "", definition)
+                doc["text"] = "\n".join([content["name"], "、".join(content.get("aliases") or []), definition])
     return docs
 
 
@@ -210,18 +221,22 @@ def rank(question, docs, mode, embedder=None, *, prefer_executable=False):
 
 
 def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors=False,
-             prefer_executable=None):
+             prefer_executable=None, text_style=None):
     mode = mode or os.getenv("HRCHAT_RAG_MODE", "off")
     if mode not in {"off", "lexical", "hybrid"}:
         raise ValueError("HRCHAT_RAG_MODE must be off, lexical or hybrid")
     if prefer_executable is None:
         prefer_executable = include_distractors
+    text_style = text_style or os.getenv("HRCHAT_RAG_TEXT_STYLE", "legacy")
+    if text_style not in {"legacy", "semantic"}:
+        raise ValueError("Retrieval text style must be legacy or semantic")
     started = time.perf_counter()
     fingerprint = hashlib.sha256(json.dumps(catalog, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
     evidence = {"mode": mode, "corpus_version": CORPUS_VERSION, "catalog_fingerprint": fingerprint,
                 "candidate_count": 0, "executable_metric_count": 0, "distractor_count": 0,
                 "include_distractors": include_distractors,
                 "prefer_executable": prefer_executable,
+                "text_style": text_style,
                 "model": MODEL_ID if mode == "hybrid" else None,
                 "selected": [], "ranked_metadata_codes": [],
                 "status": "disabled" if mode == "off" else "ok"}
@@ -229,7 +244,7 @@ def retrieve(question, catalog, *, mode=None, embedder=None, include_distractors
         evidence["elapsed_ms"] = round((time.perf_counter() - started) * 1000, 2)
         return {}, evidence
     try:
-        docs = documents(catalog, include_distractors=include_distractors)
+        docs = documents(catalog, include_distractors=include_distractors, text_style=text_style)
         evidence.update(candidate_count=len(docs),
             executable_metric_count=sum(d["kind"] == "metadata" and d.get("executable", False) for d in docs),
             distractor_count=sum(d["content"].get("role") == "retrieval_distractor" for d in docs),

@@ -94,6 +94,11 @@ async def role_reply(adapter, budget, records, request, role, schema, data):
         "Reviewer必须检查全部claim；可删除无支持项、具体请求一次daily_counts补查或声明insufficient；"
         "没有补查必要则accept，不要求固定补查。补查已执行时不可再次申请。"
         "不能因两个角色同意而覆盖程序给出的invalid_claim_ids。只解释聚合统计，不评价个人。"
+        "程序提供structure:*事实描述增减抵消和按绝对变化计算的份额，不代表风险或原因。"
+        "Analyst优先覆盖overall以及增减最多的部门（focus_fact_ids，含并列）；总数不变不能忽略部门变化。"
+        "Reviewer检查重点遗漏，可通过highlight_fact_ids选择已有部门证据中的事实补齐，最多6项，不写新数值。"
+        "missing_focus_fact_ids是程序提供的覆盖提示，不能声称是Reviewer独立发现。"
+        "没有变化不强求洞察，基期为零不计算增长率，净变化为零不计算净贡献率；不自行认定集中或异常。"
         + stage_instruction + "JSON schema:\n" + json.dumps(schema.model_json_schema(), ensure_ascii=False)
     )
     agent = Agent(name=role, system_prompt=system,

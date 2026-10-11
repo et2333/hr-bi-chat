@@ -44,6 +44,8 @@ def main():
                         help="Evaluation-only RAG mode; sets HRCHAT_RAG_MODE for the Python gateway")
     parser.add_argument("--prompt-distractors", action="store_true",
                         help="Evaluation-only: put retrieval distractors into the planning prompt metrics list")
+    parser.add_argument("--rag-text-style", choices=["legacy", "semantic"], default="legacy",
+                        help="Control index text representation; full planner definitions remain available")
     parser.add_argument("--pressure-suite", action="store_true",
                         help="Run rag_pressure hard metric-selection cases instead of dataset runner")
     parser.add_argument("--report-pointer", help="Write the exact report path for an experiment controller")
@@ -125,6 +127,7 @@ def main():
         env["HRCHAT_QUERY_REPAIR_ENABLED"] = "0"
     if args.model:
         env["OPENAI_MODEL"] = args.model
+    env["HRCHAT_RAG_TEXT_STYLE"] = args.rag_text_style
     if args.rag is not None:
         env["HRCHAT_RAG_MODE"] = args.rag
         if args.rag == "hybrid":
@@ -178,6 +181,7 @@ def main():
                     "requested_model": env.get("OPENAI_MODEL") if real_model else None,
                     "memory_enabled": args.memory == "on" if args.runtime == "remote" else None,
                     "rag_mode": env.get("HRCHAT_RAG_MODE") if args.runtime == "remote" else None,
+                    "rag_text_style": env.get("HRCHAT_RAG_TEXT_STYLE"),
                     "prompt_distractors": args.prompt_distractors,
                     "repair_enabled": env["HRCHAT_QUERY_REPAIR_ENABLED"] == "1",
                     "org_catalog_scope": args.org_catalog_scope,

@@ -26,11 +26,18 @@ export interface AnalysisResult {
   mode: string
   summary: { current_total: number; baseline_total: number; delta: number; closure_verified: boolean } | null
   contributions: Contribution[]
+  structure?: {
+    increase: number; decrease: number; offset: number; absolute_movement: number; net_delta: number
+    largest_increase_org_ids: number[]; largest_decrease_org_ids: number[]; largest_absolute_org_ids: number[]
+    baseline_zero: boolean
+  } | null
   facts: Record<string, Record<string, string | number>>
   claims: Array<{ claim_id: string; kind: string; fact_id?: string; hypothesis?: string; next_check?: string; evidence_ids: string[] }>
   evidence: Array<{ evidence_id: string; status: string; metric_version: string; data_version: string; query: { detail: string }; daily?: Array<{ period: string; date: string; count: number }> }>
   data_quality: string[]
   supplement_assessment?: { claim_id: string; evidence_id: string; fact_ids: string[]; conclusion: 'descriptive_only' | 'insufficient' } | null
+  supplement_decisions?: Array<{ role: string; allowed: boolean; reason: string | null;
+    need: { claim_id: string; reason: string; required_fact_ids: string[] } | null }>
   unresolved: string[]
   disclaimer: string
   usage: { elapsed_ms?: number; [key: string]: unknown }

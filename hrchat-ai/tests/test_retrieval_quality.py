@@ -7,6 +7,24 @@ from adapters.query_retrieval import rank
 from evals import retrieval_quality as quality
 
 
+def test_semantic_index_preserves_authority_contracts_and_example_text():
+    _, legacy, _ = quality.load_suite()
+    _, semantic, _ = quality.load_suite(text_style="semantic")
+    assert len(legacy) == len(semantic)
+    changed = 0
+    for old, new in zip(legacy, semantic):
+        assert {k: v for k, v in old.items() if k != "text"} == {k: v for k, v in new.items() if k != "text"}
+        if old["kind"] == "example":
+            assert old["text"] == new["text"]
+        else:
+            changed += old["text"] != new["text"]
+            assert new["content"]["name"] in new["text"]
+            assert "allowed_modes" not in new["text"]
+    assert changed == 63
+    with pytest.raises(ValueError):
+        quality.load_suite(text_style="unknown")
+
+
 def test_mrr_full_cutoff_and_multirelevant_recall_are_distinct():
     scores = quality.ranking_metrics(["wrong", "wrong", "also_wrong", "gold", "gold2"], ["gold", "gold2"])
     assert scores["mrr"] == pytest.approx(1 / 3)

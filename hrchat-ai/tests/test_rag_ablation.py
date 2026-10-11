@@ -75,6 +75,13 @@ def test_rag_ablation_compare_isolates_mode_and_reports_paired_delta():
     assert result["success_rate_delta_percentage_points"] == 100.0
 
 
+def test_rag_comparison_rejects_text_representation_confounder():
+    old, new = report(rag_mode="off"), report(rag_mode="hybrid")
+    new["server"]["rag_text_style"] = "semantic"
+    with pytest.raises(ValueError, match="text style"):
+        compare_pair(old, new, kind="rag_ablation", ids=list(DEFAULT_CASE_IDS))
+
+
 @pytest.mark.parametrize("change", [
     "partial", "model", "repair", "memory", "rag_same", "evidence_mode", "cases", "jar",
 ])

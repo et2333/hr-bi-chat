@@ -136,6 +136,8 @@ def compare_pair(baseline, full, *, kind, ids):
     elif kind == "rag_ablation":
         if baseline["runtime"] != "remote" or baseline["model_kind"] != "real" or not baseline["server"].get("memory_enabled"):
             raise ValueError("RAG ablation baseline must use the real model and memory")
+        if baseline["server"].get("rag_text_style", "legacy") != full["server"].get("rag_text_style", "legacy"):
+            raise ValueError("RAG text style differs between arms")
         for key in ("requested_model", "repair_enabled", "planner_variant", "memory_enabled"):
             if baseline["server"].get(key) != full["server"].get(key):
                 raise ValueError("Non-RAG setting changed: " + key)
