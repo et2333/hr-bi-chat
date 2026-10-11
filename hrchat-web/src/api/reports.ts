@@ -47,21 +47,48 @@ export interface ExportCreateRequest {
 export interface ChartDataView {
   chartType: string
   categories: string[]
-  series: Array<{ name: string; data: number[] }>
+  series: Array<{ name: string; data: Array<number | null> }>
   pieData: Array<{ name: string; value: number }>
 }
 
-/** 同一次授权取数的图表与洞察，版本号覆盖整个响应。 */
+/** 只读图文视图：来自持久化数据版本，GET 不触发取数。 */
 export interface ChartAnalysisView {
-  dataVersion: string
+  dataVersion: string | null
+  viewKey: string
   dimValue: string | null
-  chart: ChartDataView
+  chartStatus: 'READY' | 'NEED_GENERATE' | 'VIEW_NOT_DERIVABLE' | 'FAILED' | string
+  insightStatus: 'READY' | 'PENDING' | 'NONE' | 'DEGRADED' | 'FAILED' | string
+  chart: ChartDataView | null
   insight: InsightView | null
+}
+
+export interface DataVersionView {
+  dataVersionId: number
+  versionNo: number
+  status: string
+  dataAsOf: string | null
+  reportGeneratedAt: string | null
+  failureReason: string | null
+  published: boolean
 }
 
 export function getChartAnalysis(reportId: number, componentId: number, dimValue?: string) {
   return get<ApiResponse<ChartAnalysisView>>(`/reports/${reportId}/components/${componentId}/chart-analysis`, {
     params: dimValue ? { dimValue } : undefined,
+  })
+}
+
+/** 旧报表打开/首次确保当前数据版本（幂等） */
+export function ensureReportDataVersion(reportId: number, idempotencyKey?: string) {
+  return post<ApiResponse<DataVersionView>>(`/reports/${reportId}/data-versions/ensure`, null, {
+    headers: idempotencyKey ? { [IDEMPOTENCY_HEADER]: idempotencyKey } : undefined,
+  })
+}
+
+/** 显式刷新数据版本 */
+export function refreshReportDataVersion(reportId: number, idempotencyKey?: string) {
+  return post<ApiResponse<DataVersionView>>(`/reports/${reportId}/data-versions/refresh`, null, {
+    headers: idempotencyKey ? { [IDEMPOTENCY_HEADER]: idempotencyKey } : undefined,
   })
 }
 

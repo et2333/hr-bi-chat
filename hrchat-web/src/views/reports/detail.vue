@@ -29,10 +29,11 @@
       <a-row :gutter="[12, 12]">
         <a-col v-for="c in report?.components" :key="c.componentId" :xs="24" :md="12">
           <div class="comp-box">
-            <a-space>
+            <a-space wrap>
               <!-- CHART 的具体图型由下方切换条表达，不再重复打「柱状图」标签 -->
               <a-tag color="geekblue">{{ compTypeName(c.compType) }}</a-tag>
               <a-tag v-if="c.compType !== 'CHART' && c.chartType">{{ chartTypeName(c.chartType) }}</a-tag>
+              <a-tag v-if="periodTag(c)" color="purple">期间：{{ periodTag(c) }}</a-tag>
             </a-space>
 
             <!-- CHART 组件：图表类型一键切换 + 组织下钻 + AI 洞察 -->
@@ -92,7 +93,16 @@
                     </ul>
                   </template>
                   <p v-else-if="insightStateOf(c.componentId)!.loading" class="insight-loading">洞察生成中…</p>
-                  <p v-else class="insight-error">洞察加载失败</p>
+                  <p
+                    v-else-if="insightStateOf(c.componentId)!.status === 'PENDING'"
+                    class="insight-pending"
+                  >洞察待生成（I0 尚未接入模型解读）</p>
+                  <p
+                    v-else-if="insightStateOf(c.componentId)!.status === 'NONE'"
+                    class="insight-pending"
+                  >当前图型无洞察</p>
+                  <p v-else-if="insightStateOf(c.componentId)!.error" class="insight-error">洞察加载失败</p>
+                  <p v-else class="insight-pending">洞察暂不可用</p>
                 </a-spin>
               </div>
             </template>
@@ -186,23 +196,6 @@
       </a-table>
     </a-card>
 
-    <!-- 快照 -->
-    <a-card :bordered="false" title="快照历史" class="section-card">
-      <a-table
-        :columns="snapColumns"
-        :data-source="snapshots"
-        :pagination="false"
-        row-key="id"
-        size="small"
-      >
-        <template #bodyCell="{ column, record }">
-          <template v-if="column.key === 'generatedAt'">{{ formatDateTime(record.generatedAt) }}</template>
-          <template v-else-if="column.key === 'expireAt'">{{ formatDateTime(record.expireAt) }}</template>
-        </template>
-      </a-table>
-      <a-empty v-if="snapshots.length === 0" description="暂无快照" />
-    </a-card>
-
     <!-- 新建订阅弹窗 -->
     <a-modal v-model:open="subModalVisible" title="新建订阅" :confirm-loading="subSubmitting" @ok="createSub">
       <a-form layout="vertical">
@@ -258,7 +251,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import { ArrowLeftOutlined, BulbOutlined, DownloadOutlined, PlusOutlined } from '@ant-design/icons-vue'
 import { reportApi } from '@/api'
-import type { ComponentView, ReportDetail, SnapshotView, SubscriptionView } from '@/api/types'
+import type { ComponentView, ReportDetail, SubscriptionView } from '@/api/types'
 import type { MetricCardView, TableView } from '@/api/reports'
 import { useReportChartAnalysis } from '@/composables/useReportChartAnalysis'
 import ChartRenderer, { type ChartType } from '@/components/ChartRenderer.vue'
@@ -270,7 +263,6 @@ const reportId = Number(route.params.id)
 
 const report = ref<ReportDetail | null>(null)
 const subscriptions = ref<SubscriptionView[]>([])
-const snapshots = ref<SnapshotView[]>([])
 const loading = ref(false)
 
 // 图表与洞察从服务端共享快照同步更新。
@@ -505,12 +497,6 @@ const subColumns = [
   { title: '操作', key: 'actions', width: 90 },
 ]
 
-const snapColumns = [
-  { title: '快照 ID', key: 'id', dataIndex: 'id' },
-  { title: '生成时间', key: 'generatedAt' },
-  { title: '过期时间', key: 'expireAt' },
-]
-
 // 订阅表单
 const subModalVisible = ref(false)
 const subSubmitting = ref(false)
@@ -537,9 +523,13 @@ async function loadDetail() {
     const res = await reportApi.getReport(reportId)
     report.value = res.data
     subscriptions.value = res.data.subscriptions
-    const snaps = await reportApi.listSnapshots(reportId)
-    snapshots.value = snaps.data.records
-    await loadCharts(res.data.components)
+    // 旧报表/无版本：打开详情时幂等初始化数据版本（不暗中刷新已有成功版本）
+    if (!res.data.currentDataVersionId) {
+      await reportApi.ensureReportDataVersion(reportId, `ensure-${reportId}`)
+      const refreshed = await reportApi.getReport(reportId)
+      report.value = refreshed.data
+    }
+    await loadCharts((report.value ?? res.data).components)
   } catch (e) {
     message.error(e instanceof Error ? e.message : '加载报表详情失败')
   } finally {
@@ -625,6 +615,22 @@ function prettyJson(def: Record<string, unknown>): string {
 
 function metricCardTitle(def?: Record<string, unknown> | null): string {
   return String(def?.title ?? def?.metric ?? '指标')
+}
+
+/** 组件期间展示：优先 periodLabel，否则 periodStart/periodEnd 或滚动 months */
+function periodTag(c: ComponentView): string {
+  const def = c.def ?? {}
+  const label = def.periodLabel
+  if (typeof label === 'string' && label.trim()) return label.trim()
+  const start = def.periodStart
+  const end = def.periodEnd
+  if (typeof start === 'string' && typeof end === 'string' && start && end) {
+    return `${start} ~ ${end}`
+  }
+  const months = def.months
+  if (typeof months === 'number' && months > 0) return `近${months}月`
+  if (typeof months === 'string' && months.trim()) return `近${months}月`
+  return ''
 }
 
 function formatTime(iso: string): string {
@@ -731,6 +737,12 @@ function formatDateTime(iso: string): string {
 }
 
 .insight-loading,
+.insight-pending {
+  margin: 0;
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
 .insight-error {
   margin: 8px 0 0;
   font-size: 12px;
