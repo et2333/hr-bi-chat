@@ -170,6 +170,35 @@ class ChatServiceFlowTest {
     }
 
     @Test
+    void getSql_fallsBackToCaliberDefinitionWhenSqlMissing() {
+        AnswerPayload.Caliber caliber = new AnswerPayload.Caliber("离职人数",
+                "统计期内主动(5)/被动(6)离职人数", "2026-07-01/2026-07-31", null);
+        AnswerPayload payload = new AnswerPayload("ask-2", "ans-2", "completed", "QUERY",
+                false, null, null, null, null, caliber, null, 100L);
+        when(askStore.get("ask-2")).thenReturn(record("ask-2", payload, null));
+        when(askStore.evidence("ask-2")).thenReturn(Map.of());
+
+        SqlView view = service.getSql(ctx, "ask-2");
+        assertThat(view.sql()).isEqualTo("统计期内主动(5)/被动(6)离职人数");
+        assertThat(view.caliber()).containsEntry("metric", "离职人数");
+    }
+
+    @Test
+    void getSql_prefersAuthorizedSqlFromExecutionEvidence() {
+        AnswerPayload.Caliber caliber = new AnswerPayload.Caliber("离职人数",
+                "统计期内主动(5)/被动(6)离职人数", "2026-07-01/2026-07-31", null);
+        AnswerPayload payload = new AnswerPayload("ask-3", "ans-3", "completed", "QUERY",
+                false, null, null, null, null, caliber, null, 100L);
+        when(askStore.get("ask-3")).thenReturn(record("ask-3", payload, null));
+        when(askStore.evidence("ask-3")).thenReturn(Map.of(
+                "execution", Map.of("sql", "SELECT COUNT(*) FROM fact_emp_change WHERE change_type IN (5, 6)")));
+
+        SqlView view = service.getSql(ctx, "ask-3");
+        assertThat(view.sql()).contains("SELECT COUNT(*)");
+        assertThat(view.sql()).contains("fact_emp_change");
+    }
+
+    @Test
     void getTable_paginatesWhenLarge() {
         List<Map<String, Object>> rows = List.of(
                 Map.of("k", 1), Map.of("k", 2), Map.of("k", 3), Map.of("k", 4), Map.of("k", 5));

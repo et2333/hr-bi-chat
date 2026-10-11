@@ -179,8 +179,12 @@ class JavaMcpSemanticToolClient:
                       "as_of_date": raw.get("as_of_date")}
         else:
             result = _present_from_mcp(code, view, raw, plan.query_mode)
-        result["execution_evidence"] = {"query_plan": raw["query_plan"],
+        evidence = {"query_plan": raw["query_plan"],
             "metric_version": raw["metric_version"], "effective_org_ids": raw["effective_org_ids"]}
+        # Java 授权执行后的 SQL，供对话台「查看 SQL」展示（不进入模型侧计划）
+        if isinstance(raw.get("sql"), str) and raw["sql"].strip():
+            evidence["sql"] = raw["sql"]
+        result["execution_evidence"] = evidence
         return result
 
     async def resolve_organization(self, name, context):
