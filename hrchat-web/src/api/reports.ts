@@ -51,6 +51,20 @@ export interface ChartDataView {
   pieData: Array<{ name: string; value: number }>
 }
 
+/** 同一次授权取数的图表与洞察，版本号覆盖整个响应。 */
+export interface ChartAnalysisView {
+  dataVersion: string
+  dimValue: string | null
+  chart: ChartDataView
+  insight: InsightView | null
+}
+
+export function getChartAnalysis(reportId: number, componentId: number, dimValue?: string) {
+  return get<ApiResponse<ChartAnalysisView>>(`/reports/${reportId}/components/${componentId}/chart-analysis`, {
+    params: dimValue ? { dimValue } : undefined,
+  })
+}
+
 /** 表格列定义（后端 ChartViews.TableColumn） */
 export interface TableColumn {
   key: string

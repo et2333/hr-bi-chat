@@ -175,6 +175,73 @@ class ReportChartServiceTest {
     }
 
     @Test
+    void chartAnalysis_drillUsesOneAuthorizedQueryAndIdenticalValuesForInsight() {
+        when(componentMapper.selectOne(any())).thenReturn(
+                comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
+                metric("headcount", "在职人数", "SELECT COUNT(*) FROM dim_employee"));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class)))
+                .thenReturn(result("研发一部", 3), result("不应再次取数", 999));
+        when(agentRuntime.generateInsight(any())).thenReturn(Map.of("summary", "3 人", "points", List.of()));
+
+        var view = service.chartAnalysis(1L, 10L, " 研发中心 ", ctx);
+
+        assertThat(view.dataVersion()).isNotBlank();
+        assertThat(view.dimValue()).isEqualTo("研发中心");
+        assertThat(view.chart().categories()).containsExactly("研发一部");
+        var query = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService).executeReadonly(query.capture());
+        assertThat(query.getValue().sql()).contains("org_name = '研发中心'");
+        var request = org.mockito.ArgumentCaptor.forClass(InsightRequest.class);
+        org.mockito.Mockito.verify(agentRuntime).generateInsight(request.capture());
+        assertThat(request.getValue().summary().get("categories")).isEqualTo(view.chart().categories());
+        assertThat(request.getValue().summary().get("series")).isEqualTo(List.of(Map.of(
+                "name", view.chart().series().get(0).name(), "data", view.chart().series().get(0).data())));
+        org.mockito.Mockito.verify(reportService).requireViewAccess(ctx, 1L);
+        org.mockito.Mockito.verify(authzService).checkFunc(ctx, ReportChartService.PERM_READ);
+    }
+
+    @Test
+    void chartAnalysis_newRefreshGetsNewVersionAndRootHasNoDrillFilter() {
+        when(componentMapper.selectOne(any())).thenReturn(
+                comp("LINE", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
+                metric("headcount", "在职人数", "SELECT COUNT(*) FROM dim_employee"));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("研发中心", 3));
+        when(agentRuntime.generateInsight(any())).thenReturn(Map.of("summary", "3 人", "points", List.of()));
+        var first = service.chartAnalysis(1L, 10L, null, ctx);
+        var second = service.chartAnalysis(1L, 10L, " ", ctx);
+        assertThat(first.dataVersion()).isNotEqualTo(second.dataVersion());
+        assertThat(second.dimValue()).isNull();
+        var query = org.mockito.ArgumentCaptor.forClass(AuthorizedQuery.class);
+        org.mockito.Mockito.verify(queryExecService, org.mockito.Mockito.times(2)).executeReadonly(query.capture());
+        assertThat(query.getValue().sql()).doesNotContain("parent_org_key = (SELECT");
+    }
+
+    @Test
+    void chartAnalysis_degradedInsightRetainsChartFromSameQuery() {
+        when(componentMapper.selectOne(any())).thenReturn(
+                comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));
+        when(semanticMetaService.getMetricByCode("headcount")).thenReturn(
+                metric("headcount", "在职人数", "SELECT COUNT(*) FROM dim_employee"));
+        when(queryExecService.executeReadonly(any(AuthorizedQuery.class))).thenReturn(result("研发一部", 3));
+        when(agentRuntime.generateInsight(any())).thenThrow(new BizException(ErrorCode.AI_DEGRADED));
+        var view = service.chartAnalysis(1L, 10L, "研发中心", ctx);
+        assertThat(view.chart().series().get(0).data()).containsExactly(3);
+        assertThat(view.insight().points().get(0).type()).isEqualTo("degraded");
+        org.mockito.Mockito.verify(queryExecService).executeReadonly(any(AuthorizedQuery.class));
+    }
+
+    @Test
+    void chartAnalysis_deniedReportDoesNotQueryOrGenerateInsight() {
+        org.mockito.Mockito.doThrow(new BizException(ErrorCode.PARAM_INVALID))
+                .when(reportService).requireViewAccess(ctx, 1L);
+        assertThatThrownBy(() -> service.chartAnalysis(1L, 10L, "研发中心", ctx))
+                .isInstanceOf(BizException.class);
+        org.mockito.Mockito.verifyNoInteractions(componentMapper, queryExecService, agentRuntime);
+    }
+
+    @Test
     void insight_fallsBackWhenAgentDegraded() {
         when(componentMapper.selectOne(any())).thenReturn(
                 comp("BAR", "{\"metric\":\"headcount\",\"dim\":\"org\"}"));

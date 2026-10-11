@@ -13,6 +13,7 @@ import com.hrchat.common.error.ErrorCode;
 import com.hrchat.queryexec.model.QueryResult;
 import com.hrchat.queryexec.service.QueryExecService;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
+import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
 import com.hrchat.report.chart.ChartViews.ChartPieDatum;
 import com.hrchat.report.chart.ChartViews.ChartSeries;
 import com.hrchat.report.chart.ChartViews.InsightPoint;
@@ -302,6 +303,18 @@ public class ReportChartService {
     // AI 洞察
     // =================================================================
 
+    /** 图表和洞察必须使用同一次取数，避免两次查询之间数据变化。 */
+    public ChartAnalysisView chartAnalysis(Long reportId, Long compId, String dimValue, UserContext ctx) {
+        authzService.checkFunc(ctx, PERM_READ);
+        reportService.requireViewAccess(ctx, reportId);
+        RptComponent comp = requireChartComponent(reportId, compId);
+        String drill = dimValue == null || dimValue.isBlank() ? null : dimValue.trim();
+        ChartDataView chart = loadChart(comp, drill, ctx);
+        String version = java.util.UUID.randomUUID().toString();
+        InsightView insight = "PIE".equals(chart.chartType()) ? null : insightFromChart(reportId, chart);
+        return new ChartAnalysisView(version, drill, chart, insight);
+    }
+
     /** AI 洞察解读；Agent 降级时返回兜底视图。 */
     public InsightView insight(Long reportId, Long compId, UserContext ctx) {
         authzService.checkFunc(ctx, PERM_READ);
@@ -309,6 +322,10 @@ public class ReportChartService {
         RptComponent comp = requireChartComponent(reportId, compId);
 
         ChartDataView chart = loadChart(comp, null, ctx);
+        return insightFromChart(reportId, chart);
+    }
+
+    private InsightView insightFromChart(Long reportId, ChartDataView chart) {
         RptReport report = reportMapper.selectById(reportId);
         String reportName = report == null || report.getReportName() == null
                 ? "报表" + reportId : report.getReportName();
