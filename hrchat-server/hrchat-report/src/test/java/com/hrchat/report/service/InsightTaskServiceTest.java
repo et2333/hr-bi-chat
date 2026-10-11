@@ -1,5 +1,8 @@
 package com.hrchat.report.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.MybatisMapperBuilderAssistant;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
@@ -28,6 +31,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.List;
 import java.util.Map;
@@ -41,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -75,6 +81,9 @@ class InsightTaskServiceTest {
 
     @BeforeEach
     void setUp() {
+        // 纯单测环境下初始化 TableInfo 缓存，使 LambdaQueryWrapper/LambdaUpdateWrapper 可渲染 SQL 片段
+        TableInfoHelper.initTableInfo(new MybatisMapperBuilderAssistant(new MybatisConfiguration(), ""),
+                RptInsightTask.class);
         service = new InsightTaskService(insightMapper, componentMapper, dataVersionMapper,
                 viewSnapshotMapper, reportService, agentRuntime, objectMapper);
         service.setChartService(chartService);
@@ -244,5 +253,61 @@ class InsightTaskServiceTest {
         assertThat(view.insight().actions()).hasSize(1);
         assertThat(view.insight().actions().get(0).capabilityId()).isEqualTo("attribution");
         assertThat(view.generation()).containsEntry("usage_source", "unknown");
+    }
+
+    @Test
+    void ensureForView_registersAfterCommitSchedulingWhenTransactionActive() throws Exception {
+        when(reportService.requireAccessibleReport(any(), eq(1L))).thenReturn(report());
+        when(componentMapper.selectOne(any())).thenReturn(chartComponent());
+        when(dataVersionMapper.selectById(7L)).thenReturn(readyVersion());
+        when(viewSnapshotMapper.selectOne(any())).thenReturn(snapshot());
+        RptInsightTask pending = task(RptInsightTask.PENDING, 0);
+        pending.setId(60L);
+        when(insightMapper.selectOne(any())).thenReturn(pending);
+        when(insightMapper.selectById(60L)).thenReturn(pending);
+
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            InsightTaskView view = service.ensureForView(ctx, 1L, 10L, null);
+
+            assertThat(view.taskId()).isEqualTo(60L);
+            List<TransactionSynchronization> syncs = TransactionSynchronizationManager.getSynchronizations();
+            assertThat(syncs).hasSize(1);
+            // 事务提交回调触发入队（真实提交前不提交执行器）
+            syncs.get(0).afterCommit();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
+    }
+
+    @Test
+    void retry_requeuesFailedTaskWithinSameVersion() throws Exception {
+        when(reportService.requireAccessibleReport(any(), eq(1L))).thenReturn(report());
+        when(componentMapper.selectOne(any())).thenReturn(chartComponent());
+        RptInsightTask failed = task(RptInsightTask.FAILED, 1);
+        RptInsightTask reset = task(RptInsightTask.PENDING, 1);
+        when(insightMapper.selectById(50L)).thenReturn(failed, reset);
+        when(dataVersionMapper.selectById(7L)).thenReturn(readyVersion());
+        when(viewSnapshotMapper.selectOne(any())).thenReturn(snapshot());
+        when(insightMapper.update(any(), any())).thenReturn(1);
+
+        InsightTaskView view = service.retry(ctx, 1L, 10L, 50L);
+
+        assertThat(view.status()).isEqualTo(RptInsightTask.PENDING);
+        verify(insightMapper).update(isNull(), any());
+    }
+
+    @Test
+    void interruptOnStartup_marksUnfinishedTasksInterrupted() {
+        when(insightMapper.update(isNull(), any())).thenReturn(2);
+
+        service.interruptOnStartup();
+
+        verify(insightMapper).update(isNull(), any());
+    }
+
+    @Test
+    void shutdownExecutor_doesNotThrow() {
+        service.shutdownExecutor();
     }
 }
