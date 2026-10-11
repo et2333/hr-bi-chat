@@ -1,5 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createExport, getChartAnalysis, getChartData, getDimValues, getInsight, getTableData } from './reports'
+import {
+  createExport,
+  getChartAnalysis,
+  getChartData,
+  getDimValues,
+  getInsight,
+  getTableData,
+  postInsightTask,
+  retryInsightTask,
+} from './reports'
 import { get, post } from './http'
 
 vi.mock('./http', () => ({
@@ -50,6 +59,20 @@ describe('api/reports', () => {
   it('getInsight 请求 insight 端点', () => {
     getInsight(7, 23)
     expect(get).toHaveBeenCalledWith('/reports/7/components/23/insight')
+  })
+
+  it('postInsightTask 幂等确保洞察任务并透传下钻条件', () => {
+    postInsightTask(7, 23, '研发中心')
+    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks', null, {
+      params: { dimValue: '研发中心' },
+    })
+    postInsightTask(7, 23)
+    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks', null, { params: undefined })
+  })
+
+  it('retryInsightTask 复用快照重试指定任务', () => {
+    retryInsightTask(7, 23, 99)
+    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks/99/retry', null)
   })
 
   it('createExport 透传 PDF 格式', () => {
