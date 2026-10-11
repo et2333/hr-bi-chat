@@ -1,0 +1,30 @@
+{
+  "selected_fact_ids": ["fact:missing", "absolute_change:overall"],
+  "claims": [
+    {
+      "claim_id": "c1",
+      "kind": "fact",
+      "text": "研发贡献了全部增长",
+      "fact_ids": ["department_contribution:net"],
+      "predicate": "department_net_contribution"
+    },
+    {
+      "claim_id": "c2",
+      "kind": "fact",
+      "text": "越权组织结论",
+      "fact_ids": ["absolute_change:overall"],
+      "scope_ref": "org:999"
+    }
+  ],
+  "limitations": ["示例局限"],
+  "next_actions": [
+    {
+      "action_id": "a1",
+      "capability_id": "unsupported_magic_analysis",
+      "question": "做一次魔法归因",
+      "params": {},
+      "missing_params": [],
+      "executable": true
+    }
+  ]
+}

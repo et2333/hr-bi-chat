@@ -1,0 +1,30 @@
+{
+  "context": {
+    "schema_version": "1",
+    "report_id": "r-nz",
+    "metric_code": "leave_count",
+    "metric_version": "1",
+    "metric_name": "离职人数",
+    "report_name": "部门抵消",
+    "unit": "人",
+    "metric_kind": "flow",
+    "current_period": {"start": "2026-03-01", "end": "2026-04-01"},
+    "baseline_period": {"start": "2026-02-01", "end": "2026-03-01"},
+    "effective_org_ids": [1, 2],
+    "data_version": "dv-nz-1",
+    "view_key": "dept|all",
+    "scope_ref": "org:1,2"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-nz-1",
+    "data_version": "dv-nz-1",
+    "view_key": "dept|all",
+    "categories": ["2026-02", "2026-03"],
+    "series": [{"name": "离职人数", "data": [10, 10]}],
+    "departments": [
+      {"org_id": 1, "org_name": "研发", "baseline_count": 3, "current_count": 8},
+      {"org_id": 2, "org_name": "销售", "baseline_count": 7, "current_count": 2}
+    ],
+    "groups_truncated": false
+  }
+}

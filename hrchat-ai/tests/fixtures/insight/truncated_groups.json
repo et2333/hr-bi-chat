@@ -1,0 +1,32 @@
+{
+  "context": {
+    "schema_version": "1",
+    "report_id": "r-trunc",
+    "metric_code": "leave_count",
+    "metric_version": "1",
+    "metric_name": "离职人数",
+    "report_name": "离职分布",
+    "unit": "人",
+    "metric_kind": "flow",
+    "current_period": {"start": "2026-03-01", "end": "2026-04-01"},
+    "baseline_period": {"start": "2026-02-01", "end": "2026-03-01"},
+    "effective_org_ids": [1, 2, 3],
+    "data_version": "dv-trunc-1",
+    "view_key": "dept|top3",
+    "scope_ref": "org:1,2,3"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-trunc-1",
+    "data_version": "dv-trunc-1",
+    "view_key": "dept|top3",
+    "categories": ["2026-03"],
+    "series": [{"name": "离职人数", "data": [30]}],
+    "groups": [
+      {"group_id": "d1", "group_name": "研发", "value": 12},
+      {"group_id": "d2", "group_name": "销售", "value": 10},
+      {"group_id": "d3", "group_name": "运营", "value": 8}
+    ],
+    "groups_truncated": true,
+    "groups_total": 50
+  }
+}

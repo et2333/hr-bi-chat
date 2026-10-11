@@ -324,13 +324,10 @@ def create_app(
 
     @app.post("/v1/insight")
     async def insight(body: dict):
-        """报表 AI 洞察解读（P3）：入参 report_name/metric_name/summary{categories,series}，
-        返回模板化解读（均值/趋势/极值）。"""
-        report_name = (body or {}).get("report_name") or ""
-        metric_name = (body or {}).get("metric_name") or ""
-        summary = (body or {}).get("summary") or {}
-        return build_insight(report_name, metric_name,
-                             summary.get("categories") or [], summary.get("series") or [])
+        """报表 AI 洞察：富上下文走 FactBuilder 程序路径；否则保留旧模板解读。"""
+        from insight.service import handle_insight
+
+        return handle_insight(body or {})
 
     @app.post("/v1/chat/sessions/{session_id}/asks")
     async def submit_ask(
