@@ -361,22 +361,17 @@ public class ReportChartService {
         RptComponent comp = requireChartComponent(reportId, compId);
 
         ChartDataView chart = loadChart(comp, null, ctx);
-        return insightFromChart(reportId, chart);
+        return insightFromChart(reportId, compId, chart);
     }
 
-    private InsightView insightFromChart(Long reportId, ChartDataView chart) {
+    private InsightView insightFromChart(Long reportId, Long compId, ChartDataView chart) {
         RptReport report = reportMapper.selectById(reportId);
         String reportName = report == null || report.getReportName() == null
                 ? "报表" + reportId : report.getReportName();
         String metricName = asString(chart.series().isEmpty() ? null : chart.series().get(0).name());
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("categories", chart.categories());
-        summary.put("series", List.of(Map.of(
-                "name", metricName == null ? "" : metricName,
-                "data", chart.series().isEmpty() ? List.of() : chart.series().get(0).data())));
+        InsightRequest request = buildInsightRequest(report, reportId, compId, chart, reportName, metricName);
         try {
-            Map<String, Object> agentView = agentRuntime.generateInsight(
-                    new InsightRequest(reportName, metricName, summary));
+            Map<String, Object> agentView = agentRuntime.generateInsight(request);
             Object text = agentView.get("summary");
             List<InsightPoint> points = new ArrayList<>();
             Object rawPoints = agentView.get("points");
@@ -388,13 +383,230 @@ public class ReportChartService {
                     }
                 }
             }
+            String status = agentView.get("status") == null ? null : String.valueOf(agentView.get("status"));
+            String degradation = agentView.get("degradation_reason") == null
+                    ? null : String.valueOf(agentView.get("degradation_reason"));
+            String dataVersion = agentView.get("data_version") == null
+                    ? null : String.valueOf(agentView.get("data_version"));
+            String viewKey = agentView.get("view_key") == null
+                    ? null : String.valueOf(agentView.get("view_key"));
             return new InsightView(reportName, metricName,
-                    text == null ? "" : String.valueOf(text), points);
+                    text == null ? "" : String.valueOf(text), points,
+                    status, degradation, dataVersion, viewKey);
         } catch (BizException e) {
             return new InsightView(reportName, metricName,
                     "智能洞察暂不可用，请稍后重试。",
-                    List.of(new InsightPoint("degraded", "AI 服务暂不可用")));
+                    List.of(new InsightPoint("degraded", "AI 服务暂不可用")),
+                    "failed", "ai_degraded", null, null);
         }
+    }
+
+    /**
+     * I1：有版本/上下文/序列时组装富 InsightRequest；否则旧三字段模板路径。
+     */
+    InsightRequest buildInsightRequest(RptReport report, Long reportId, Long componentId,
+                                       ChartDataView chart, String reportName, String metricName) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("categories", chart.categories() == null ? List.of() : chart.categories());
+        List<Number> seriesData = new ArrayList<>();
+        if (!chart.series().isEmpty() && chart.series().get(0).data() != null) {
+            for (Object v : chart.series().get(0).data()) {
+                seriesData.add(v instanceof Number n ? n : null);
+            }
+        }
+        summary.put("series", List.of(Map.of(
+                "name", metricName == null ? "" : metricName,
+                "data", seriesData)));
+
+        Map<String, Object> stored = parseJsonMap(report == null ? null : report.getContextJson());
+        String metricCode = asString(stored.get("metricCode"));
+        if (report == null || metricCode == null || metricCode.isBlank()
+                || chart.categories() == null || chart.categories().isEmpty()) {
+            return new InsightRequest(reportName, metricName, summary);
+        }
+
+        String viewKey = ViewKeySupport.root();
+        String dataVersion = report.getCurrentDataVersionId() == null
+                ? "live-" + reportId : String.valueOf(report.getCurrentDataVersionId());
+        String snapshotId = "live-" + reportId + "-" + viewKey;
+        if (dataVersionService != null && report.getCurrentDataVersionId() != null) {
+            try {
+                RptDataVersion version = dataVersionService.requireReadyVersion(report);
+                if (version != null) {
+                    dataVersion = String.valueOf(version.getId());
+                    if (componentId != null) {
+                        RptViewSnapshot snap = dataVersionService.findSnapshot(
+                                version.getId(), componentId, viewKey);
+                        if (snap != null && snap.getId() != null) {
+                            snapshotId = String.valueOf(snap.getId());
+                        }
+                    }
+                }
+            } catch (RuntimeException ignored) {
+                // 版本不可用时仍可用 live 标识走富路径计算
+            }
+        }
+
+        InsightRequest.Period current = resolvePeriod(stored, chart.categories(), true);
+        InsightRequest.Period baseline = resolvePeriod(stored, chart.categories(), false);
+        if (current == null) {
+            return new InsightRequest(reportName, metricName, summary);
+        }
+
+        String metricKind = resolveMetricKind(metricCode, stored);
+        String unit = asString(stored.get("unit"));
+        if (unit == null || unit.isBlank()) {
+            unit = "人";
+        }
+        String metricVersion = stored.get("metricVersion") == null
+                ? "unknown" : String.valueOf(stored.get("metricVersion"));
+        List<Long> orgIds = toLongList(stored.get("effectiveOrgIds"));
+        String scopeRef = orgIds.isEmpty() ? "default" : "org:" + orgIds.get(0);
+        if (report.getCurrentDataVersionId() != null && dataVersionService != null) {
+            try {
+                RptDataVersion version = dataVersionService.requireReadyVersion(report);
+                if (version != null && version.getScopeRef() != null && !version.getScopeRef().isBlank()) {
+                    scopeRef = version.getScopeRef();
+                }
+            } catch (RuntimeException ignored) {
+                // keep default scope
+            }
+        }
+
+        String resolvedMetricName = asString(stored.get("metricName"));
+        if (resolvedMetricName == null || resolvedMetricName.isBlank()) {
+            resolvedMetricName = metricName == null ? metricCode : metricName;
+        }
+        String contextReportName = reportName == null ? "" : reportName;
+
+        InsightRequest.InsightContext context = new InsightRequest.InsightContext(
+                "1",
+                String.valueOf(reportId),
+                componentId == null ? null : String.valueOf(componentId),
+                metricCode,
+                metricVersion,
+                resolvedMetricName,
+                contextReportName,
+                unit,
+                metricKind,
+                current,
+                baseline,
+                orgIds,
+                dataVersion,
+                viewKey,
+                scopeRef,
+                null,
+                null);
+        InsightRequest.InsightSnapshot snapshot = new InsightRequest.InsightSnapshot(
+                snapshotId,
+                dataVersion,
+                viewKey,
+                chart.categories(),
+                List.of(new InsightRequest.SeriesItem(
+                        metricName == null ? "" : metricName, seriesData)),
+                null,
+                false,
+                null,
+                null,
+                List.of());
+        return new InsightRequest(reportName, metricName, summary, context, snapshot);
+    }
+
+    private Map<String, Object> parseJsonMap(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, new TypeReference<>() {
+            });
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private static List<Long> toLongList(Object raw) {
+        if (!(raw instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        List<Long> out = new ArrayList<>();
+        for (Object o : list) {
+            if (o instanceof Number n) {
+                out.add(n.longValue());
+            } else if (o != null) {
+                try {
+                    out.add(Long.valueOf(String.valueOf(o)));
+                } catch (NumberFormatException ignored) {
+                    // skip
+                }
+            }
+        }
+        return out;
+    }
+
+    private String resolveMetricKind(String metricCode, Map<String, Object> stored) {
+        String mode = asString(stored.get("queryMode"));
+        if (PERCENT_METRICS.contains(metricCode) || "ratio".equalsIgnoreCase(mode)) {
+            return "ratio";
+        }
+        if ("leave_count".equals(metricCode) || "hire_count".equals(metricCode)
+                || "flow".equalsIgnoreCase(mode)) {
+            return "flow";
+        }
+        return "stock";
+    }
+
+    /**
+     * current=true 取末期；否则取首期基期。多期类目优先由 yyyy-MM 推导半开区间，否则回退 ReportContext.period。
+     */
+    private InsightRequest.Period resolvePeriod(Map<String, Object> stored,
+                                                List<String> categories, boolean current) {
+        if (categories != null && categories.size() >= 2) {
+            String label = current ? categories.get(categories.size() - 1) : categories.get(0);
+            InsightRequest.Period fromCat = monthLabelToPeriod(label);
+            if (fromCat != null) {
+                return fromCat;
+            }
+        }
+        if (current) {
+            Object period = stored.get("period");
+            if (period instanceof Map<?, ?> p) {
+                String start = firstNonBlank(asString(p.get("resolvedStart")), asString(p.get("start")));
+                String end = firstNonBlank(asString(p.get("resolvedEndExclusive")), asString(p.get("endExclusive")));
+                if (start != null && end != null) {
+                    return new InsightRequest.Period(start, end);
+                }
+            }
+            if (categories != null && !categories.isEmpty()) {
+                return monthLabelToPeriod(categories.get(categories.size() - 1));
+            }
+        }
+        return null;
+    }
+
+    private static InsightRequest.Period monthLabelToPeriod(String label) {
+        if (label == null) {
+            return null;
+        }
+        String s = label.trim();
+        if (s.matches("\\d{4}-\\d{2}")) {
+            LocalDate start = LocalDate.parse(s + "-01");
+            return new InsightRequest.Period(start.toString(), start.plusMonths(1).toString());
+        }
+        if (s.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            LocalDate start = LocalDate.parse(s);
+            return new InsightRequest.Period(start.toString(), start.plusDays(1).toString());
+        }
+        return null;
+    }
+
+    private static String firstNonBlank(String a, String b) {
+        if (a != null && !a.isBlank()) {
+            return a;
+        }
+        if (b != null && !b.isBlank()) {
+            return b;
+        }
+        return null;
     }
 
     // =================================================================

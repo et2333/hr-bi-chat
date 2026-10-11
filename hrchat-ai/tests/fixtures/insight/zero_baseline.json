@@ -1,0 +1,26 @@
+{
+  "context": {
+    "schema_version": "1",
+    "report_id": "r-zb",
+    "metric_code": "headcount",
+    "metric_version": "1",
+    "metric_name": "在职人数",
+    "report_name": "零基期",
+    "unit": "人",
+    "metric_kind": "stock",
+    "current_period": {"start": "2026-02-01", "end": "2026-03-01"},
+    "baseline_period": {"start": "2026-01-01", "end": "2026-02-01"},
+    "effective_org_ids": [10],
+    "data_version": "dv-zb-1",
+    "view_key": "month|org:10",
+    "scope_ref": "org:10"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-zb-1",
+    "data_version": "dv-zb-1",
+    "view_key": "month|org:10",
+    "categories": ["2026-01", "2026-02"],
+    "series": [{"name": "在职人数", "data": [0, 5]}],
+    "groups_truncated": false
+  }
+}

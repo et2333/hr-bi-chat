@@ -74,7 +74,8 @@ class AnalysisTaskStore:
 def install_analysis_routes(app, *, adapter_resolver, tool_client, store=None):
     store = store or AnalysisTaskStore(max_running=int(os.getenv("ANALYSIS_MAX_CONCURRENCY", "4")))
     app.state.analysis_tasks = store
-    app.add_event_handler("shutdown", store.close)
+    # Starlette 1.x: event handlers live on the router, not FastAPI app.
+    app.router.add_event_handler("shutdown", store.close)
 
     def trusted(service_token):
         expected = os.getenv("HRCHAT_MCP_SERVICE_TOKEN", "")

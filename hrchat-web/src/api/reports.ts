@@ -108,12 +108,16 @@ export interface TableView {
   size: number
 }
 
-/** AI 洞察（后端 ChartViews.InsightView） */
+/** AI 洞察（后端 ChartViews.InsightView；I1 可带状态与版本字段） */
 export interface InsightView {
   reportName: string
   metricName: string
   summary: string
   points: Array<{ type: string; label: string }>
+  status?: string | null
+  degradationReason?: string | null
+  dataVersion?: string | null
+  viewKey?: string | null
 }
 
 /** 指标卡实时数据（后端 ChartViews.MetricCardView） */

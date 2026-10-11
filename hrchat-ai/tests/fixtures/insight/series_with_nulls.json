@@ -1,0 +1,26 @@
+{
+  "context": {
+    "schema_version": "1",
+    "report_id": "r-nulls",
+    "metric_code": "headcount",
+    "metric_version": "1",
+    "metric_name": "在职人数",
+    "report_name": "编制月报",
+    "unit": "人",
+    "metric_kind": "stock",
+    "current_period": {"start": "2026-03-01", "end": "2026-04-01"},
+    "baseline_period": {"start": "2026-01-01", "end": "2026-02-01"},
+    "effective_org_ids": [10],
+    "data_version": "dv-nulls-1",
+    "view_key": "month|org:10",
+    "scope_ref": "org:10"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-nulls-1",
+    "data_version": "dv-nulls-1",
+    "view_key": "month|org:10",
+    "categories": ["2026-01", "2026-02", "2026-03"],
+    "series": [{"name": "在职人数", "data": [100, null, 120]}],
+    "groups_truncated": false
+  }
+}

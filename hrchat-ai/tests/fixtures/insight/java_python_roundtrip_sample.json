@@ -1,0 +1,35 @@
+{
+  "_comment": "I1 cross-stack sample: Java RemoteAgentRuntimeClient.toRemoteInsight shape (snake_case).",
+  "report_name": "编制对比",
+  "metric_name": "在职人数",
+  "summary": {
+    "categories": ["2026-01", "2026-02"],
+    "series": [{"name": "在职人数", "data": [1, 2]}]
+  },
+  "context": {
+    "schema_version": "1",
+    "report_id": "7",
+    "component_id": "23",
+    "metric_code": "headcount",
+    "metric_version": "1",
+    "metric_name": "在职人数",
+    "report_name": "编制对比",
+    "unit": "人",
+    "metric_kind": "stock",
+    "current_period": {"start": "2026-02-01", "end": "2026-03-01"},
+    "baseline_period": {"start": "2026-01-01", "end": "2026-02-01"},
+    "effective_org_ids": [10],
+    "data_version": "88",
+    "view_key": "root",
+    "scope_ref": "org:10"
+  },
+  "snapshot": {
+    "snapshot_id": "snap-1",
+    "data_version": "88",
+    "view_key": "root",
+    "categories": ["2026-01", "2026-02"],
+    "series": [{"name": "在职人数", "data": [1, 2]}],
+    "groups_truncated": false,
+    "continuity_gaps": []
+  }
+}
