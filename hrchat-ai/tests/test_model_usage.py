@@ -108,7 +108,7 @@ async def test_timeout_has_one_unknown_attempt_and_does_not_retry():
     await adapter.aclose()
 
 
-@pytest.mark.parametrize("model", ["qwen-turbo", "qwen-plus"])
+@pytest.mark.parametrize("model", ["qwen-turbo", "qwen-plus", "qwen3.6-plus"])
 async def test_json_mode_and_system_role_only_apply_to_planning(model):
     adapter = OpenAIClientImpl(base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", api_key="secret", model=model)
     await adapter.aclose()
@@ -122,6 +122,8 @@ async def test_json_mode_and_system_role_only_apply_to_planning(model):
     assert calls[0]["response_format"] == {"type": "json_object"}
     assert [m["role"] for m in calls[0]["messages"]] == ["system", "user"]
     assert calls[0]["enable_thinking"] is False
+    assert calls[0]["model"] == model
+    assert calls[0]["max_tokens"] == 2048
     assert "response_format" not in calls[1]
     await adapter.aclose()
 

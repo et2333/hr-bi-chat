@@ -19,7 +19,7 @@ _CN_MONTH = {
 _CN_MONTH_ALT = "|".join(sorted(_CN_MONTH, key=len, reverse=True))
 # 日历月：7月 / 07月份 / 2026年7月 / 七月；排除「3个月」等相对跨度
 _CALENDAR_MONTH = (
-    rf"(?:(\d{{4}})\s*年\s*)?(?:(0?[1-9]|1[0-2])\s*月份?(?!个)|({_CN_MONTH_ALT}))"
+    rf"(?:(\d{{4}})\s*年\s*)?(?:(0?[1-9]|1[0-2])\s*月份?(?!个)|({_CN_MONTH_ALT})份?)"
 )
 _MENTION = re.compile(
     rf"{_DATE}\s*(?:至|到|~|～)\s*{_DATE}|{_DATE}|{_RELATIVE}|"
@@ -120,3 +120,19 @@ def time_mentions(question, today):
 
 def has_time_cue(question):
     return bool(re.search(r"截至|截止|同期|期间|昨天|前天|\d\s*[年月日号天]|[上本下近前去今昨].{0,3}[月季年天]|[一二三四五六七八九十]+月", question))
+
+
+# These phrases refer to a selection, not a calendar window. They never invent
+# dates, and an explicit date elsewhere in the question is still checked.
+SELECTION_TIME_REFERENCE = re.compile(
+    r"(?:(?:在|按|用)(?:我)?)?(?:我)?(?:已|所)?选(?:定|好|择)?的?"
+    r"(?:统计)?(?:日期范围|时间范围|统计期间|日期|月份|期间|时间)(?:里|内)?"
+)
+
+
+def is_selection_time_reference(expression):
+    return bool(expression and SELECTION_TIME_REFERENCE.fullmatch(expression.strip()))
+
+
+def without_selection_time_references(question):
+    return SELECTION_TIME_REFERENCE.sub("", question)

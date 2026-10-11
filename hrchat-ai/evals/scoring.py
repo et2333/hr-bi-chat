@@ -17,6 +17,11 @@ def score(expected, actual):
     payload = actual.get("answer") or {}
     if expected.get("no_execution") and (actual.get("evidence") or {}).get("execution"):
         errors.append("unexpected_execution")
+    if expected.get("require_no_query_trace"):
+        evidence = actual.get("evidence") or {}
+        trace = evidence.get("trace") or []
+        if not trace or evidence.get("execution") or any(t.get("stage") == "tool" for t in trace):
+            errors.append("unexpected_query_or_missing_trace")
     conclusion = payload.get("conclusion") or {}
     if expected.get("no_data") and (
         (payload.get("table") or {}).get("rows")
