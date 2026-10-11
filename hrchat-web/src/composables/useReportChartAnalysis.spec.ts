@@ -7,7 +7,11 @@ vi.mock('@/api/reports', () => ({ getChartAnalysis: vi.fn() }))
 
 function snapshot(version: string, dimValue: string | null = null): { data: ChartAnalysisView } {
   return { data: {
-    dataVersion: version, dimValue,
+    dataVersion: version,
+    viewKey: dimValue ? `dim=org|value=${encodeURIComponent(dimValue)}` : 'root',
+    dimValue,
+    chartStatus: 'READY',
+    insightStatus: 'READY',
     chart: { chartType: 'BAR', categories: [version], series: [{ name: '人数', data: [2] }], pieData: [] },
     insight: { reportName: '报表', metricName: '人数', summary: version, points: [] },
   } }

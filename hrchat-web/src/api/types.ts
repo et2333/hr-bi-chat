@@ -199,11 +199,18 @@ export interface ReportDetail {
   id: number
   name: string
   sourceType: string
+  templateId?: number | null
+  sourceAskId?: string | null
+  currentDataVersionId?: number | null
+  definitionRevision?: number
+  contextCompleteness?: string
   params: Record<string, unknown>
+  metricVersions?: string | null
   components: ComponentView[]
   refresh: string
   createdAt: string
   subscriptions: SubscriptionView[]
+  latestSnapshot?: SnapshotView | null
 }
 
 export interface SnapshotView {

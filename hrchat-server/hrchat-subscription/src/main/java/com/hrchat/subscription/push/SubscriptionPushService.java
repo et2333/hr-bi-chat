@@ -206,17 +206,26 @@ public class SubscriptionPushService {
         receiverMapper.updateById(update);
     }
 
-    /** 推进下次执行时间（日/周/月，简单前推）。 */
+    /**
+     * 推进下次执行时间（日/周/月）。
+     * 若 next_run_at 已落后很久，需追上直到严格晚于当前时刻，避免每分钟扫描都再次到期刷快照。
+     */
     LocalDateTime advance(RptSubscription sub) {
         LocalDateTime next = sub.getNextRunAt();
         if (next == null) {
             next = LocalDateTime.now();
         }
-        return switch (sub.getFreq() == null ? 1 : sub.getFreq()) {
-            case 2 -> next.plusWeeks(1);
-            case 3 -> next.plusMonths(1);
-            default -> next.plusDays(1);
-        };
+        LocalDateTime now = LocalDateTime.now();
+        int guard = 0;
+        do {
+            next = switch (sub.getFreq() == null ? 1 : sub.getFreq()) {
+                case 2 -> next.plusWeeks(1);
+                case 3 -> next.plusMonths(1);
+                default -> next.plusDays(1);
+            };
+            guard++;
+        } while (!next.isAfter(now) && guard < 3660);
+        return next;
     }
 
     // =================================================================

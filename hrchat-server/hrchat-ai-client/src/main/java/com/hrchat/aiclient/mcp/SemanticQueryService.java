@@ -172,6 +172,8 @@ public class SemanticQueryService {
         QueryResult raw = queryExecService.executeReadonly(authorized);
         Map<String, Object> result = toMaskedResult(user, details, raw, limit, queryMode);
         result.put("query_mode", queryMode);
+        // 供「查看 SQL」回放：仅进入证据链，不向模型/计划方回传（arguments 仍禁止客户端自带 sql）
+        result.put("sql", authorized.sql());
         if (planEvidence != null) {
             result.put("query_plan", planEvidence.get("validated_plan"));
             result.put("metric_version", primary.effectiveVersion());

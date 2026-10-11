@@ -28,6 +28,9 @@ public class RptReport {
 
     private Long templateId;
 
+    /** ASK 来源 askId（与 templateId 分离，I0） */
+    private String sourceAskId;
+
     /** 参数快照 {org,period,filters} */
     private String paramsJson;
 
@@ -36,6 +39,21 @@ public class RptReport {
 
     /** 指标口径版本快照 */
     private String metricVersions;
+
+    /** 定义修订号（改指标/期间/筛选时递增） */
+    private Integer definitionRevision;
+
+    /** 当前成功数据版本 id */
+    private Long currentDataVersionId;
+
+    /** ReportContext JSON */
+    private String contextJson;
+
+    /** complete / partial */
+    private String contextCompleteness;
+
+    /** 创建时是否复用源答案快照：1是 0否 */
+    private Integer snapshotReuse;
 
     /** 所属租户（NULL=旧数据单租户兼容） */
     private String tenantId;

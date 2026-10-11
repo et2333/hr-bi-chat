@@ -404,8 +404,34 @@ public class ChatService {
             caliber.put("time_range", c.timeRange());
             caliber.put("data_updated_at", c.dataUpdatedAt());
         }
-        auditSqlView(ctx, askId, record.sql());
-        return new SqlView(askId, record.sql(), caliber);
+        // 优先任务记录 SQL；remote 路径通常为空，再从执行证据取授权后 SQL；最后回退口径定义
+        String sql = record.sql();
+        if (sql == null || sql.isBlank()) {
+            sql = sqlFromEvidence(askId);
+        }
+        if (sql == null || sql.isBlank()) {
+            sql = caliber.get("definition");
+        }
+        auditSqlView(ctx, askId, sql);
+        return new SqlView(askId, sql, caliber);
+    }
+
+    @SuppressWarnings("unchecked")
+    private String sqlFromEvidence(String askId) {
+        Map<String, Object> root = askStore.evidence(askId);
+        if (root == null || root.isEmpty()) {
+            return null;
+        }
+        Object execution = root.get("execution");
+        if (!(execution instanceof Map<?, ?> execMap)) {
+            return null;
+        }
+        Object sql = execMap.get("sql");
+        if (sql == null) {
+            return null;
+        }
+        String text = String.valueOf(sql).trim();
+        return text.isEmpty() ? null : text;
     }
 
     /** Diagnostic evidence is owner- and permission-bound, not a public answer card. */

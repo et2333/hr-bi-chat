@@ -27,7 +27,8 @@ export type ChartType = 'BAR' | 'LINE' | 'PIE' | 'NUMBER_CARD'
 
 export interface ChartSeriesData {
   name: string
-  data: number[]
+  /** null 表示缺失，不得显示为 0 */
+  data: Array<number | null>
 }
 
 export interface ChartPieDatum {
@@ -90,10 +91,13 @@ const effectivePieData = computed<ChartPieDatum[]>(() => {
   if (props.pieData.length > 0) return props.pieData
   const s = props.series[0]
   if (!s || props.categories.length === 0) return []
-  return props.categories.map((name, i) => ({
-    name,
-    value: Number(s.data[i] ?? 0),
-  }))
+  return props.categories
+    .map((name, i) => {
+      const raw = s.data[i]
+      if (raw == null) return null
+      return { name, value: Number(raw) }
+    })
+    .filter((item): item is ChartPieDatum => item != null)
 })
 
 /** BAR/LINE/PIE 是否有可渲染数据 */

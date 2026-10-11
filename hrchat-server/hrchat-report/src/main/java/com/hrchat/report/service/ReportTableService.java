@@ -61,12 +61,12 @@ public class ReportTableService {
         RptComponent comp = requireTableComponent(reportId, compId);
         TableDef def = parseDef(comp);
 
-        // 各指标分组聚合执行，按 dim_value 合并（time 维走按月趋势 SQL）
+        // 各指标分组聚合执行，按 dim_value 合并（time 维走期间趋势 SQL）
         Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
         for (MetricDetail metric : def.metrics()) {
             ReportChartService.Aggregation agg = chartService.parseAggregation(metric);
             String sql = "time".equals(def.dim())
-                    ? chartService.buildTimeSeriesSql(metric, agg, def.months())
+                    ? chartService.buildTimeSeriesSql(metric, agg, def.periodDef())
                     : (agg.ratio()
                             ? chartService.buildRatioSql(metric, def.dim(), agg)
                             : chartService.buildDirectSql(metric, def.dim(), agg));
@@ -113,7 +113,7 @@ public class ReportTableService {
         MetricDetail first = def.metrics().get(0);
         ReportChartService.Aggregation agg = chartService.parseAggregation(first);
         String sql = "time".equals(def.dim())
-                ? chartService.buildTimeSeriesSql(first, agg, def.months())
+                ? chartService.buildTimeSeriesSql(first, agg, def.periodDef())
                 : (agg.ratio()
                         ? chartService.buildRatioSql(first, def.dim(), agg)
                         : chartService.buildDirectSql(first, def.dim(), agg));
@@ -164,10 +164,15 @@ public class ReportTableService {
             throw new BizException(ErrorCode.PARSE_FAILED, "组件缺少 metric");
         }
         String dimKey = chartService.resolveDimKey(def);
-        int months = 3;
-        Object monthsRaw = def.get("months");
-        if (monthsRaw instanceof Number n) {
-            months = Math.max(1, Math.min(24, n.intValue()));
+        Map<String, Object> periodDef = new LinkedHashMap<>();
+        if (def.get("periodStart") != null) {
+            periodDef.put("periodStart", def.get("periodStart"));
+        }
+        if (def.get("periodEnd") != null) {
+            periodDef.put("periodEnd", def.get("periodEnd"));
+        }
+        if (def.get("months") != null) {
+            periodDef.put("months", def.get("months"));
         }
         List<MetricDetail> metrics = new ArrayList<>();
         for (String code : codes) {
@@ -177,7 +182,7 @@ public class ReportTableService {
             }
             metrics.add(metric);
         }
-        return new TableDef(dimKey, metrics, months);
+        return new TableDef(dimKey, metrics, periodDef);
     }
 
     /** 排序白名单：dimValue 或任一指标编码；否则拒绝。 */
@@ -256,6 +261,6 @@ public class ReportTableService {
         return metric.name() == null || metric.name().isBlank() ? metric.code() : metric.name();
     }
 
-    private record TableDef(String dim, List<MetricDetail> metrics, int months) {
+    private record TableDef(String dim, List<MetricDetail> metrics, Map<String, Object> periodDef) {
     }
 }

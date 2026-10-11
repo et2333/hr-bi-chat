@@ -20,14 +20,18 @@ import com.hrchat.report.chart.ChartViews.InsightPoint;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.entity.RptComponent;
+import com.hrchat.report.entity.RptDataVersion;
 import com.hrchat.report.entity.RptReport;
+import com.hrchat.report.entity.RptViewSnapshot;
 import com.hrchat.report.mapper.RptComponentMapper;
 import com.hrchat.report.mapper.RptReportMapper;
 import com.hrchat.semantic.dto.DimensionDetail;
 import com.hrchat.semantic.dto.MetricDetail;
 import com.hrchat.semantic.service.SemanticMetaService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -85,9 +89,17 @@ public class ReportChartService {
     private final AgentRuntimeClient agentRuntime;
     private final ObjectMapper objectMapper;
 
+    /** 与版本服务互引，懒加载打破循环。 */
+    private ReportDataVersionService dataVersionService;
+
     /** 与问数链路对齐的演示「今天」，用于近 N 月趋势窗口。 */
     @Value("${hrchat.demo.now:2026-09-28}")
     private LocalDate demoNow = LocalDate.of(2026, 9, 28);
+
+    @Autowired
+    public void setDataVersionService(@Lazy ReportDataVersionService dataVersionService) {
+        this.dataVersionService = dataVersionService;
+    }
 
     /**
      * 指标口径：比率（true 时用 numCode/denCode）或直接聚合（metricExpr/table/where）。
@@ -198,7 +210,7 @@ public class ReportChartService {
         Aggregation agg = parseAggregation(metric);
         // 时间维：按月趋势 SQL（与问数 LINE 对齐）；组织下钻不适用
         if ("time".equals(dimKey)) {
-            String sql = buildTimeSeriesSql(metric, agg, resolveMonths(def));
+            String sql = buildTimeSeriesSql(metric, agg, def);
             QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
             return toView(chartType, metric, result);
         }
@@ -303,16 +315,43 @@ public class ReportChartService {
     // AI 洞察
     // =================================================================
 
-    /** 图表和洞察必须使用同一次取数，避免两次查询之间数据变化。 */
+    /**
+     * 只读：返回当前成功数据版本下的图表快照；不重新查询业务库、不生成洞察。
+     * 无版本时 chartStatus=NEED_GENERATE；同版不可派生时 VIEW_NOT_DERIVABLE。
+     */
     public ChartAnalysisView chartAnalysis(Long reportId, Long compId, String dimValue, UserContext ctx) {
         authzService.checkFunc(ctx, PERM_READ);
-        reportService.requireViewAccess(ctx, reportId);
-        RptComponent comp = requireChartComponent(reportId, compId);
+        RptReport report = reportService.requireAccessibleReport(ctx, reportId);
+        requireChartComponent(reportId, compId);
         String drill = dimValue == null || dimValue.isBlank() ? null : dimValue.trim();
-        ChartDataView chart = loadChart(comp, drill, ctx);
-        String version = java.util.UUID.randomUUID().toString();
-        InsightView insight = "PIE".equals(chart.chartType()) ? null : insightFromChart(reportId, chart);
-        return new ChartAnalysisView(version, drill, chart, insight);
+        String viewKey = ViewKeySupport.normalize(drill);
+        if (dataVersionService == null) {
+            throw new BizException(ErrorCode.SYSTEM_BUSY, "数据版本服务不可用");
+        }
+        RptDataVersion version = dataVersionService.requireReadyVersion(report);
+        if (version == null) {
+            return new ChartAnalysisView(null, viewKey, drill, "NEED_GENERATE", "PENDING", null, null);
+        }
+        // 读取快照前再次核验权限（撤权后拒绝复用）
+        reportService.requireViewAccess(ctx, reportId);
+        if (version.getScopeRef() != null && ctx.getPermissionFingerprint() != null
+                && !version.getScopeRef().equals(ctx.getPermissionFingerprint())) {
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        }
+        RptViewSnapshot snap = dataVersionService.findSnapshot(version.getId(), compId, viewKey);
+        if (snap == null || snap.getChartJson() == null) {
+            return new ChartAnalysisView(String.valueOf(version.getId()), viewKey, drill,
+                    ViewKeySupport.STATUS_NOT_DERIVABLE, "PENDING", null, null);
+        }
+        ChartDataView chart = parseChart(snap.getChartJson());
+        String insightStatus = "PIE".equalsIgnoreCase(chart.chartType()) ? "NONE" : "PENDING";
+        return new ChartAnalysisView(String.valueOf(version.getId()), viewKey, drill,
+                "READY", insightStatus, chart, null);
+    }
+
+    /** 版本生成时授权取数并物化视图（非 GET 只读路径）。 */
+    public ChartDataView materializeChart(RptComponent comp, String dimValue, UserContext ctx) {
+        return loadChart(comp, dimValue, ctx);
     }
 
     /** AI 洞察解读；Agent 降级时返回兜底视图。 */
@@ -570,7 +609,30 @@ public class ReportChartService {
         return null;
     }
 
-    private static int resolveMonths(Map<String, Object> def) {
+    /**
+     * 解析趋势窗口：优先固定期间；其次显式 rolling months。
+     * 旧种子/历史组件可能只有 time 维而无期间字段：兼容回退近 3 月，避免打开旧报表整页失败。
+     * 新 ASK 存报表仍由 {@link ReportComponentDefMerger} 写入明确期间，不再依赖此回退。
+     */
+    LocalDate[] resolveTrendWindow(Map<String, Object> def) {
+        String periodStart = asString(def.get("periodStart"));
+        String periodEnd = asString(def.get("periodEnd"));
+        if (periodStart != null && periodEnd != null) {
+            try {
+                return new LocalDate[]{LocalDate.parse(periodStart), LocalDate.parse(periodEnd)};
+            } catch (Exception ignored) {
+                // fall through
+            }
+        }
+        Integer months = resolveMonthsOrNull(def);
+        if (months == null) {
+            months = 3;
+        }
+        LocalDate endExclusive = demoNow.plusDays(1);
+        return new LocalDate[]{demoNow.minusMonths(months), endExclusive};
+    }
+
+    private static Integer resolveMonthsOrNull(Map<String, Object> def) {
         Object raw = def.get("months");
         if (raw instanceof Number n) {
             int m = n.intValue();
@@ -581,19 +643,19 @@ public class ReportChartService {
                 int m = Integer.parseInt(String.valueOf(raw).trim());
                 return Math.max(1, Math.min(24, m));
             } catch (NumberFormatException ignored) {
-                // fall through
+                return null;
             }
         }
-        return 3;
+        return null;
     }
 
     /**
-     * 近 N 月按 period(yyyy-MM) 聚合，输出 dim_value / metric_value（与组织维视图同形）。
-     * 事实表按 dt 月份；在职快照按入职/离职日还原月末时点。
+     * 按组件定义的期间生成趋势 SQL。事实表按 dt 月份；在职快照按入职/离职日还原月末时点。
      */
-    public String buildTimeSeriesSql(MetricDetail metric, Aggregation agg, int months) {
-        LocalDate endExclusive = demoNow.plusDays(1);
-        LocalDate start = demoNow.minusMonths(months);
+    public String buildTimeSeriesSql(MetricDetail metric, Aggregation agg, Map<String, Object> def) {
+        LocalDate[] window = resolveTrendWindow(def);
+        LocalDate start = window[0];
+        LocalDate endExclusive = window[1];
         if (agg.ratio()) {
             return buildTimeRatioSql(agg, start, endExclusive);
         }
@@ -605,6 +667,13 @@ public class ReportChartService {
         }
         throw new BizException(ErrorCode.PARSE_FAILED,
                 "指标 " + metric.code() + " 暂不支持时间趋势维度");
+    }
+
+    /** 兼容旧调用：显式 months。 */
+    public String buildTimeSeriesSql(MetricDetail metric, Aggregation agg, int months) {
+        Map<String, Object> def = new LinkedHashMap<>();
+        def.put("months", months);
+        return buildTimeSeriesSql(metric, agg, def);
     }
 
     private String buildFactMonthlySql(Aggregation agg, LocalDate start, LocalDate endExclusive) {
@@ -705,7 +774,13 @@ public class ReportChartService {
             Object dimValue = row.get("dim_value");
             Object metricValue = row.get("metric_value");
             categories.add(String.valueOf(dimValue));
-            data.add(metricValue instanceof Number n ? scalePercent(metric, n) : 0);
+            if (metricValue == null) {
+                data.add(null);
+            } else if (metricValue instanceof Number n) {
+                data.add(scalePercent(metric, n));
+            } else {
+                data.add(null);
+            }
         }
         String name = metric.name() == null || metric.name().isBlank() ? metric.code() : metric.name();
         return new ChartDataView(chartType, categories,
@@ -759,5 +834,13 @@ public class ReportChartService {
 
     private String escape(String value) {
         return value.replace("'", "''");
+    }
+
+    private ChartDataView parseChart(String json) {
+        try {
+            return objectMapper.readValue(json, ChartDataView.class);
+        } catch (Exception e) {
+            throw new BizException(ErrorCode.PARSE_FAILED, "视图快照解析失败");
+        }
     }
 }
