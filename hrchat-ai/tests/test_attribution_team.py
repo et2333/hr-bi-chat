@@ -22,6 +22,17 @@ def request(mode="dual"):
         "invocation_id": "inv-1", "tool_context_token": "task-token", "mode": mode})
 
 
+def report_request(mode="dual"):
+    """REPORT 来源：无 askId，凭持久化的报表数据版本恢复可信上下文。"""
+    return AnalysisRequest.model_validate({"analysis_context": {
+        "task_id": "task-r1", "source_type": "REPORT", "source_report_id": 7, "source_data_version_id": 42,
+        "tenant_no": "t1", "metric_code": "leave_count", "metric_version": "v1", "unit": "人",
+        "data_version": "snap-1", "effective_org_ids": [3, 4], "scope_ref": "report:7:42",
+        "current_period": {"start": "2026-09-01", "end": "2026-10-01"},
+        "baseline_period": {"start": "2026-08-01", "end": "2026-09-01"}},
+        "invocation_id": "inv-r1", "tool_context_token": "task-token", "mode": mode})
+
+
 def evidence():
     context = request().analysis_context.model_dump(mode="json")
     return {**{k: context[k] for k in ("metric_code", "metric_version", "unit", "data_version",
@@ -76,7 +87,7 @@ class ScriptedAdapter(ModelAdapter):
                            usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}, usage_source="actual")
 
 
-async def run(outputs=None, *, mode="dual", raw=None, budget=None):
+async def run(outputs=None, *, mode="dual", raw=None, budget=None, req=None):
     adapter = ScriptedAdapter(outputs or [])
     tools = ToolFixture(raw)
     events = []
@@ -84,7 +95,7 @@ async def run(outputs=None, *, mode="dual", raw=None, budget=None):
     async def emit(event):
         events.append(event)
 
-    result = await AttributionTeam(adapter, tools, request(mode), budget=budget).run(emit)
+    result = await AttributionTeam(adapter, tools, req or request(mode), budget=budget).run(emit)
     return result, events, adapter, tools
 
 
@@ -95,6 +106,17 @@ async def test_deterministic_zero_net_keeps_offsetting_contributions():
     assert result["summary"]["delta"] == 0
     assert [r["delta"] for r in result["contributions"]] == [2, -2]
     assert "confidence" not in result and not model.calls
+    assert events[1]["event"] == "TOOL_CALL_START"
+
+
+@pytest.mark.asyncio
+async def test_report_source_runs_without_ask_id():
+    """REPORT 来源无 askId：证据记录与结果返回的 source_ask_id 应为 None 且不报错。"""
+    result, events, model, tools = await run(mode="deterministic", req=report_request("deterministic"))
+    assert result["status"] == "COMPLETED", result
+    assert result["source_ask_id"] is None
+    assert result["summary"]["delta"] == 0
+    assert len(tools.calls) == 1 and not model.calls
     assert events[1]["event"] == "TOOL_CALL_START"
 
 

@@ -29,8 +29,11 @@ class Period(Contract):
 class AnalysisContext(Contract):
     schema_version: Literal["1"] = "1"
     task_id: str = Field(min_length=1, max_length=100)
-    source_ask_id: str = Field(min_length=1, max_length=100)
-    source_turn_id: str = Field(min_length=1, max_length=100)
+    source_type: Literal["ASK", "REPORT"] = "ASK"
+    source_ask_id: str | None = Field(default=None, max_length=100)
+    source_turn_id: str | None = Field(default=None, max_length=100)
+    source_report_id: int | None = Field(default=None, ge=1)
+    source_data_version_id: int | None = Field(default=None, ge=1)
     tenant_no: str = Field(min_length=1, max_length=100)
     metric_code: Literal["leave_count"]
     metric_version: str = Field(min_length=1)
@@ -40,6 +43,21 @@ class AnalysisContext(Contract):
     effective_org_ids: list[StrictInt] = Field(min_length=1, max_length=500)
     data_version: str = Field(min_length=1)
     scope_ref: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def source_consistent(self):
+        """来源二选一：ASK 必须带问答轮次且不携带报表字段；REPORT 不得伪造 askId。"""
+        if self.source_type == "ASK":
+            if not self.source_ask_id or not self.source_turn_id:
+                raise ValueError("ASK 来源必须带 source_ask_id/source_turn_id")
+            if self.source_report_id is not None or self.source_data_version_id is not None:
+                raise ValueError("ASK 来源不得携带报表字段")
+        else:
+            if self.source_ask_id is not None or self.source_turn_id is not None:
+                raise ValueError("REPORT 来源不得伪造 askId")
+            if self.source_report_id is None or self.source_data_version_id is None:
+                raise ValueError("REPORT 来源必须带 source_report_id/source_data_version_id")
+        return self
 
     @model_validator(mode="after")
     def distinct_orgs(self):
