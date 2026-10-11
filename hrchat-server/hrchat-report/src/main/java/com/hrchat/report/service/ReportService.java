@@ -232,6 +232,15 @@ public class ReportService {
         return report;
     }
 
+    /**
+     * 内部加载报表（不做访问校验）：仅供已授权的后台任务执行器重建上下文，
+     * 不暴露给请求路径；缺失或已删除返回 null。
+     */
+    public RptReport loadReport(Long reportId) {
+        RptReport report = reportMapper.selectById(reportId);
+        return report == null || Integer.valueOf(1).equals(report.getIsDeleted()) ? null : report;
+    }
+
     public void updateCurrentDataVersion(Long reportId, Long dataVersionId) {
         RptReport report = requireReport(reportId);
         report.setCurrentDataVersionId(dataVersionId);

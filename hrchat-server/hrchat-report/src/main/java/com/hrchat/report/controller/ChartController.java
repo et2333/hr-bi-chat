@@ -5,9 +5,11 @@ import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.api.ApiResponse;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
 import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
+import com.hrchat.report.chart.ChartViews.InsightTaskView;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
 import com.hrchat.report.chart.ChartViews.TableView;
+import com.hrchat.report.service.InsightTaskService;
 import com.hrchat.report.service.ReportChartService;
 import com.hrchat.report.service.ReportDataVersionService;
 import com.hrchat.report.service.ReportTableService;
@@ -36,6 +38,7 @@ public class ChartController {
     private final ReportChartService chartService;
     private final ReportTableService tableService;
     private final ReportDataVersionService dataVersionService;
+    private final InsightTaskService insightTaskService;
 
     public static final String IDEMPOTENCY_HEADER = "X-Idempotency-Key";
 
@@ -102,6 +105,24 @@ public class ChartController {
                                                @PathVariable Long compId,
                                                @CurrentUser UserContext ctx) {
         return ApiResponse.ok(tableService.dimValues(reportId, compId, ctx));
+    }
+
+    @Operation(summary = "确保当前视图的洞察任务（幂等；图表就绪但尚无洞察时入队生成）")
+    @PostMapping("/{reportId}/components/{compId}/insight-tasks")
+    public ApiResponse<InsightTaskView> ensureInsightTask(@PathVariable Long reportId,
+                                                          @PathVariable Long compId,
+                                                          @RequestParam(required = false) String dimValue,
+                                                          @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(insightTaskService.ensureForView(ctx, reportId, compId, dimValue));
+    }
+
+    @Operation(summary = "重试失败的洞察任务（沿用同一数据版本与快照，attempt 递增）")
+    @PostMapping("/{reportId}/components/{compId}/insight-tasks/{taskId}/retry")
+    public ApiResponse<InsightTaskView> retryInsightTask(@PathVariable Long reportId,
+                                                         @PathVariable Long compId,
+                                                         @PathVariable Long taskId,
+                                                         @CurrentUser UserContext ctx) {
+        return ApiResponse.ok(insightTaskService.retry(ctx, reportId, compId, taskId));
     }
 
     @Operation(summary = "图表 AI 洞察解读")

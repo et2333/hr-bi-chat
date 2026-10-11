@@ -1,0 +1,27 @@
+-- I2: 报表洞察任务与结果持久化（幂等生成键 + attempt 状态机）
+CREATE TABLE IF NOT EXISTS rpt_insight_task (
+  id                   BIGINT UNSIGNED AUTO_INCREMENT,
+  generation_key       VARCHAR(128) NOT NULL,
+  tenant_id            VARCHAR(16) DEFAULT NULL,
+  report_id            BIGINT UNSIGNED NOT NULL,
+  component_id         BIGINT UNSIGNED NOT NULL,
+  data_version_id      BIGINT UNSIGNED NOT NULL,
+  view_key             VARCHAR(128) NOT NULL,
+  scope_ref            VARCHAR(128) DEFAULT NULL,
+  metric_version       VARCHAR(64) DEFAULT NULL,
+  insight_revision     VARCHAR(64) NOT NULL,
+  status               VARCHAR(16) NOT NULL COMMENT 'PENDING/RUNNING/COMPLETE/DEGRADED/FAILED/CANCELLED/INTERRUPTED',
+  attempt              INT NOT NULL DEFAULT 0,
+  degradation_reason   VARCHAR(64) DEFAULT NULL,
+  failure_reason       VARCHAR(255) DEFAULT NULL,
+  result_json          JSON DEFAULT NULL,
+  generation_json      JSON DEFAULT NULL,
+  insight_generated_at DATETIME(3) DEFAULT NULL,
+  created_at           DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+  created_by           VARCHAR(64) DEFAULT NULL,
+  updated_at           DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+  updated_by           VARCHAR(64) DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rpt_insight_gen (generation_key),
+  KEY idx_rpt_insight_lookup (report_id, component_id, view_key)
+) ENGINE=InnoDB COMMENT='报表洞察任务与结果';
