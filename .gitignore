@@ -58,15 +58,8 @@ htmlcov/
 /docs/runtime-parity.md
 /docs/evaluation-runs/
 
-# Local implementation notes for the 1005 interview-preparation work
-/docs/development-plans/1005*.md
-
-# Local process notes (not for remote)
-/docs/development-plans/local/
-/docs/development-plans/R2*.md
-/docs/development-plans/R3*.md
-/docs/development-plans/R4*.md
-/docs/development-plans/R5*.md
+# Local implementation notes
+docs/development-plans/
 /hrchat-ai/evals/S2-*.md
 /hrchat-ai/evals/S3-*.md
 /hrchat-ai/evals/S4-*.md
