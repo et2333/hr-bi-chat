@@ -138,6 +138,10 @@ public class ReportChartService {
         authzService.checkFunc(ctx, PERM_READ);
         reportService.requireViewAccess(ctx, reportId);
         RptComponent comp = requireChartComponent(reportId, compId);
+        if (dataVersionService != null) {
+            return dataVersionService.readSnapshot(ctx, reportId, compId,
+                    ViewKeySupport.normalize(dimValue), ChartDataView.class);
+        }
         return loadChart(comp, dimValue, ctx);
     }
 
@@ -148,6 +152,13 @@ public class ReportChartService {
         authzService.checkFunc(ctx, PERM_READ);
         reportService.requireViewAccess(ctx, reportId);
         RptComponent comp = requireMetricCardComponent(reportId, compId);
+        if (dataVersionService != null) {
+            return dataVersionService.readSnapshot(ctx, reportId, compId, ViewKeySupport.ROOT, MetricCardView.class);
+        }
+        return materializeMetricCard(comp, ctx);
+    }
+
+    public MetricCardView materializeMetricCard(RptComponent comp, UserContext ctx) {
         Map<String, Object> def = parseMap(comp.getDefJson());
         String metricCode = resolveMetricCode(def);
         MetricDetail metric = semanticMetaService.getMetricByCode(metricCode);
@@ -155,7 +166,9 @@ public class ReportChartService {
             throw new BizException(ErrorCode.PARSE_FAILED, "指标不存在 " + metricCode);
         }
         Aggregation agg = parseAggregation(metric);
-        String sql = agg.ratio() ? buildScalarRatioSql(agg) : buildScalarSql(agg);
+        ctx = ReportDataScope.narrow(ctx, def);
+        requireMetricVersion(metric, def);
+        String sql = scopedScalarSql(metric, agg, def);
         QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
         Number value = scalePercent(metric, firstMetricValue(result));
         String title = asString(def.get("title"));
@@ -183,7 +196,8 @@ public class ReportChartService {
         if (comp == null) {
             throw new BizException(ErrorCode.PARAM_INVALID, "报表缺少图表组件");
         }
-        return loadChart(comp, null, ctx);
+        if (dataVersionService != null) dataVersionService.requireExportScope(ctx, reportId);
+        return chartData(reportId, comp.getId(), null, ctx);
     }
 
     private ChartDataView loadChart(RptComponent comp, String dimValue, UserContext ctx) {
@@ -206,6 +220,8 @@ public class ReportChartService {
         if (metric == null) {
             throw new BizException(ErrorCode.PARSE_FAILED, "指标不存在 " + metricCode);
         }
+        ctx = ReportDataScope.narrow(ctx, def);
+        requireMetricVersion(metric, def);
         String dimKey = resolveDimKey(def);
         Aggregation agg = parseAggregation(metric);
         // 时间维：按月趋势 SQL（与问数 LINE 对齐）；组织下钻不适用
@@ -215,9 +231,7 @@ public class ReportChartService {
             return toView(chartType, metric, result);
         }
         String drill = dimValue == null || dimValue.isBlank() ? null : dimValue.trim();
-        String sql = agg.ratio()
-                ? buildRatioSql(metric, dimKey, agg, drill)
-                : buildDirectSql(metric, dimKey, agg, drill);
+        String sql = buildScopedSql(metric, dimKey, def, drill);
         QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
         return toView(chartType, metric, result);
     }
@@ -334,10 +348,7 @@ public class ReportChartService {
         }
         // 读取快照前再次核验权限（撤权后拒绝复用）
         reportService.requireViewAccess(ctx, reportId);
-        if (version.getScopeRef() != null && ctx.getPermissionFingerprint() != null
-                && !version.getScopeRef().equals(ctx.getPermissionFingerprint())) {
-            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
-        }
+        dataVersionService.requireScope(ctx, report, version);
         RptViewSnapshot snap = dataVersionService.findSnapshot(version.getId(), compId, viewKey);
         if (snap == null || snap.getChartJson() == null) {
             return new ChartAnalysisView(String.valueOf(version.getId()), viewKey, drill,
@@ -360,12 +371,23 @@ public class ReportChartService {
         reportService.requireViewAccess(ctx, reportId);
         RptComponent comp = requireChartComponent(reportId, compId);
 
-        ChartDataView chart = loadChart(comp, null, ctx);
-        return insightFromChart(reportId, compId, chart);
+        RptReport report = reportService.requireAccessibleReport(ctx, reportId);
+        ChartDataView chart;
+        if (dataVersionService == null) {
+            chart = loadChart(comp, null, ctx);
+            report = reportMapper.selectById(reportId);
+        } else {
+            RptDataVersion version = dataVersionService.requireReadyVersion(report);
+            if (version == null) throw new BizException(ErrorCode.PARAM_INVALID, "报表数据尚未生成");
+            dataVersionService.requireScope(ctx, report, version);
+            RptViewSnapshot snapshot = dataVersionService.findSnapshot(version.getId(), compId, ViewKeySupport.ROOT);
+            if (snapshot == null) throw new BizException(ErrorCode.PARAM_INVALID, "当前版本缺少图表快照");
+            chart = parseChart(snapshot.getChartJson());
+        }
+        return insightFromChart(report, reportId, compId, chart);
     }
 
-    private InsightView insightFromChart(Long reportId, Long compId, ChartDataView chart) {
-        RptReport report = reportMapper.selectById(reportId);
+    private InsightView insightFromChart(RptReport report, Long reportId, Long compId, ChartDataView chart) {
         String reportName = report == null || report.getReportName() == null
                 ? "报表" + reportId : report.getReportName();
         String metricName = asString(chart.series().isEmpty() ? null : chart.series().get(0).name());
@@ -448,7 +470,8 @@ public class ReportChartService {
         }
 
         InsightRequest.Period current = resolvePeriod(stored, chart.categories(), true);
-        InsightRequest.Period baseline = resolvePeriod(stored, chart.categories(), false);
+        InsightRequest.Period baseline = isTimeAxis(stored)
+                ? resolvePeriod(stored, chart.categories(), false) : null;
         if (current == null) {
             return new InsightRequest(reportName, metricName, summary);
         }
@@ -496,7 +519,9 @@ public class ReportChartService {
                 viewKey,
                 scopeRef,
                 null,
-                null);
+                null,
+                isTimeAxis(stored) ? "time" : "category",
+                "%".equals(unit) ? "percent" : null);
         InsightRequest.InsightSnapshot snapshot = new InsightRequest.InsightSnapshot(
                 snapshotId,
                 dataVersion,
@@ -541,6 +566,11 @@ public class ReportChartService {
             }
         }
         return out;
+    }
+
+    private boolean isTimeAxis(Map<String, Object> stored) {
+        return stored.get("dimensions") instanceof List<?> dims && dims.contains("time")
+                || "trend".equals(stored.get("queryMode"));
     }
 
     private String resolveMetricKind(String metricCode, Map<String, Object> stored) {
@@ -888,15 +918,65 @@ public class ReportChartService {
         return buildTimeSeriesSql(metric, agg, def);
     }
 
+    void requireMetricVersion(MetricDetail metric, Map<String, Object> def) {
+        Object expected = def.get("metricVersion");
+        if (expected != null && !String.valueOf(expected).equals(String.valueOf(metric.effectiveVersion()))) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标口径已变化，请重新保存报表");
+        }
+    }
+
+    private Aggregation withinPeriod(MetricDetail metric, Aggregation agg, Map<String, Object> def) {
+        if (agg.ratio() || !(def.containsKey("periodStart") || def.containsKey("months"))) return agg;
+        LocalDate[] window = resolveTrendWindow(def);
+        String condition;
+        if ("headcount".equals(metric.code()) && "dim_employee".equalsIgnoreCase(agg.table())) {
+            String asOf = window[1].minusDays(1).format(SQL_DATE);
+            // Historical headcount must not retain the current active/is_current filter.
+            return Aggregation.direct(agg.metricExpr(), agg.table(), "hire_date <= DATE '" + asOf
+                    + "' AND (leave_date IS NULL OR leave_date > DATE '" + asOf + "')");
+        } else if (agg.table().startsWith("fact_")) {
+            String date = "fact_emp_change".equalsIgnoreCase(agg.table()) ? "change_date" : "dt";
+            condition = date + " >= DATE '" + window[0] + "' AND " + date + " < DATE '" + window[1] + "'";
+        } else {
+            throw new BizException(ErrorCode.PARAM_INVALID, "该指标尚不支持指定期间口径");
+        }
+        return Aggregation.direct(agg.metricExpr(), agg.table(),
+                (agg.where() == null ? "" : "(" + agg.where() + ") AND ") + condition);
+    }
+
+    String scopedScalarSql(MetricDetail metric, Aggregation agg, Map<String, Object> def) {
+        if (!agg.ratio()) return buildScalarSql(withinPeriod(metric, agg, def));
+        MetricDetail num = semanticMetaService.getMetricByCode(agg.numCode());
+        MetricDetail den = semanticMetaService.getMetricByCode(agg.denCode());
+        return "SELECT CAST((" + scopedScalarSql(num, parseAggregation(num), def)
+                + ") AS DECIMAL(18,6)) / NULLIF((" + scopedScalarSql(den, parseAggregation(den), def)
+                + "), 0) AS metric_value";
+    }
+
+    public String buildScopedSql(MetricDetail metric, String dim, Map<String, Object> def, String drill) {
+        requireMetricVersion(metric, def);
+        Aggregation agg = parseAggregation(metric);
+        if ("time".equals(dim)) return buildTimeSeriesSql(metric, agg, def);
+        if (!agg.ratio()) return buildDirectSql(metric, dim, withinPeriod(metric, agg, def), drill);
+        MetricDetail num = semanticMetaService.getMetricByCode(agg.numCode());
+        MetricDetail den = semanticMetaService.getMetricByCode(agg.denCode());
+        Map<String, Object> childDef = new LinkedHashMap<>(def);
+        childDef.remove("metricVersion");
+        String n = buildScopedSql(num, dim, childDef, drill);
+        String d = buildScopedSql(den, dim, childDef, drill);
+        return "SELECT n.dim_value, CAST(n.metric_value AS DECIMAL(18,6)) / NULLIF(d.metric_value, 0) AS metric_value"
+                + " FROM (" + n + ") n LEFT JOIN (" + d + ") d ON n.dim_value = d.dim_value";
+    }
+
     private String buildFactMonthlySql(Aggregation agg, LocalDate start, LocalDate endExclusive) {
         List<String> conditions = new ArrayList<>();
         conditions.add(SqlRewriteService.ORG_FILTER_PLACEHOLDER);
         if (agg.where() != null && !agg.where().isBlank()) {
             conditions.add("(" + agg.where() + ")");
         }
-        conditions.add("dt >= DATE '" + start.format(SQL_DATE) + "'");
-        conditions.add("dt < DATE '" + endExclusive.format(SQL_DATE) + "'");
-        String periodExpr = "FORMATDATETIME(dt, 'yyyy-MM')";
+        conditions.add(("fact_emp_change".equalsIgnoreCase(agg.table()) ? "change_date" : "dt") + " >= DATE '" + start.format(SQL_DATE) + "'");
+        conditions.add(("fact_emp_change".equalsIgnoreCase(agg.table()) ? "change_date" : "dt") + " < DATE '" + endExclusive.format(SQL_DATE) + "'");
+        String periodExpr = "FORMATDATETIME(" + ("fact_emp_change".equalsIgnoreCase(agg.table()) ? "change_date" : "dt") + ", 'yyyy-MM')";
         return "SELECT " + periodExpr + " AS dim_value, " + agg.metricExpr() + " AS metric_value"
                 + " FROM " + agg.table() + " t"
                 + " WHERE " + String.join(" AND ", conditions)
@@ -911,7 +991,7 @@ public class ReportChartService {
         while (!cursor.isAfter(last)) {
             LocalDate monthEnd = cursor.withDayOfMonth(cursor.lengthOfMonth());
             String period = monthEnd.format(PERIOD);
-            String asOf = monthEnd.format(SQL_DATE);
+            String asOf = (monthEnd.isAfter(last) ? last : monthEnd).format(SQL_DATE);
             unions.add("SELECT '" + period + "' AS dim_value, COUNT(DISTINCT emp_key) AS metric_value"
                     + " FROM dim_employee t WHERE "
                     + "hire_date <= DATE '" + asOf + "' "
@@ -926,36 +1006,19 @@ public class ReportChartService {
     }
 
     private String buildTimeRatioSql(Aggregation agg, LocalDate start, LocalDate endExclusive) {
-        MetricDetail num = semanticMetaService.getMetricByCode(agg.numCode());
-        MetricDetail den = semanticMetaService.getMetricByCode(agg.denCode());
-        if (num == null) {
-            throw new BizException(ErrorCode.PARSE_FAILED, "比率分子指标不存在 " + agg.numCode());
+        List<String> months = new ArrayList<>();
+        MetricDetail ratio = semanticMetaService.getMetricByCode(agg.numCode());
+        LocalDate cursor = start.withDayOfMonth(1);
+        while (cursor.isBefore(endExclusive)) {
+            LocalDate from = cursor.isBefore(start) ? start : cursor;
+            LocalDate to = cursor.plusMonths(1).isAfter(endExclusive) ? endExclusive : cursor.plusMonths(1);
+            Map<String, Object> period = Map.of("periodStart", from.toString(), "periodEnd", to.toString());
+            String scalar = scopedScalarSql(ratio, agg, period);
+            months.add("SELECT '" + cursor.format(PERIOD) + "' AS dim_value, (" + scalar + ") AS metric_value");
+            cursor = cursor.plusMonths(1);
         }
-        if (den == null) {
-            throw new BizException(ErrorCode.PARSE_FAILED, "比率分母指标不存在 " + agg.denCode());
-        }
-        Aggregation numAgg = parseAggregation(num);
-        Aggregation denAgg = parseAggregation(den);
-        if (numAgg.table() == null || !numAgg.table().toLowerCase().startsWith("fact_")) {
-            throw new BizException(ErrorCode.PARSE_FAILED, "比率分子不支持按月趋势");
-        }
-        String numSql = buildFactMonthlySql(numAgg, start, endExclusive);
-        String denSql;
-        if (denAgg.table() != null && denAgg.table().toLowerCase().startsWith("fact_")) {
-            denSql = buildFactMonthlySql(denAgg, start, endExclusive);
-            return "SELECT n.dim_value AS dim_value, "
-                    + "CAST(n.metric_value AS DECIMAL(18,6)) / NULLIF(d.metric_value, 0) AS metric_value "
-                    + "FROM (" + numSql + ") n "
-                    + "LEFT JOIN (" + denSql + ") d ON n.dim_value = d.dim_value "
-                    + "ORDER BY dim_value";
-        }
-        // 分母为快照标量：每月共用同一分母
-        denSql = "SELECT " + denAgg.metricExpr() + " AS metric_value FROM " + denAgg.table() + " t WHERE "
-                + SqlRewriteService.ORG_FILTER_PLACEHOLDER
-                + (denAgg.where() == null || denAgg.where().isBlank() ? "" : " AND (" + denAgg.where() + ")");
-        return "SELECT n.dim_value AS dim_value, "
-                + "CAST(n.metric_value AS DECIMAL(18,6)) / NULLIF((" + denSql + "), 0) AS metric_value "
-                + "FROM (" + numSql + ") n ORDER BY dim_value";
+        if (months.isEmpty()) throw new BizException(ErrorCode.PARAM_INVALID, "无效期间");
+        return "SELECT * FROM (" + String.join(" UNION ALL ", months) + ") u ORDER BY dim_value";
     }
 
     // =================================================================
@@ -1000,7 +1063,7 @@ public class ReportChartService {
     }
 
     /** 离职率等：库内为小数比率，展示/图表统一 ×100。 */
-    private static Number scalePercent(MetricDetail metric, Number raw) {
+    static Number scalePercent(MetricDetail metric, Number raw) {
         if (raw == null || metric == null || !PERCENT_METRICS.contains(metric.code())) {
             return raw;
         }

@@ -47,6 +47,13 @@ public class ReportTableService {
     private final QueryExecService queryExecService;
     private final ReportChartService chartService;
 
+    private ReportDataVersionService dataVersionService;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setDataVersionService(@org.springframework.context.annotation.Lazy ReportDataVersionService service) {
+        this.dataVersionService = service;
+    }
+
     /**
      * 表格数据（服务端排序/分页）。
      *
@@ -59,22 +66,9 @@ public class ReportTableService {
         authzService.checkFunc(ctx, PERM_READ);
         reportService.requireViewAccess(ctx, reportId);
         RptComponent comp = requireTableComponent(reportId, compId);
-        TableDef def = parseDef(comp);
-
-        // 各指标分组聚合执行，按 dim_value 合并（time 维走期间趋势 SQL）
-        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
-        for (MetricDetail metric : def.metrics()) {
-            ReportChartService.Aggregation agg = chartService.parseAggregation(metric);
-            String sql = "time".equals(def.dim())
-                    ? chartService.buildTimeSeriesSql(metric, agg, def.periodDef())
-                    : (agg.ratio()
-                            ? chartService.buildRatioSql(metric, def.dim(), agg)
-                            : chartService.buildDirectSql(metric, def.dim(), agg));
-            QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
-            merge(result, metric.code(), merged);
-        }
-        List<Map<String, Object>> rows = new ArrayList<>(merged.values());
-
+        TableView frozen = dataVersionService == null ? materializeTable(comp, ctx)
+                : dataVersionService.readSnapshot(ctx, reportId, compId, ViewKeySupport.ROOT, TableView.class);
+        List<Map<String, Object>> rows = new ArrayList<>(frozen.rows());
         // 维度值筛选（内存过滤）
         if (dimValues != null && !dimValues.isEmpty()) {
             Set<String> wanted = new HashSet<>(dimValues);
@@ -82,7 +76,10 @@ public class ReportTableService {
         }
 
         // 排序白名单 + 空值置底（比率指标可能为 NULL）
-        String sortKey = normalizeSort(sortField, def.metrics());
+        String sortKey = sortField == null || sortField.isBlank() ? DIM_KEY : sortField;
+        if (frozen.columns().stream().noneMatch(c -> c.key().equals(sortKey))) {
+            throw new BizException(ErrorCode.PARAM_INVALID, "sortField 不在白名单");
+        }
         boolean desc = "desc".equalsIgnoreCase(sortOrder);
         rows.sort(comparator(sortKey, desc));
 
@@ -95,37 +92,36 @@ public class ReportTableService {
                 ? List.of()
                 : rows.subList(from, Math.min(from + safeSize, rows.size()));
 
+        return new TableView(frozen.columns(), slice, total, safePage, safeSize);
+    }
+
+    public TableView materializeTable(RptComponent comp, UserContext ctx) {
+        TableDef def = parseDef(comp);
+        ctx = ReportDataScope.narrow(ctx, def.periodDef());
+        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
         List<TableColumn> columns = new ArrayList<>();
         columns.add(new TableColumn(DIM_KEY, dimName(def.dim()), "string"));
         for (MetricDetail metric : def.metrics()) {
+            String sql = chartService.buildScopedSql(metric, def.dim(), def.periodDef(), null);
+            QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
+            merge(result, metric.code(), merged);
+            for (Map<String, Object> row : merged.values()) {
+                if (row.get(metric.code()) instanceof Number n)
+                    row.put(metric.code(), ReportChartService.scalePercent(metric, n));
+            }
             columns.add(new TableColumn(metric.code(), displayName(metric), "number"));
         }
-        return new TableView(columns, slice, total, safePage, safeSize);
+        List<Map<String, Object>> rows = new ArrayList<>(merged.values());
+        return new TableView(columns, rows, rows.size(), 1, rows.size());
     }
 
-    /** 维度值去重列表（供前端筛选下拉）。 */
     public List<String> dimValues(Long reportId, Long compId, UserContext ctx) {
         authzService.checkFunc(ctx, PERM_READ);
         reportService.requireViewAccess(ctx, reportId);
         RptComponent comp = requireTableComponent(reportId, compId);
-        TableDef def = parseDef(comp);
-
-        MetricDetail first = def.metrics().get(0);
-        ReportChartService.Aggregation agg = chartService.parseAggregation(first);
-        String sql = "time".equals(def.dim())
-                ? chartService.buildTimeSeriesSql(first, agg, def.periodDef())
-                : (agg.ratio()
-                        ? chartService.buildRatioSql(first, def.dim(), agg)
-                        : chartService.buildDirectSql(first, def.dim(), agg));
-        QueryResult result = queryExecService.executeReadonly(authzService.authorizeSql(sql, ctx));
-        Set<String> values = new LinkedHashSet<>();
-        for (Map<String, Object> row : result.rows()) {
-            Object v = row.get("dim_value");
-            if (v != null) {
-                values.add(String.valueOf(v));
-            }
-        }
-        return values.stream().sorted().toList();
+        TableView frozen = dataVersionService == null ? materializeTable(comp, ctx)
+                : dataVersionService.readSnapshot(ctx, reportId, compId, ViewKeySupport.ROOT, TableView.class);
+        return frozen.rows().stream().map(r -> String.valueOf(r.get(DIM_KEY))).distinct().sorted().toList();
     }
 
     // =================================================================
@@ -182,7 +178,7 @@ public class ReportTableService {
             }
             metrics.add(metric);
         }
-        return new TableDef(dimKey, metrics, periodDef);
+        return new TableDef(dimKey, metrics, def);
     }
 
     /** 排序白名单：dimValue 或任一指标编码；否则拒绝。 */

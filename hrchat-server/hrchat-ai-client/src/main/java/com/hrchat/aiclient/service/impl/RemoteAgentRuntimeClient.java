@@ -242,6 +242,8 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         putIfNotNull(remote, "data_version", ctx.dataVersion());
         putIfNotNull(remote, "view_key", ctx.viewKey());
         putIfNotNull(remote, "scope_ref", ctx.scopeRef());
+        putIfNotNull(remote, "axis_kind", ctx.axisKind());
+        putIfNotNull(remote, "ratio_scale", ctx.ratioScale());
         putIfNotNull(remote, "numerator_metric_code", ctx.numeratorMetricCode());
         putIfNotNull(remote, "denominator_metric_code", ctx.denominatorMetricCode());
         return remote;

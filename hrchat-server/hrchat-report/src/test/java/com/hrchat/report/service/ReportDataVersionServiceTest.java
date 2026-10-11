@@ -65,6 +65,8 @@ class ReportDataVersionServiceTest {
         ready.setId(88L);
         ready.setVersionNo(2);
         ready.setStatus(ReportDataVersionService.STATUS_READY);
+        ready.setDefinitionRevision(1);
+        ready.setScopeRef(ReportDataScope.fingerprint(ctx));
         when(dataVersionMapper.selectById(88L)).thenReturn(ready);
 
         var view = service.ensureCurrent(ctx, 7L, "k1");
@@ -128,7 +130,11 @@ class ReportDataVersionServiceTest {
         });
 
         var first = service.ensureCurrent(ctx, 7L, "ensure-7");
-        // 第二次：内存幂等命中
+        // 第二次：持久化幂等命中（不依赖进程内缓存）。
+        RptDataVersion persisted = new RptDataVersion();
+        persisted.setId(11L);
+        persisted.setStatus(ReportDataVersionService.STATUS_READY);
+        when(dataVersionMapper.selectOne(any())).thenReturn(persisted);
         RptReport stillNoCurrent = report(7L, null);
         when(reportService.requireAccessibleReport(ctx, 7L)).thenReturn(stillNoCurrent);
         var second = service.ensureCurrent(ctx, 7L, "ensure-7");
@@ -140,6 +146,7 @@ class ReportDataVersionServiceTest {
     private static RptReport report(Long id, Long currentVersionId) {
         RptReport r = new RptReport();
         r.setId(id);
+        r.setOwnerId(1L);
         r.setDefinitionRevision(1);
         r.setCurrentDataVersionId(currentVersionId);
         r.setSnapshotReuse(0);

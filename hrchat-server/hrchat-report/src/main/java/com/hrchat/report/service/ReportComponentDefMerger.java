@@ -49,11 +49,8 @@ public final class ReportComponentDefMerger {
         Map<String, Object> tableDef = baseDef(context, dims, trend);
         tableDef.put("title", trend ? "月度明细" : "数据明细");
         List<ReportDtos.ComponentSpec> specs = new ArrayList<>();
-        specs.add(new ReportDtos.ComponentSpec("METRIC_CARD", null, Map.of(
-                "metric", context.metricCode(),
-                "title", context.metricName() == null ? context.metricCode() : context.metricName(),
-                "unit", context.unit() == null ? "" : context.unit(),
-                "definition", context.caliberDefinition() == null ? "" : context.caliberDefinition())));
+        Map<String, Object> cardDef = baseDef(context, dims, trend);
+        specs.add(new ReportDtos.ComponentSpec("METRIC_CARD", null, cardDef));
         specs.add(new ReportDtos.ComponentSpec("CHART", chartType, chartDef));
         specs.add(new ReportDtos.ComponentSpec("TABLE", null, tableDef));
         return specs;
@@ -65,13 +62,17 @@ public final class ReportComponentDefMerger {
         def.put("title", context.metricName() == null ? context.metricCode() : context.metricName());
         def.put("dimensions", dims);
         def.put("dims", dims);
-        applyPeriod(def, context, trend);
+        applyContext(def, context, "CHART", trend ? "LINE" : "BAR");
         return def;
     }
 
     private static void applyContext(Map<String, Object> def, ReportContext context,
                                      String compType, String chartType) {
         def.put("metric", context.metricCode());
+        def.remove("metrics");
+        def.remove("dim");
+        def.put("effectiveOrgIds", context.effectiveOrgIds() == null ? List.of() : context.effectiveOrgIds());
+        def.put("filters", context.filters() == null ? Map.of() : context.filters());
         if (context.metricName() != null && !context.metricName().isBlank()) {
             Object title = def.get("title");
             if (title == null || String.valueOf(title).isBlank()
@@ -87,10 +88,10 @@ public final class ReportComponentDefMerger {
                 || "LINE".equalsIgnoreCase(chartType);
         applyPeriod(def, context, trend);
         if (context.unit() != null) {
-            def.putIfAbsent("unit", context.unit());
+            def.put("unit", context.unit());
         }
         if (context.caliberDefinition() != null) {
-            def.putIfAbsent("definition", context.caliberDefinition());
+            def.put("definition", context.caliberDefinition());
         }
         if (context.organizationLabel() != null) {
             def.put("organization", context.organizationLabel());

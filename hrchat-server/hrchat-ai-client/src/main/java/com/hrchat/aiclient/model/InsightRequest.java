@@ -42,7 +42,18 @@ public record InsightRequest(
             String viewKey,
             String scopeRef,
             String numeratorMetricCode,
-            String denominatorMetricCode) {
+            String denominatorMetricCode,
+            String axisKind,
+            String ratioScale) {
+        public InsightContext(String schemaVersion, String reportId, String componentId, String metricCode,
+                              String metricVersion, String metricName, String reportName, String unit,
+                              String metricKind, Period currentPeriod, Period baselinePeriod,
+                              List<Long> effectiveOrgIds, String dataVersion, String viewKey, String scopeRef,
+                              String numeratorMetricCode, String denominatorMetricCode) {
+            this(schemaVersion, reportId, componentId, metricCode, metricVersion, metricName, reportName,
+                    unit, metricKind, currentPeriod, baselinePeriod, effectiveOrgIds, dataVersion, viewKey,
+                    scopeRef, numeratorMetricCode, denominatorMetricCode, "unknown", null);
+        }
     }
 
     /** 半开区间期间 {@code [start, end)}，ISO-8601 日期。 */

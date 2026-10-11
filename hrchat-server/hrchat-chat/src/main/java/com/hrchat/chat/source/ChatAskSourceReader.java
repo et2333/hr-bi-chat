@@ -136,7 +136,7 @@ public class ChatAskSourceReader implements AskSourceReader {
             Matcher fixed = DATE_RANGE.matcher(label);
             if (fixed.find()) {
                 String s = fixed.group(1);
-                String e = fixed.group(2);
+                String e = java.time.LocalDate.parse(fixed.group(2)).plusDays(1).toString();
                 // caliber 展示常为含尾日；统一存 endExclusive=次日需调用方自行处理时保留原字符串端点
                 return new ReportContext.PeriodSpec("FIXED", s, e, null, null, s, e, label);
             }

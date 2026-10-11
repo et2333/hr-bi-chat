@@ -60,6 +60,9 @@ public class SubscriptionPushService {
     private final ReportChartService chartService;
     private final ReportExcelExporter excelExporter;
 
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.hrchat.report.service.ReportDataVersionService dataVersionService;
+
     /** 推送附件输出目录（默认由配置注入；单测可 setOutputDir 覆盖）。 */
     @Value("${hrchat.push.output-dir:}")
     private String outputDir = "";
@@ -110,6 +113,18 @@ public class SubscriptionPushService {
 
     /** 单订阅推送：生成附件 → 逐收件人 BR-13 鉴权 → 推送（重试 ≤3）→ 快照。 */
     int pushOne(RptSubscription sub) {
+        if (dataVersionService != null) {
+            RptReport report = reportMapper.selectById(sub.getReportId());
+            if (report == null) return 0;
+            var version = dataVersionService.refresh(resolveOwnerContext(report), report.getId(),
+                    "subscription-" + sub.getId() + "-" + sub.getNextRunAt());
+            if (!"READY".equals(version.status()) || !version.published()) {
+                sub.setNextRunAt(advance(sub));
+                sub.setUpdatedAt(LocalDateTime.now());
+                subscriptionMapper.updateById(sub);
+                return 0;
+            }
+        }
         String attachmentPath = generateAttachment(sub);
         List<RptSubReceiver> receivers = receiverMapper.selectList(new LambdaQueryWrapper<RptSubReceiver>()
                 .eq(RptSubReceiver::getSubscriptionId, sub.getId()));
@@ -149,10 +164,12 @@ public class SubscriptionPushService {
             if (!java.util.Objects.equals(receiverCtx.getTenantId(), report.getTenantId())) {
                 return false;
             }
-            if (report.getOwnerId().equals(userId)) {
-                return true;
-            }
             authzService.checkFunc(receiverCtx, "report:view");
+            if (dataVersionService != null) {
+                var version = dataVersionService.requireReadyVersion(report);
+                if (version == null) return false;
+                dataVersionService.requireScope(receiverCtx, report, version);
+            }
             return true;
         } catch (BizException e) {
             return false;

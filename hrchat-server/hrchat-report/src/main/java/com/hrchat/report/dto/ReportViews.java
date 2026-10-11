@@ -37,7 +37,7 @@ public final class ReportViews {
                                String contextCompleteness,
                                Map<String, Object> params, String metricVersions,
                                List<ComponentView> components, String refresh, String createdAt,
-                               List<SubscriptionView> subscriptions, SnapshotView latestSnapshot) {
+                               List<SubscriptionView> subscriptions, SnapshotView latestSnapshot, boolean canRefresh) {
     }
 
     /** 导出任务视图。 */
