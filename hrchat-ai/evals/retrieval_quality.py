@@ -100,9 +100,9 @@ def audit_cases(cases, docs, prior_questions=()):
             "human_review": "pending", "semantic_independence": "not established by exact-overlap checks"}
 
 
-def load_suite():
+def load_suite(text_style="legacy"):
     payload = json.loads(DATASET.read_text(encoding="utf-8"))
-    docs = retrieval.documents(synthetic_catalog(), include_distractors=True)
+    docs = retrieval.documents(synthetic_catalog(), include_distractors=True, text_style=text_style)
     prior = []
     for path in (Path(__file__).parent / "datasets").rglob("*.json"):
         if path != DATASET:
@@ -211,8 +211,8 @@ def fingerprint(docs):
             "candidate_sha256": hashlib.sha256(json.dumps(docs, ensure_ascii=False, sort_keys=True).encode()).hexdigest()}
 
 
-def run(split="dev"):
-    payload, docs, audit = load_suite()
+def run(split="dev", text_style="legacy"):
+    payload, docs, audit = load_suite(text_style)
     cases = [c for c in payload["cases"] if c["split"] == split]
     if not cases:
         raise ValueError("Empty split")
@@ -243,6 +243,8 @@ def run(split="dev"):
     manifest = embedder.path / "hrchat-model.json"
     report = {"version": VERSION, "created_at": datetime.now(timezone.utc).isoformat(),
               "dataset": payload["schema_version"], "split": split, "count": len(cases),
+              "text_style": text_style,
+              "evaluation_status": "development diagnostic" if split == "dev" else "regression after first frozen run; not new holdout evidence",
               "llm_calls": 0, "scope": "synthetic retrieval only; NOT task success, refusal or execution accuracy",
               "audit": audit, "fingerprint": frozen, "candidate_counts": {"metadata": len(metadata), "examples": len(examples)},
               "model_manifest": json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else None,
@@ -284,13 +286,14 @@ def run(split="dev"):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--split", choices=("dev", "frozen"), default="dev")
+    parser.add_argument("--text-style", choices=("legacy", "semantic"), default="legacy")
     parser.add_argument("--validate", action="store_true", help="Validate dataset only; no embedding or LLM")
     args = parser.parse_args()
     if args.validate:
-        payload, _, audit = load_suite()
+        payload, _, audit = load_suite(args.text_style)
         print(json.dumps({"count": len(payload["cases"]), "audit": audit}, ensure_ascii=False, indent=2))
     else:
-        run(args.split)
+        run(args.split, args.text_style)
 
 
 if __name__ == "__main__":

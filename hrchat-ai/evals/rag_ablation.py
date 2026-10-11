@@ -24,7 +24,9 @@ def save(path, value):
     temporary.replace(path)
 
 
-def prepare(*, model="qwen-plus", case_ids=DEFAULT_CASE_IDS):
+def prepare(*, model="qwen-plus", case_ids=DEFAULT_CASE_IDS, text_style="legacy"):
+    if text_style not in {"legacy", "semantic"}:
+        raise ValueError("Unknown retrieval text style")
     case_ids = tuple(case_ids)
     manifest, cases = load_dataset(MODE_DATASET)
     selected = select_cases(cases, "dev", list(case_ids))
@@ -35,7 +37,8 @@ def prepare(*, model="qwen-plus", case_ids=DEFAULT_CASE_IDS):
     directory.mkdir(parents=True)
     jar = ROOT / "hrchat-server/hrchat-bootstrap/target/hrchat-bootstrap-1.0.0-SNAPSHOT.jar"
     base = [sys.executable, "-m", "evals.launch_remote", "--stage", "s3", "--split", "dev",
-            "--dataset", MODE_DATASET.name, "--model", model, "--repair", "off", "--memory", "on"]
+            "--dataset", MODE_DATASET.name, "--model", model, "--repair", "off", "--memory", "on",
+            "--rag-text-style", text_style]
     for case_id in case_ids:
         base.extend(["--case-id", case_id])
     arms = [{"name": f"rag-{mode}", "rag_mode": mode,
@@ -45,6 +48,7 @@ def prepare(*, model="qwen-plus", case_ids=DEFAULT_CASE_IDS):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "measurement_kind": "rag_mode_ablation",
         "model": model,
+        "rag_text_style": text_style,
         "dataset": manifest,
         "case_ids": list(case_ids),
         "source_sha256": source_fingerprint(),
@@ -134,6 +138,7 @@ def execute(path, *, compare_only=False):
 def main():
     parser = argparse.ArgumentParser(description="J3 off/lexical/hybrid end-to-end ablation")
     parser.add_argument("--model", default="qwen-plus")
+    parser.add_argument("--text-style", choices=["legacy", "semantic"], default="legacy")
     parser.add_argument("--case-id", action="append", dest="case_ids",
                         help="Override default modes subset; repeatable. Defaults to trend/org/detail trio.")
     parser.add_argument("--plan", type=Path)
@@ -146,7 +151,7 @@ def main():
         parser.error("--compare-only requires --plan")
     if args.execute and args.compare_only:
         parser.error("Use either --execute or --compare-only")
-    path = args.plan or prepare(model=args.model, case_ids=tuple(args.case_ids or DEFAULT_CASE_IDS))
+    path = args.plan or prepare(model=args.model, case_ids=tuple(args.case_ids or DEFAULT_CASE_IDS), text_style=args.text_style)
     print(json.dumps({"plan": str(path)}, ensure_ascii=False), flush=True)
     if args.compare_only:
         return execute(path, compare_only=True)
