@@ -55,6 +55,8 @@ class MockLlmAdapter(ModelAdapter):
             return self._analyst(prompt)
         if "【归因-WRITER】" in prompt:
             return self._writer(prompt)
+        if "【洞察-DRAFT】" in prompt:
+            return self._insight_draft(prompt)
         if any(g.lower() in prompt.lower() for g in GREETINGS):
             return "您好，我是 HR 智能问数助手，可以帮您查询在职人数、入职/离职、离职率、人力成本、平均薪酬等数据。请问您想了解什么？"
         return "（mock）已收到"
@@ -132,6 +134,65 @@ class MockLlmAdapter(ModelAdapter):
             "以上为辅助分析结果，仅供参考。"
         )
         return summary
+
+    def _insight_draft(self, prompt: str) -> str:
+        """确定性洞察草稿：从 prompt 内嵌事实 JSON 选择 preferred 事实并生成引用。"""
+        facts = self._insight_facts(prompt)
+        computable = [f for f in facts if f.get("computable")]
+        preferred = [f for f in computable if f.get("preferred")] or computable
+        selected = preferred[:3]
+        claims = []
+        if selected:
+            fact = selected[0]
+            claims.append(
+                {
+                    "claim_id": "c1",
+                    "kind": "fact",
+                    "text": fact.get("label", ""),
+                    "fact_ids": [fact["fact_id"]],
+                    "predicate": self._insight_predicate(fact),
+                    "unit": fact.get("unit"),
+                    "scope_ref": fact.get("scope_ref"),
+                }
+            )
+        return json.dumps(
+            {
+                "selected_fact_ids": [f["fact_id"] for f in selected],
+                "claims": claims,
+                "limitations": [],
+                "next_actions": [],
+            },
+            ensure_ascii=False,
+        )
+
+    @staticmethod
+    def _insight_facts(prompt: str) -> list[dict]:
+        for line in prompt.splitlines():
+            if '"facts"' not in line:
+                continue
+            start, end = line.find("{"), line.rfind("}")
+            if start < 0 or end <= start:
+                continue
+            try:
+                parsed = json.loads(line[start:end + 1])
+            except json.JSONDecodeError:
+                continue
+            facts = parsed.get("facts")
+            if isinstance(facts, list):
+                return facts
+        return []
+
+    @staticmethod
+    def _insight_predicate(fact: dict) -> str | None:
+        value = fact.get("value")
+        if not isinstance(value, (int, float)):
+            return None
+        fact_type = fact.get("fact_type")
+        if fact_type == "absolute_change":
+            return "absolute_increase" if value > 0 else "absolute_decrease" if value < 0 else None
+        if fact_type == "relative_change":
+            return "relative_increase" if value > 0 else "relative_decrease" if value < 0 else None
+        return None
 
 
 # 向后兼容别名（S6 骨架时期命名）

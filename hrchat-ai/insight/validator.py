@@ -5,7 +5,7 @@ Blocks unsupported actions and definite department contribution without evidence
 """
 from __future__ import annotations
 
-from insight.capabilities import is_supported_capability, resolve_action, action_param_errors
+from insight.capabilities import MANUAL_REVIEW, is_supported_capability, resolve_action, action_param_errors
 from insight.schema import (
     ClaimKind,
     FactBundle,
@@ -70,7 +70,7 @@ def validate_draft(
             errors.extend(action_errors)
             continue
         resolved = resolve_action(action, context)
-        if resolved.capability_id == "manual_review":
+        if resolved.capability_id == MANUAL_REVIEW:
             accepted_actions.append(resolved.model_copy(update={"executable": False}))
         else:
             accepted_actions.append(resolved)
@@ -92,12 +92,14 @@ def _check_claim(
 ) -> list[ValidationIssue]:
     errors: list[ValidationIssue] = []
     if not claim.fact_ids:
-        errors.append(ValidationIssue(
-            kind=ValidationErrorKind.BAD_FACT_REF,
-            message="claim requires fact_ids",
-            fixable=True,
-            claim_id=claim.claim_id,
-        ))
+        # Only evidence-bearing claims must cite facts; limitation/next_check stand alone.
+        if claim.kind in {ClaimKind.FACT, ClaimKind.STATISTICAL_CONTRIBUTION}:
+            errors.append(ValidationIssue(
+                kind=ValidationErrorKind.BAD_FACT_REF,
+                message="claim requires fact_ids",
+                fixable=True,
+                claim_id=claim.claim_id,
+            ))
         return errors
 
     for fid in claim.fact_ids:
@@ -179,7 +181,7 @@ def _scope_subset(claim_scope: str, context: InsightContext) -> bool:
 
 
 def _check_action(action: NextAction, context: InsightContext) -> list[ValidationIssue]:
-    if action.capability_id == "manual_review":
+    if action.capability_id == MANUAL_REVIEW:
         if action.executable:
             return [ValidationIssue(
                 kind=ValidationErrorKind.UNSUPPORTED_ACTION,

@@ -223,6 +223,7 @@ class InsightResult(Contract):
     view_key: str | None = None
     limitations: list[str] = Field(default_factory=list)
     claims: list[InsightClaim] = Field(default_factory=list)
+    generation: dict[str, Any] | None = None
 
 
 class ValidationIssue(Contract):

@@ -9,6 +9,7 @@ from insight.schema import NextAction, InsightContext, Period
 from pydantic import ValidationError
 
 CAPABILITY_LEAVE_COUNT_DEPT = "leave_count_department_contribution"
+MANUAL_REVIEW = "manual_review"
 
 CAPABILITIES: dict[str, dict] = {
     CAPABILITY_LEAVE_COUNT_DEPT: {
@@ -26,11 +27,20 @@ CAPABILITIES: dict[str, dict] = {
 
 
 def list_capabilities() -> list[dict]:
-    return [
+    catalog = [
         {"capability_id": cid, **{k: v for k, v in meta.items() if k != "required_params"},
          "required_params": list(meta["required_params"])}
         for cid, meta in CAPABILITIES.items()
     ]
+    # Always expose the non-executable fallback so the model can pick it in plain JSON.
+    catalog.append({
+        "capability_id": MANUAL_REVIEW,
+        "metric_code": None,
+        "description": "没有可自动执行的分析能力时，仅建议人工核查",
+        "executable": False,
+        "required_params": [],
+    })
+    return catalog
 
 
 def resolve_action(action: NextAction, context: InsightContext | None = None) -> NextAction:
@@ -56,7 +66,7 @@ def suggestion_action(*, action_id: str, question: str) -> NextAction:
     """Human-check suggestion: never clickable auto-action."""
     return NextAction(
         action_id=action_id,
-        capability_id="manual_review",
+        capability_id=MANUAL_REVIEW,
         question=question,
         params={},
         missing_params=[],
