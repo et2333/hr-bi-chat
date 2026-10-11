@@ -53,6 +53,8 @@ class AttributionTeam:
         result = await role_reply(self.adapter, self.budget, self.records, self.request, role_name, schema, data)
         self.trace.append({"role": role_name, "stage": name, "schema": schema.__name__,
                            "input_invalid_claim_ids": data.get("invalid_claim_ids", []),
+                           "input_focus_fact_ids": data.get("focus_fact_ids", []),
+                           "input_missing_focus_fact_ids": data.get("missing_focus_fact_ids", []),
                            "output": result.model_dump(mode="json")})
         return result
 
@@ -83,9 +85,12 @@ class AttributionTeam:
                                           "evidence_id": evidence_id, "status": "verified"})
 
     def handoff(self):
+        focus = self.computed.get("focus_fact_ids", []) if self.computed else []
+        cited = {c.fact_id for c in self.claims.claims if c.claim_id not in self.invalid_claims()} if self.claims else set()
         return {"task_goal": "explain_department_delta", "phase": "post_supplement" if self.supplemented else "initial",
                 "plan": self.plan.model_dump(), "evidence": self.evidence,
                 "facts": self.computed["facts"] if self.computed else {},
+                "focus_fact_ids": focus, "missing_focus_fact_ids": [f for f in focus if f not in cited],
                 "claims": self.claims.model_dump() if self.claims else None,
                 "requested_supplement_need": self.requested_supplement_need.model_dump() if self.requested_supplement_need else None,
                 "invalid_claim_ids": self.invalid_claims(), "supplement_available": not self.supplemented,
@@ -162,6 +167,20 @@ class AttributionTeam:
             self.unresolved.append("unsupported_claim")
             invalid = set(self.invalid_claims())
             self.claims.claims = [c for c in self.claims.claims if c.claim_id not in invalid]
+        # Reviewer may select existing facts to repair omissions, never invent
+        # numbers or extend tool scope. Validate every addition before mutation.
+        department = next(e for e in self.evidence if e["evidence_id"] == "ev_department")
+        if any(f not in department["result"]["facts"] for f in review.highlight_fact_ids):
+            raise EvidenceError("review_highlight_invalid")
+        cited = {c.fact_id for c in self.claims.claims}
+        additions = [f for f in review.highlight_fact_ids if f not in cited]
+        if len(self.claims.claims) + len(additions) > 20:
+            raise EvidenceError("review_highlight_limit")
+        for fact_id in additions:
+            claim_id = "review_" + uuid.uuid4().hex[:12]
+            self.claims.claims.append(Claim(claim_id=claim_id,
+                kind="statistical_contribution" if fact_id.startswith("department:") else "fact",
+                fact_id=fact_id, evidence_ids=["ev_department"]))
         if review.decision == "request_evidence":
             if self.allow_supplement(review.supplement_need, "Reviewer"):
                 return {"route": "supplement"}
@@ -217,6 +236,7 @@ class AttributionTeam:
                 "scope": self.context.model_dump(mode="json", exclude={"tenant_no"}),
                 "summary": {k: c[k] for k in ("current_total", "baseline_total", "delta", "closure_verified")} if c else None,
                 "contributions": c["departments"] if c else [], "facts": c["facts"] if c else {},
+                "structure": c["structure"] if c else None,
                 "claims": safe_claims, "review": self.reviews, "evidence": self.evidence,
                 "supplement_decisions": self.supplement_decisions,
                 "supplement_assessment": self.verified_assessment,

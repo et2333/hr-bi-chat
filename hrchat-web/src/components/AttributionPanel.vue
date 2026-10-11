@@ -45,6 +45,11 @@
             本期 {{ result.summary.current_total }} 人，基期 {{ result.summary.baseline_total }} 人，变化 {{ signed(result.summary.delta) }} 人。
           </p>
           <p v-if="result.summary?.delta === 0" class="muted">总量未变化，仍可查看各部门的增加与减少；不计算以净变化为分母的贡献率。</p>
+          <section v-if="structureTexts.length" class="structure-insights" data-testid="structure-insights" aria-label="统计变化重点">
+            <h4>统计变化重点</h4>
+            <ul><li v-for="text in structureTexts" :key="text">{{ text }}</li></ul>
+            <p class="muted">根据已核验的部门数据计算；用于确定核查重点，不代表异常或真实离职原因。</p>
+          </section>
           <div v-if="result.contributions.length" class="contribution-scroll">
             <table class="contribution-table">
               <caption>部门数量变化（事件所属部门互斥分项）</caption>
@@ -57,6 +62,10 @@
           <ul v-if="claimTexts.length" class="analysis-claims">
             <li v-for="claim in claimTexts" :key="claim.id">{{ claim.text }} <span class="muted">[{{ claim.refs.join('、') }}]</span></li>
           </ul>
+          <section v-if="supplementSteps.length" data-testid="supplement-journey" aria-label="补查过程">
+            <h4>补查过程</h4>
+            <ol><li v-for="text in supplementSteps" :key="text">{{ text }}</li></ol>
+          </section>
           <div v-if="supplementTexts.length" data-testid="supplement-facts">
             <h4>补查得到的事实</h4>
             <ul><li v-for="item in supplementTexts" :key="item.id">{{ item.text }} <span class="muted">[{{ result.supplement_assessment?.evidence_id }}]</span></li></ul>
@@ -91,7 +100,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useAttribution } from '@/composables/useAttribution'
 import { baselineFromInputs, displayPeriod, shiftDate } from '@/utils/analysisPeriod'
-import { analysisClaimText, analysisIssueLabel } from '@/utils/analysisPresentation'
+import { analysisClaimText, analysisIssueLabel, analysisStructureTexts, analysisSupplementSteps } from '@/utils/analysisPresentation'
 
 const props = defineProps<{ sourceAskId: string; autoOpen?: boolean }>()
 const { context, task, stages, busy, cancelling, disconnected, error, prepare, start, restore, cancel, chooseAgain } = useAttribution(props.sourceAskId)
@@ -103,6 +112,8 @@ const signed = (value: number) => value > 0 ? `+${value}` : String(value)
 const issueLabel = analysisIssueLabel
 const result = computed(() => ['COMPLETED', 'PARTIAL'].includes(task.value?.status ?? '') ? task.value?.result : null)
 const statusLabel = computed(() => ({ RUNNING: '分析中', COMPLETED: '分析完成', PARTIAL: '部分完成', FAILED: '分析失败', CANCELLED: '已取消' })[task.value?.status ?? 'RUNNING'])
+const structureTexts = computed(() => result.value ? analysisStructureTexts(result.value) : [])
+const supplementSteps = computed(() => result.value ? analysisSupplementSteps(result.value) : [])
 const claimTexts = computed(() => (result.value?.claims ?? []).map(claim => ({ id: claim.claim_id,
   text: analysisClaimText(claim, result.value!.facts), refs: claim.evidence_ids,
 })).filter(claim => claim.text))
@@ -142,6 +153,7 @@ input[type='date'] { padding: 5px 8px; border: 1px solid #b8c6d8; border-radius:
 .analysis-warning { color: #8a4b0d; }
 .analysis-stages { padding-left: 20px; color: #657386; font-size: 13px; }
 .analysis-summary { font-weight: 600; }
+.structure-insights { margin: 12px 0; padding: 4px 12px; background: #f0f5ff; border-radius: 6px; font-size: 13px; }
 .contribution-scroll { overflow-x: auto; }
 .contribution-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .contribution-table caption { text-align: left; margin-bottom: 6px; color: #657386; }

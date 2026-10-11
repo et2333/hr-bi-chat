@@ -13,12 +13,28 @@ from adapters.local_env import load_local_model_env
 from adapters.openai_client import OpenAIClientImpl
 from adapters.query_budget import QueryBudget
 from agentscope_teams.attribution_team import AttributionTeam
-from evals.s6_dataset import load_dataset, dataset_identity
-from evals.s6_run import FixtureTools, MODES, ROOT, make_request, score_result, behavior_observations
+from evals.s6_dataset import load_dataset, dataset_identity, reference
+from evals.s6_run import FixtureTools, MODES, ROOT, make_request, score_result, behavior_observations, grounded_fact_ids
 from evals.s5_compare import source_fingerprint
 
 
-async def run(model, case_ids):
+def insight_coverage(case, result):
+    """Reference-derived highlights; never derive the denominator from model output."""
+    deltas = reference(case)["department_deltas"]
+    required = {"overall"}
+    for positive in (True, False):
+        values = [v for v in deltas.values() if (v > 0 if positive else v < 0)]
+        if values:
+            extreme = max(values) if positive else min(values)
+            required.update("department:" + str(k) for k, v in deltas.items() if v == extreme)
+    grounded = grounded_fact_ids(result)
+    return {"required_fact_ids": sorted(required), "missing_fact_ids": sorted(required - grounded),
+            "numerator": len(required & grounded), "denominator": len(required),
+            "value": len(required & grounded) / len(required),
+            "note": "Coverage of grounded AI claims, not table completeness or causal correctness; all tied leaders included."}
+
+
+async def run(model, case_ids, *, prepare_only=False):
     manifest, dataset = load_dataset()
     cases = [case for case in dataset if case["case_id"] in set(case_ids)]
     if len(cases) != len(set(case_ids)) or any(c["origin"] != "seed" for c in cases):
@@ -32,6 +48,9 @@ async def run(model, case_ids):
             "dataset": dataset_identity(manifest), "source_sha256": source_fingerprint(),
             "note": "Small behavior acceptance only, not evidence of general collaboration benefit."}
     (run_dir / "manifest.json").write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+    if prepare_only:
+        print(json.dumps({"plan": str(run_dir / "manifest.json"), "max_model_calls": plan["max_model_calls_total"], "actual_calls": 0}))
+        return 0
     load_local_model_env()
     adapter = OpenAIClientImpl(model=model)
     rows = []
@@ -48,6 +67,7 @@ async def run(model, case_ids):
                 result = await AttributionTeam(adapter, tools, make_request(case, mode), budget=budget).run(emit)
                 rows.append({"case_id": case["case_id"], "mode": mode, "result": result,
                              "score": score_result(case, mode, result, tools.calls),
+                             "insight_coverage": insight_coverage(case, result),
                              "behavior": behavior_observations(result, tools.calls), "events": events})
                 # Preserve every failed attempt; never select only the best rerun.
                 (run_dir / "report.json").write_text(json.dumps({"manifest": plan, "cases": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -70,10 +90,11 @@ def main():
     parser.add_argument("--case-id", action="append", choices=["S6-01", "S6-03"],
                         help="Explicitly select one anchor for an authorised smaller run")
     parser.add_argument("--confirm-real-calls", action="store_true")
+    parser.add_argument("--prepare-only", action="store_true", help="Write the fixed cases/budget without loading credentials or calling a model")
     args = parser.parse_args()
-    if not args.confirm_real_calls:
+    if not args.confirm_real_calls and not args.prepare_only:
         parser.error("This run sends mock department aggregates to a model API; explicitly confirm up to 14 calls")
-    return asyncio.run(run(args.model, args.case_id or ["S6-01", "S6-03"]))
+    return asyncio.run(run(args.model, args.case_id or ["S6-01", "S6-03"], prepare_only=args.prepare_only))
 
 
 if __name__ == "__main__":

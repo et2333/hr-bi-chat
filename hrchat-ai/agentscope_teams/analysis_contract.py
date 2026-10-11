@@ -128,18 +128,22 @@ class ReviewResult(Contract):
     decision: Literal["accept", "request_evidence", "insufficient"]
     checked_claim_ids: list[str] = Field(max_length=20)
     drop_claim_ids: list[str] = Field(default_factory=list, max_length=20)
+    highlight_fact_ids: list[str] = Field(default_factory=list, max_length=6,
+        description="补充草稿遗漏的重点，只能选择已有overall、department:ID或structure:*事实；不新增数值或假设。")
     evidence_request: Literal["daily_counts"] | None = Field(default=None,
         description="仅request_evidence决策填写；补查后必须null，证据足够则accept，仍不足则insufficient。")
     supplement_need: SupplementNeed | None = Field(default=None,
         description="请求时关联未被删除的时间分布假设和缺失事实；其余决策为null。不能仅因Analyst请求就批准。")
     supplement_assessment: SupplementAssessment | None = Field(default=None,
         description="补查后复核须引用新每日事实或声明不足，不能仅输出accept；初次复核为null。")
-    issues: list[Literal["unsupported_claim", "missing_daily_evidence", "cause_unverified", "evidence_insufficient"]] = Field(default_factory=list, max_length=4)
+    issues: list[Literal["unsupported_claim", "missing_daily_evidence", "cause_unverified", "evidence_insufficient", "missing_key_fact"]] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def actionable_request(self):
         if (self.decision == "request_evidence") != (self.evidence_request is not None):
             raise ValueError("request_evidence must name an allowed query")
+        if len(set(self.highlight_fact_ids)) != len(self.highlight_fact_ids):
+            raise ValueError("duplicate highlighted fact")
         return self
 
 
@@ -216,9 +220,42 @@ def validate_evidence(context: AnalysisContext, raw: dict, *, detail="department
             if candidates:
                 peak = max(candidates, key=lambda r: (r["count"], r["date"]))
                 facts[f"daily_peak:{period}"] = {"date": peak["date"], "count": peak["count"], "total": totals[period]}
+    structure = structural_changes(departments, current, baseline)
+    facts.update(structure["facts"])
     return {"current_total": current, "baseline_total": baseline, "delta": current - baseline,
             "departments": sorted(departments, key=lambda r: (-abs(r["delta"]), r["org_id"])),
+            "structure": structure["summary"], "focus_fact_ids": structure["focus_fact_ids"],
             "closure_verified": True, "facts": facts}
+
+
+def structural_changes(departments, current, baseline):
+    """Descriptive structure only. Shares use absolute movement, never net delta.
+
+    All ties are kept. No arbitrary concentration/risk threshold or causal claim.
+    Input must already have passed validate_evidence's scope/closure checks.
+    """
+    increases = [r for r in departments if r["delta"] > 0]
+    decreases = [r for r in departments if r["delta"] < 0]
+    up = sum(r["delta"] for r in increases)
+    down = sum(-r["delta"] for r in decreases)
+    movement = up + down
+    largest = max((abs(r["delta"]) for r in departments), default=0)
+    leaders = [r for r in departments if largest and abs(r["delta"]) == largest]
+    top_up = max((r["delta"] for r in increases), default=0)
+    top_down = min((r["delta"] for r in decreases), default=0)
+    up_ids = sorted(r["org_id"] for r in increases if r["delta"] == top_up)
+    down_ids = sorted(r["org_id"] for r in decreases if r["delta"] == top_down)
+    offset = {"increase": up, "decrease": down, "offset": min(up, down),
+              "absolute_movement": movement, "net_delta": current - baseline}
+    # The tied-largest group share is explicit; not an individual department's share.
+    concentration = {"largest_absolute_delta": largest, "tied_department_count": len(leaders),
+                     "tied_absolute_delta": largest * len(leaders), "absolute_movement": movement}
+    summary = {**offset, "largest_increase_org_ids": up_ids, "largest_decrease_org_ids": down_ids,
+               "largest_absolute_org_ids": sorted(r["org_id"] for r in leaders),
+               "baseline_zero": baseline == 0}
+    focus = ["overall", *[f"department:{i}" for i in sorted(set(up_ids + down_ids))]]
+    return {"summary": summary, "focus_fact_ids": focus,
+            "facts": {"structure:offset": offset, "structure:concentration": concentration}}
 
 
 def check_claims(claims: Claims, facts: dict, evidence_ids: set[str], evidence_facts: dict | None = None) -> list[str]:
