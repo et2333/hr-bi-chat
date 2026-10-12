@@ -58,6 +58,17 @@ class ValidationErrorKind(str, Enum):
     MISSING_EVIDENCE = "missing_evidence"
     BAD_PREDICATE = "bad_predicate"
     BAD_ACTION_PARAMS = "bad_action_params"
+    BAD_SEGMENT = "bad_segment"
+
+
+class SegmentField(str, Enum):
+    """Allowed fact-slot fields: numbers/units/dates are rendered from the fact, never typed by the model."""
+
+    VALUE = "value"
+    UNIT = "unit"
+    PERIOD_LABEL = "period_label"
+    SCOPE_LABEL = "scope_label"
+    CATEGORY = "category"
 
 
 class Period(Contract):
@@ -90,7 +101,7 @@ class DepartmentRow(Contract):
 
 
 class InsightContext(Contract):
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["1", "2"] = "1"
     report_id: str = Field(min_length=1, max_length=100)
     component_id: str | None = Field(default=None, max_length=100)
     metric_code: str = Field(min_length=1, max_length=100)
@@ -109,6 +120,11 @@ class InsightContext(Contract):
     scope_ref: str = Field(min_length=1, max_length=500)
     numerator_metric_code: str | None = None
     denominator_metric_code: str | None = None
+    # A7/D2 context v2: authorized business goal. question_summary is only present when the
+    # caller's access to the source question was re-authorized for this visibility domain.
+    question_summary: str | None = Field(default=None, max_length=500)
+    analysis_goal: str = Field(default="", max_length=500)
+    goal_source: Literal["ask", "report", "none"] = "none"
 
     @model_validator(mode="after")
     def distinct_orgs(self):
@@ -179,14 +195,46 @@ class FactBundle(Contract):
     facts: list[Fact] = Field(default_factory=list)
 
 
+class ClaimSegment(Contract):
+    """A narrative piece: free text or a fact slot rendered by the server.
+
+    Numbers, dates and units must come from a fact slot so the model cannot type
+    a value that never existed in the verified facts.
+    """
+
+    type: Literal["text", "fact"]
+    text: str | None = Field(default=None, max_length=600)
+    fact_id: str | None = Field(default=None, max_length=120)
+    field: SegmentField | None = None
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.type == "text":
+            if not self.text:
+                raise ValueError("text segment requires text")
+            if self.fact_id is not None or self.field is not None:
+                raise ValueError("text segment must not carry fact_id/field")
+        elif not self.fact_id:
+            raise ValueError("fact segment requires fact_id")
+        return self
+
+
 class InsightClaim(Contract):
     claim_id: str = Field(min_length=1, max_length=64)
     kind: ClaimKind
     text: str = Field(default="", max_length=2000)
+    segments: list[ClaimSegment] = Field(default_factory=list, max_length=20)
     fact_ids: list[str] = Field(default_factory=list, max_length=8)
     scope_ref: str | None = None
     predicate: str | None = None
     unit: str | None = None
+
+
+class Narrative(Contract):
+    """Which validated claim is the summary and which ones are the findings."""
+
+    summary_claim_id: str | None = Field(default=None, max_length=64)
+    finding_claim_ids: list[str] = Field(default_factory=list, max_length=3)
 
 
 class NextAction(Contract):
@@ -201,6 +249,7 @@ class NextAction(Contract):
 class InsightDraft(Contract):
     selected_fact_ids: list[str] = Field(default_factory=list, max_length=20)
     claims: list[InsightClaim] = Field(default_factory=list, max_length=20)
+    narrative: Narrative | None = None
     limitations: list[str] = Field(default_factory=list, max_length=20)
     next_actions: list[NextAction] = Field(default_factory=list, max_length=10)
 
@@ -211,6 +260,7 @@ class InsightPoint(Contract):
 
 
 class InsightResult(Contract):
+    schema_version: Literal["2"] = "2"
     report_name: str = ""
     metric_name: str = ""
     summary: str = ""
@@ -221,8 +271,10 @@ class InsightResult(Contract):
     next_actions: list[NextAction] = Field(default_factory=list)
     data_version: str | None = None
     view_key: str | None = None
+    snapshot_id: str | None = None
     limitations: list[str] = Field(default_factory=list)
     claims: list[InsightClaim] = Field(default_factory=list)
+    narrative: Narrative | None = None
     generation: dict[str, Any] | None = None
 
 
@@ -239,6 +291,16 @@ class ValidationResult(Contract):
     errors: list[ValidationIssue] = Field(default_factory=list)
     accepted_claims: list[InsightClaim] = Field(default_factory=list)
     accepted_actions: list[NextAction] = Field(default_factory=list)
+    narrative: Narrative | None = None
+
+
+class InsightInvocation(Contract):
+    """Java-side call binding the credential is verified against."""
+
+    task_id: StrictInt
+    attempt: StrictInt
+    tenant_id: str | None = None
+    correlation_id: str | None = None
 
 
 class InsightRequest(Contract):
@@ -250,6 +312,7 @@ class InsightRequest(Contract):
     report_name: str | None = None
     metric_name: str | None = None
     summary: dict[str, Any] | None = None
+    invocation: InsightInvocation | None = None
 
     def is_rich(self) -> bool:
         return self.context is not None and self.snapshot is not None

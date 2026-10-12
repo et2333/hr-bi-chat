@@ -6,15 +6,41 @@ from typing import Any
 from insight.capabilities import CAPABILITY_LEAVE_COUNT_DEPT, resolve_action, suggestion_action
 from insight.fact_builder import build_fact_bundle
 from insight.schema import (
+    ClaimKind,
     Fact,
     FactType,
+    InsightClaim,
+    InsightDraft,
     InsightPoint,
     InsightRequest,
     InsightResult,
     InsightStatus,
+    Narrative,
     NextAction,
+    ValidationResult,
 )
 from insight.validator import validate_draft
+
+
+def render_narrative(
+    draft: InsightDraft,
+    validation: ValidationResult,
+) -> tuple[str | None, list[InsightClaim]]:
+    """Map the validated narrative to (summary text, finding claims).
+
+    Numbers in the rendered text came from fact slots validated by the validator,
+    so the model interpretation—not a Fact.label concatenation—reaches the page.
+    """
+
+    if validation.narrative is None:
+        return None, []
+    by_id = {c.claim_id: c for c in validation.accepted_claims}
+    summary = by_id.get(validation.narrative.summary_claim_id) if validation.narrative.summary_claim_id else None
+    findings = [
+        by_id[cid] for cid in validation.narrative.finding_claim_ids
+        if cid in by_id and by_id[cid].kind in {ClaimKind.FACT, ClaimKind.STATISTICAL_CONTRIBUTION}
+    ]
+    return (summary.text if summary and summary.text else None), findings[:3]
 
 
 def handle_insight(body: dict | None) -> dict:
@@ -80,22 +106,28 @@ def _handle_rich(request: InsightRequest) -> InsightResult:
     if request.draft is not None:
         validated = validate_draft(request.draft, bundle, request.context)
         if validated.ok:
-            degradation_reason = None
-            claims = validated.accepted_claims
-            limitations = list(request.draft.limitations)
-            actions = validated.accepted_actions
-            status = InsightStatus.COMPLETE
-            selected = [f for f in bundle.facts if f.fact_id in set(request.draft.selected_fact_ids) and f.computable]
-            if not selected:
-                selected = [f for f in bundle.facts if f.computable and f.preferred] or [
-                    f for f in bundle.facts if f.computable
-                ]
-            return _result_from_facts(
-                request, bundle.facts, selected, status=status,
-                degradation_reason=None, claims=claims, limitations=limitations, actions=actions,
-            )
-        degradation_reason = "draft_validation_failed"
-        actions = []
+            summary_text, point_claims = render_narrative(request.draft, validated)
+            if summary_text is None and not point_claims:
+                # Validation passed but nothing usable reaches the page; degrade explicitly
+                # rather than labelling a Fact.label template fallback as a successful insight.
+                claims = validated.accepted_claims
+                degradation_reason = "no_usable_narrative"
+            else:
+                claims = validated.accepted_claims
+                limitations = list(request.draft.limitations)
+                actions = validated.accepted_actions
+                selected = [f for f in bundle.facts if f.fact_id in set(request.draft.selected_fact_ids) and f.computable]
+                if not selected:
+                    selected = [f for f in bundle.facts if f.computable and f.preferred] or [
+                        f for f in bundle.facts if f.computable
+                    ]
+                return _result_from_facts(
+                    request, bundle.facts, selected, status=InsightStatus.COMPLETE,
+                    degradation_reason=None, claims=claims, limitations=limitations, actions=actions,
+                    summary_text=summary_text, point_claims=point_claims, narrative=validated.narrative,
+                )
+        else:
+            degradation_reason = "draft_validation_failed"
 
     selected = _default_selected(bundle.facts)
     actions = _default_actions(request) if degradation_reason == "no_model_draft" else []
@@ -104,7 +136,7 @@ def _handle_rich(request: InsightRequest) -> InsightResult:
         request, bundle.facts, selected,
         status=InsightStatus.DEGRADED,
         degradation_reason=degradation_reason,
-        claims=claims,
+        claims=claims if degradation_reason == "no_usable_narrative" else [],
         limitations=limitations,
         actions=actions,
     )
@@ -164,11 +196,19 @@ def _result_from_facts(
     claims,
     limitations: list[str],
     actions: list[NextAction],
+    summary_text: str | None = None,
+    point_claims: list[InsightClaim] | None = None,
+    narrative: Narrative | None = None,
 ) -> InsightResult:
     ctx = request.context
     assert ctx is not None
-    points = [_fact_to_point(f) for f in selected]
-    if not points:
+    if point_claims:
+        points = [InsightPoint(type="finding", label=c.text) for c in point_claims if c.text]
+    else:
+        points = [_fact_to_point(f) for f in selected]
+    if summary_text:
+        summary = summary_text
+    elif not selected:
         summary = f"报告「{ctx.report_name}」暂无可用的已核验事实。"
     else:
         head = selected[0].label or "已核验事实"
@@ -184,8 +224,10 @@ def _result_from_facts(
         next_actions=actions,
         data_version=ctx.data_version,
         view_key=ctx.view_key,
+        snapshot_id=request.snapshot.snapshot_id if request.snapshot else None,
         limitations=limitations,
         claims=list(claims),
+        narrative=narrative,
     )
 
 

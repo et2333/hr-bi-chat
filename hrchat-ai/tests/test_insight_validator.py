@@ -13,9 +13,54 @@ from insight.schema import (
     NextAction,
     ValidationErrorKind,
 )
-from insight.validator import validate_draft
+from insight.validator import free_text_issues, validate_draft
 
 FIXTURES = Path(__file__).parent / "fixtures" / "insight"
+
+
+def test_hedged_limitation_text_allowed_but_assertive_causality_rejected():
+    """局限类文本允许「由于…缺失，无法判定…」这类限定表述；断言式因果与数字仍被拒绝。
+
+    已知边界：限定标记出现在句内即豁免因果词（关键词正则，非语义判定）。
+    """
+    hedged = "由于时间序列存在缺失或不连续，无法判定持续的涨跌趋势。"
+    assert free_text_issues(hedged, hedged_causality_ok=True) == []
+    # 同一句作为事实断言（非局限文本）时仍被拒绝
+    assert free_text_issues(hedged, hedged_causality_ok=False) != []
+    # 无限定标记的断言式因果：即使按局限文本处理也不放过
+    assert free_text_issues("本期下降因为管理失败", hedged_causality_ok=True) != []
+    # 数字/日期禁令不受豁免影响
+    assert free_text_issues("缺少 2026-02 数据，无法判定趋势", hedged_causality_ok=True) != []
+
+
+def test_tied_extreme_category_slot_renders_tied_categories():
+    """category 槽对 tied_extreme 回退渲染 tied_categories，不再被判「无可渲染类目」。
+
+    真实模型把 category 槽绑到 tied_extreme 时会因「事实里没有 category 字段」被整条拒绝，
+    而类目信息其实就在已核验事实的 tied_categories 里。
+    """
+    req = _rich_request("tied_extremes.json")
+    bundle = build_fact_bundle(req.context, req.snapshot)
+    fact = next(f for f in bundle.facts if f.tied_categories)
+
+    draft = InsightDraft.model_validate({
+        "selected_fact_ids": [fact.fact_id],
+        "claims": [{
+            "claim_id": "c1", "kind": "fact",
+            "segments": [
+                {"type": "text", "text": "极值出现在"},
+                {"type": "fact", "fact_id": fact.fact_id, "field": "category"},
+            ],
+            "fact_ids": [fact.fact_id], "predicate": "tied_extreme",
+            "unit": fact.unit, "scope_ref": fact.scope_ref,
+        }],
+        "narrative": {"summary_claim_id": "c1", "finding_claim_ids": []},
+        "limitations": [], "next_actions": [],
+    })
+    result = validate_draft(draft, bundle, req.context)
+
+    assert result.ok, result.errors
+    assert result.accepted_claims[0].text == "极值出现在" + "、".join(fact.tied_categories)
 
 
 def _rich_request(fixture: str = "headcount_two_period.json") -> InsightRequest:

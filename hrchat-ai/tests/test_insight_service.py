@@ -2,15 +2,36 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from agent_gateway.app import create_app
+from insight.credential import sign_credential
 from insight.schema import InsightStatus
 from insight.service import handle_insight
 
 FIXTURES = Path(__file__).parent / "fixtures" / "insight"
+
+_SECRET = "test-insight-secret"
+
+
+def _credential_headers(body: dict, tenant: str = "t01") -> dict:
+    """Sign the invocation binding exactly as Java would for this body."""
+    context = body["context"]
+    snapshot = body["snapshot"]
+    now = int(time.time())
+    claims = {
+        "purpose": "insight", "tenant_id": tenant,
+        "report_id": context.get("report_id"), "component_id": context.get("component_id"),
+        "data_version": context.get("data_version"), "view_key": context.get("view_key"),
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "task_id": body["invocation"]["task_id"], "attempt": body["invocation"]["attempt"],
+        "correlation_id": body["invocation"].get("correlation_id"),
+        "iat": now, "exp": now + 300, "jti": "test-jti",
+    }
+    return {"X-Tenant-No": tenant, "X-Insight-Credential": sign_credential(_SECRET, claims)}
 
 
 def test_java_python_roundtrip_sample_is_accepted():
@@ -39,10 +60,12 @@ def test_rich_payload_returns_facts_and_degraded_result():
     assert "next_actions" in result
 
 
-def test_rich_payload_via_http_endpoint_generates_once():
+def test_rich_payload_via_http_endpoint_generates_once(monkeypatch):
+    monkeypatch.setenv("HRCHAT_MCP_SERVICE_TOKEN", _SECRET)
     client = TestClient(create_app())
     body = json.loads((FIXTURES / "headcount_two_period.json").read_text(encoding="utf-8"))
-    resp = client.post("/v1/insight", json=body)
+    body["invocation"] = {"task_id": 50, "attempt": 1, "tenant_id": "t01", "correlation_id": "corr-1"}
+    resp = client.post("/v1/insight", json=body, headers=_credential_headers(body))
     assert resp.status_code == 200
     data = resp.json()
     # 富上下文经租户适配器（mock 脚本模型）产出一次调用后的洞察。
@@ -50,6 +73,7 @@ def test_rich_payload_via_http_endpoint_generates_once():
     assert data["facts"]
     assert data["data_version"] == "dv-hc-1"
     assert data["generation"]["call_count"] == 1
+    assert data["generation"]["correlation_id"] == "corr-1"
     assert data["claims"]
 
 

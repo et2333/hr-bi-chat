@@ -323,10 +323,17 @@ def create_app(
         return _runtime_view(runtime, tenant_no)
 
     @app.post("/v1/insight")
-    async def insight(body: dict, x_tenant_no: Optional[str] = Header(default=None)):
-        """报表 AI 洞察：富上下文走轻量生成（租户适配器）；否则保留旧模板解读。"""
+    async def insight(body: dict, x_tenant_no: Optional[str] = Header(default=None),
+                      x_insight_credential: Optional[str] = Header(default=None)):
+        """报表 AI 洞察：富上下文走轻量生成（租户适配器）；否则保留旧模板解读。
+
+        富上下文在选定租户适配器、构建 prompt 与调用模型之前先校验可信凭据，
+        非法请求在此处拒绝且不产生任何调用记录。
+        """
+        from insight.credential import require_insight_credential
         from insight.service import handle_insight_async
 
+        require_insight_credential(x_insight_credential, x_tenant_no, body or {})
         return await handle_insight_async(body or {}, get_current_adapter(x_tenant_no))
 
     @app.post("/v1/chat/sessions/{session_id}/asks")
