@@ -36,7 +36,7 @@
       </template>
 
       <a-button v-if="disconnected" :loading="busy" data-testid="restore-report-analysis" @click="restore">恢复查看</a-button>
-      <a-button v-if="!context && !task && !disconnected" :loading="busy" @click="prepare">重新读取分析范围</a-button>
+      <a-button v-if="sourceReady && !context && !task && !disconnected" :loading="busy" @click="prepare">重新读取分析范围</a-button>
     </section>
   </a-drawer>
 </template>
@@ -53,11 +53,33 @@ const props = defineProps<{
   reportId: number
   dataVersionId: number
   capabilityId: string
+  /** A2：服务端动作引用；提供时由后端按原视图/期间恢复来源，不传期间/组织。 */
+  componentId?: number
+  viewKey?: string
+  actionId?: string
 }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
-const { context, task, stages, busy, cancelling, disconnected, error, prepare, start, restore, cancel, chooseAgain } =
-  useReportAnalysis(() => ({ reportId: props.reportId, dataVersionId: props.dataVersionId, capabilityId: props.capabilityId }))
+/** 动作引用齐备时使用视图级来源；否则退回版本级来源（兼容旧调用）。 */
+const actionRef = computed(() =>
+  props.componentId && props.viewKey && props.actionId
+    ? { componentId: props.componentId, viewKey: props.viewKey, actionId: props.actionId }
+    : null)
+
+const { context, task, stages, busy, cancelling, disconnected, error, prepare, start, restore, cancel, chooseAgain, resetSession } =
+  useReportAnalysis(() => ({
+    reportId: props.reportId, dataVersionId: props.dataVersionId, capabilityId: props.capabilityId,
+    actionRef: actionRef.value,
+  }))
+
+/** 来源就绪（有效报表版本 + 能力）才允许读取/建立会话，避免初始空值触发无效请求。 */
+const sourceReady = computed(() => props.reportId > 0 && props.dataVersionId > 0 && !!props.capabilityId)
+/** 来源身份签名：切换动作/视图即显式选择新的分析会话，避免复用同一恢复键。 */
+const sourceSignature = computed(() => {
+  const ref = actionRef.value
+  return `${props.reportId}:${props.dataVersionId}:${props.capabilityId}`
+    + `:${ref?.componentId ?? '-'}:${ref?.viewKey ?? '-'}:${ref?.actionId ?? '-'}`
+})
 
 const panelTitle = '进一步分析'
 const versionLabel = computed(() => String(task.value?.context.sourceDataVersionId ?? props.dataVersionId))
@@ -70,13 +92,25 @@ function syncWidth() { isNarrow.value = typeof window !== 'undefined' && window.
 onMounted(() => { syncWidth(); window.addEventListener('resize', syncWidth) })
 onBeforeUnmount(() => window.removeEventListener('resize', syncWidth))
 
-/** 打开时按任务 ID 恢复；无任务才读取预填范围。收起仅停止展示，不取消任务。 */
-watch(() => props.open, async (visible) => {
-  if (!visible) return
+/**
+ * 打开或切换来源时同步会话：来源未就绪直接返回（不建立空会话）；来源身份变化且无运行中任务时
+ * 立即重建会话——即使首次 prepare 仍在途、context/task 都还是空，也要让旧来源的在途请求失效，
+ * 不能以“是否已有返回数据”作为重置条件；运行中任务不被来源变化篡改。收起仅停止展示，不取消任务。
+ */
+let sessionSignature = ''
+async function sync(open: boolean) {
+  if (!open || !sourceReady.value) return
+  if (sessionSignature !== sourceSignature.value) {
+    if (task.value?.status === 'RUNNING') return
+    resetSession()
+    sessionSignature = sourceSignature.value
+  }
   if (task.value) return
   await restore()
   if (!task.value && !context.value) await prepare()
-}, { immediate: true })
+}
+
+watch([() => props.open, sourceSignature], ([open]) => { void sync(open) }, { immediate: true })
 
 function collapse() { emit('update:open', false) }
 async function confirm(baseline: AnalysisPeriod) { await start(baseline, 'dual') }

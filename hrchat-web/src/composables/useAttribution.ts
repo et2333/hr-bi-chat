@@ -7,7 +7,7 @@ import { useAnalysisSession } from './useAnalysisSession'
 export function useAttribution(sourceAskId: string) {
   const identity = [localStorage.getItem(TENANT_NO_KEY) || 't01', localStorage.getItem(USER_NO_KEY) || 'hr01']
   return useAnalysisSession<AnalysisContext, AnalysisContext>({
-    storageKey: `hrchat_analysis:${JSON.stringify([...identity, sourceAskId])}`,
+    resolveKey: () => `hrchat_analysis:${JSON.stringify([...identity, sourceAskId])}`,
     loadContext: () => getAnalysisContext(sourceAskId).then((res) => res.data),
     startTask: (baseline, mode, key) => startAnalysis(sourceAskId, baseline, key, mode)
       .then((res) => res.data as AnalysisTask<AnalysisContext>),

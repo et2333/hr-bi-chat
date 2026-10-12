@@ -94,4 +94,70 @@ describe('ReportAnalysisPanel', () => {
     expect(wrapper.text()).toContain('已取消分析')
     wrapper.unmount()
   })
+
+  it('builds no session key while props are empty, then adopts the loaded version', async () => {
+    const wrapper = mount(ReportAnalysisPanel, {
+      props: { open: false, reportId: 42, dataVersionId: 0, capabilityId: '' },
+      global: { plugins: [Antd], stubs: { 'a-drawer': { template: '<div class="drawer-stub"><slot /></div>' } } },
+    })
+    await flushPromises()
+    // 初始 version=0/capability=''：不读取范围、不建立任何恢复键
+    expect(reportsApi.getReportAnalysisContext).not.toHaveBeenCalled()
+    expect(Object.keys(sessionStorage)).toEqual([])
+
+    await wrapper.setProps({ dataVersionId: 7, capabilityId: capability, open: true })
+    await flushPromises()
+    // 载入 V7 后只为合法来源读取范围，仍不写空键
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenCalledWith(42, 7, capability)
+    expect(Object.keys(sessionStorage)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('protects a running session when the requested source changes', async () => {
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(reportsApi.startReportAnalysis).toHaveBeenCalledTimes(1)
+
+    // 另一个动作版本到来时，运行中任务不被重新读取或重建
+    await wrapper.setProps({ dataVersionId: 8, capabilityId: 'other_capability' })
+    await flushPromises()
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenCalledTimes(1)
+    expect(reportsApi.startReportAnalysis).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('adopts a new source once the previous task has finished', async () => {
+    vi.mocked(reportsApi.startReportAnalysis).mockResolvedValue(response({ ...running, status: 'PARTIAL', result }))
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+
+    await wrapper.setProps({ dataVersionId: 8, capabilityId: 'other_capability' })
+    await flushPromises()
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenLastCalledWith(42, 8, 'other_capability')
+    wrapper.unmount()
+  })
+
+  // B2 反例（原 docs/evaluation-runs/r1-r6-recheck-20261012）转为正式回归用例：
+  // 首次 prepare 仍在途时切换来源，也必须让旧来源的会话/在途请求失效，而不是等到有返回数据才重置。
+  it('resets the session when the source changes while the initial prepare is pending', async () => {
+    let complete!: (value: ReturnType<typeof response<ReportAnalysisPrefill>>) => void
+    vi.mocked(reportsApi.getReportAnalysisContext).mockReturnValueOnce(
+      new Promise((resolve) => { complete = resolve }) as ReturnType<typeof reportsApi.getReportAnalysisContext>)
+
+    const wrapper = render()
+    await flushPromises()
+    await wrapper.setProps({ dataVersionId: 8 })
+    await flushPromises()
+    // 切换后必须按新来源重新读取范围，而不是只发过 V7 一次
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenLastCalledWith(42, 8, capability)
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenCalledTimes(2)
+
+    // 迟到的 V7 响应不得写回已被新来源接管的会话
+    complete(response({ ...context, sourceDataVersionId: 7 }))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="current-period"]').text()).toBe('2026-09-01 至 2026-09-30')
+    wrapper.unmount()
+  })
 })

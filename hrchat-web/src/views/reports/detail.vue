@@ -94,6 +94,7 @@
                       <a-tag :color="insightStatusColor(insightStateOf(c.componentId)!.status)">
                         {{ insightStatusName(insightStateOf(c.componentId)!.status) }}
                       </a-tag>
+                      <a-tag v-if="insightStateOf(c.componentId)!.timedOut" color="orange">轮询超时</a-tag>
                       <a-button
                         v-if="canRetryInsight(c.componentId)"
                         size="small"
@@ -113,14 +114,26 @@
                     <ul v-if="insightStateOf(c.componentId)!.data!.limitations?.length" class="insight-limitations">
                       <li v-for="(item, i) in insightStateOf(c.componentId)!.data!.limitations" :key="i">{{ item }}</li>
                     </ul>
+                    <p v-if="insightDegradedNote(c.componentId)" class="insight-degraded">
+                      降级说明：{{ insightDegradedNote(c.componentId) }}
+                    </p>
+                    <details v-if="insightEvidenceOf(c.componentId).length" class="insight-evidence">
+                      <summary>查看证据（{{ insightEvidenceOf(c.componentId).length }} 条）</summary>
+                      <ul class="insight-evidence-list">
+                        <li v-for="(ev, i) in insightEvidenceOf(c.componentId)" :key="i">
+                          <span class="insight-evidence-text">{{ ev.text }}</span>
+                          <span v-if="ev.refs.length" class="insight-evidence-ref">〔{{ ev.refs.join('；') }}〕</span>
+                        </li>
+                      </ul>
+                    </details>
                     <div v-if="insightStateOf(c.componentId)!.data!.actions?.length" class="insight-actions">
                       <a-tag
                         v-for="act in insightStateOf(c.componentId)!.data!.actions"
                         :key="act.actionId"
-                        :color="isAnalyzable(act) ? 'blue' : 'default'"
-                        :class="{ 'action-clickable': isAnalyzable(act) }"
-                        :title="isAnalyzable(act) ? '点击在侧边面板中确认并分析' : undefined"
-                        @click="openReportAnalysis(act)"
+                        :color="isAnalyzable(act, c.componentId) ? 'blue' : 'default'"
+                        :class="{ 'action-clickable': isAnalyzable(act, c.componentId) }"
+                        :title="isAnalyzable(act, c.componentId) ? '点击在侧边面板中确认并分析' : undefined"
+                        @click="openReportAnalysis(act, c.componentId)"
                       >
                         {{ act.question }}
                       </a-tag>
@@ -282,6 +295,9 @@
       :report-id="reportId"
       :data-version-id="analysisDataVersionId"
       :capability-id="analysisCapabilityId"
+      :component-id="analysisComponentId"
+      :view-key="analysisViewKey"
+      :action-id="analysisActionId"
     />
   </div>
 </template>
@@ -312,16 +328,34 @@ const loading = ref(false)
 const analysisOpen = ref(false)
 const analysisCapabilityId = ref('')
 const analysisDataVersionId = ref(0)
+const analysisComponentId = ref(0)
+const analysisViewKey = ref('')
+const analysisActionId = ref('')
 
-/** 仅首轮开放能力且报表已有成功版本的推荐动作可点击打开分析面板。 */
-function isAnalyzable(act: InsightAction): boolean {
-  return act.capabilityId === REPORT_ANALYSIS_CAPABILITY && !!report.value?.currentDataVersionId
+/** 当前视图绑定的洞察来源身份（含 viewKey/版本）；无来源时不可分析。 */
+function insightSourceOf(componentId: number) {
+  return insightStates.value[componentId]?.source ?? null
 }
 
-function openReportAnalysis(act: InsightAction) {
-  if (!isAnalyzable(act)) return
+/** 仅首轮开放能力、报表已有成功版本且该视图洞察有可绑定来源的动作可点击。 */
+function isAnalyzable(act: InsightAction, componentId: number): boolean {
+  return act.capabilityId === REPORT_ANALYSIS_CAPABILITY
+    && !!report.value?.currentDataVersionId
+    && !!insightSourceOf(componentId)
+}
+
+/** A2：打开面板只回传服务端动作引用（组件/视图/动作）与来源版本，期间/组织由后端恢复。 */
+function openReportAnalysis(act: InsightAction, componentId: number) {
+  if (!isAnalyzable(act, componentId)) return
+  const source = insightSourceOf(componentId)!
+  const version = Number(source.dataVersion)
   analysisCapabilityId.value = act.capabilityId
-  analysisDataVersionId.value = report.value?.currentDataVersionId ?? 0
+  analysisDataVersionId.value = Number.isFinite(version) && version > 0
+    ? version
+    : report.value?.currentDataVersionId ?? 0
+  analysisComponentId.value = componentId
+  analysisViewKey.value = source.viewKey
+  analysisActionId.value = act.actionId
   analysisOpen.value = true
 }
 
@@ -418,9 +452,11 @@ function insightStateOf(componentId: number) {
   return insightStates.value[componentId]
 }
 
-/** 洞察状态中文名与配色（待生成/进行中/完成/降级/失败）。 */
+/** 洞察状态中文名与配色（待生成/不支持/进行中/完成/降级/失败）。 */
 function insightStatusName(status?: string): string {
   return {
+    MISSING: '待生成',
+    NOT_APPLICABLE: '不支持洞察',
     NONE: '待生成',
     PENDING: '进行中',
     RUNNING: '进行中',
@@ -441,14 +477,53 @@ function insightStatusColor(status?: string): string {
     CANCELLED: 'default',
     RUNNING: 'blue',
     PENDING: 'blue',
+    MISSING: 'default',
+    NOT_APPLICABLE: 'default',
     NONE: 'default',
   }[status ?? ''] ?? 'default'
 }
 
-/** 仅失败/中断/取消/降级提供「重试」；成功或进行中不展示。 */
+/** 重试由后端 canRetry 判定（失败/降级/中断且快照可用）；进行中或成功不展示。 */
 function canRetryInsight(componentId: number): boolean {
-  const status = insightStateOf(componentId)?.status
-  return status === 'FAILED' || status === 'INTERRUPTED' || status === 'CANCELLED' || status === 'DEGRADED'
+  return insightStateOf(componentId)?.canRetry === true
+}
+
+/** 失败/降级/中断时给出明确的降级说明，避免把确定性摘要伪装成正常 AI 解读。 */
+function insightDegradedNote(componentId: number): string {
+  const st = insightStateOf(componentId)
+  if (!st) return ''
+  const degraded = st.status === 'DEGRADED' || st.status === 'FAILED' || st.status === 'INTERRUPTED'
+  if (!degraded) return ''
+  return st.data?.degradationReason ?? '未能获得通过校验的模型解读，当前展示确定性摘要。'
+}
+
+/** 证据条目：claim 正文 + 其引用事实的期间/范围/值/依据/快照（不触发模型调用）。 */
+interface InsightEvidenceItem {
+  text: string
+  refs: string[]
+}
+
+function insightEvidenceOf(componentId: number): InsightEvidenceItem[] {
+  const data = insightStateOf(componentId)?.data
+  if (!data) return []
+  const facts = new Map((data.facts ?? []).map((f) => [f.fact_id, f]))
+  return (data.claims ?? [])
+    .map((claim) => {
+      const text = (claim.text ?? '').trim()
+      const refs = (claim.fact_ids ?? []).map((id) => {
+        const fact = facts.get(id)
+        if (!fact) return id
+        const parts: string[] = []
+        if (fact.period_ref) parts.push(`期间 ${fact.period_ref}`)
+        if (fact.scope_ref) parts.push(`范围 ${fact.scope_ref}`)
+        if (fact.value !== null && fact.value !== undefined) parts.push(`值 ${fact.value}${fact.unit ?? ''}`)
+        if (fact.basis) parts.push(`依据 ${fact.basis}`)
+        if (fact.snapshot_id) parts.push(`快照 ${fact.snapshot_id}`)
+        return parts.length ? parts.join('，') : id
+      })
+      return { text, refs }
+    })
+    .filter((item) => item.text)
 }
 
 /** 明细表状态：服务端筛选/排序/分页 */
@@ -873,6 +948,37 @@ function formatDateTime(iso: string): string {
   margin: 6px 0 0;
   padding-left: 16px;
   font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.insight-degraded {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: #d46b08;
+}
+
+.insight-evidence {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.insight-evidence > summary {
+  cursor: pointer;
+  color: #1677ff;
+}
+
+.insight-evidence-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.insight-evidence-list li {
+  margin-bottom: 2px;
+}
+
+.insight-evidence-ref {
+  margin-left: 4px;
   color: rgba(0, 0, 0, 0.45);
 }
 

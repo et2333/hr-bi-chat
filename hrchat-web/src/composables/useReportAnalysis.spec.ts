@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent } from 'vue'
+import { defineComponent, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { useReportAnalysis } from './useReportAnalysis'
 import * as reportsApi from '@/api/reports'
@@ -94,5 +94,126 @@ describe('report-source analysis lifecycle', () => {
     expect(vm.error.value).toBe('连接中断')
     expect(vm.task.value?.result).toBeNull()
     endStream(); await flushPromises()
+  })
+
+  it('never freezes an empty session key before a valid source is loaded', async () => {
+    const params = reactive({ reportId: 42, dataVersionId: 0, capabilityId: '' })
+    let scoped!: ReturnType<typeof useReportAnalysis>
+    const w = mount(defineComponent({
+      setup() { scoped = useReportAnalysis(() => ({ ...params })); return () => null },
+    }))
+    const reportKeys = () => Object.keys(sessionStorage).filter((k) => k.startsWith('hrchat_report_analysis:'))
+
+    // 初始空 props：不得坐实任何恢复键
+    await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    expect(reportKeys()).toEqual([])
+    expect(reportsApi.startReportAnalysis).not.toHaveBeenCalled()
+
+    // 载入 V7 后才建立唯一的合法会话键
+    params.dataVersionId = 7
+    params.capabilityId = capability
+    await scoped.prepare()
+    await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    expect(reportKeys()).toEqual([storageKey])
+    expect(sessionStorage.getItem(storageKey)).toBe('task1')
+    w.unmount()
+  })
+
+  it('ignores a prepare result that arrives after an explicit session reset', async () => {
+    let complete!: (value: ReturnType<typeof response<ReportAnalysisPrefill>>) => void
+    vi.mocked(reportsApi.getReportAnalysisContext).mockReturnValueOnce(
+      new Promise((resolve) => { complete = resolve }))
+    const pending = vm.prepare()
+    vm.resetSession()
+    complete(response(context))
+    await pending
+    expect(vm.context.value).toBeNull()
+  })
+
+  it('keeps the new session busy when a stale prepare resolves late (B2)', async () => {
+    let stale!: (value: ReturnType<typeof response<ReportAnalysisPrefill>>) => void
+    vi.mocked(reportsApi.getReportAnalysisContext).mockReturnValueOnce(
+      new Promise((resolve) => { stale = resolve }))
+    const first = vm.prepare()
+
+    vm.resetSession()
+    let second!: (value: ReturnType<typeof response<ReportAnalysisPrefill>>) => void
+    vi.mocked(reportsApi.getReportAnalysisContext).mockReturnValueOnce(
+      new Promise((resolve) => { second = resolve }))
+    const pendingSecond = vm.prepare()
+
+    // 旧代次请求迟到返回：不得解锁新一代仍在途的 busy
+    stale(response(context))
+    await first
+    expect(vm.busy.value).toBe(true)
+
+    second(response(context))
+    await pendingSecond
+    expect(vm.busy.value).toBe(false)
+  })
+
+  it('keeps the frozen source for start even when the live props change', async () => {
+    const params = reactive({ reportId: 42, dataVersionId: 7, capabilityId: capability })
+    let scoped!: ReturnType<typeof useReportAnalysis>
+    const w = mount(defineComponent({
+      setup() { scoped = useReportAnalysis(() => ({ ...params })); return () => null },
+    }))
+    await scoped.prepare()
+    // prepare 之后主图切到 V8，但未显式 resetSession：任务参数必须仍用冻结的 V7
+    params.dataVersionId = 8
+    await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    expect(reportsApi.startReportAnalysis).toHaveBeenCalledWith(
+      42, { dataVersionId: 7, baselinePeriod: context.suggestedBaselinePeriod, mode: 'dual' }, expect.any(String))
+    w.unmount()
+  })
+
+  it('binds the report action reference into context, start body and session key (A2)', async () => {
+    const ref = { componentId: 23, viewKey: 'root', actionId: 'act-1' }
+    let scoped!: ReturnType<typeof useReportAnalysis>
+    const w = mount(defineComponent({
+      setup() {
+        scoped = useReportAnalysis(() => ({ reportId: 42, dataVersionId: 7, capabilityId: capability, actionRef: ref }))
+        return () => null
+      },
+    }))
+    await scoped.prepare()
+    expect(reportsApi.getReportAnalysisContext).toHaveBeenCalledWith(42, 7, capability, ref)
+    await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    expect(reportsApi.startReportAnalysis).toHaveBeenCalledWith(
+      42,
+      {
+        dataVersionId: 7, baselinePeriod: context.suggestedBaselinePeriod, mode: 'dual',
+        componentId: 23, viewKey: 'root', actionId: 'act-1',
+      },
+      expect.any(String),
+    )
+    // 会话键含动作引用：同一能力的不同视图/动作各自独立恢复，不互相复用任务
+    const refKey = `hrchat_report_analysis:${JSON.stringify(['t01', 'hr01', 42, 7, capability, 23, 'root', 'act-1'])}`
+    expect(sessionStorage.getItem(refKey)).toBe('task1')
+    expect(sessionStorage.getItem(storageKey)).toBeNull()
+    w.unmount()
+  })
+
+  it('resetSession re-resolves the key so a switched source gets its own session', async () => {
+    const params = reactive({ reportId: 42, dataVersionId: 7, capabilityId: capability })
+    let scoped!: ReturnType<typeof useReportAnalysis>
+    const w = mount(defineComponent({
+      setup() { scoped = useReportAnalysis(() => ({ ...params })); return () => null },
+    }))
+    await scoped.prepare(); await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    expect(sessionStorage.getItem(storageKey)).toBe('task1')
+
+    const nextKey = `hrchat_report_analysis:${JSON.stringify(['t01', 'hr01', 42, 8, 'other_capability'])}`
+    params.dataVersionId = 8
+    params.capabilityId = 'other_capability'
+    await scoped.resetSession()
+    expect(scoped.task.value).toBeNull()
+    await scoped.prepare()
+    vi.mocked(reportsApi.startReportAnalysis).mockResolvedValue(response({ ...running, taskId: 'task2' }))
+    await scoped.start(context.suggestedBaselinePeriod!, 'dual')
+    // 新来源落到独立键，旧键内容不被覆盖
+    expect(sessionStorage.getItem(nextKey)).toBe('task2')
+    expect(sessionStorage.getItem(storageKey)).toBe('task1')
+    w.unmount()
   })
 })
