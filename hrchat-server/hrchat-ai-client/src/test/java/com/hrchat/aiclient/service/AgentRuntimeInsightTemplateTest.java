@@ -16,8 +16,9 @@ class AgentRuntimeInsightTemplateTest {
 
     private Map<String, Object> render(Map<String, Object> summary) {
         AgentRuntimeClient client = Mockito.mock(AgentRuntimeClient.class);
-        Mockito.when(client.generateInsight(Mockito.any(InsightRequest.class))).thenCallRealMethod();
-        return client.generateInsight(new InsightRequest("人力编制报表", "在职人数", summary));
+        Mockito.when(client.generateInsight(Mockito.any(InsightRequest.class), Mockito.any()))
+                .thenCallRealMethod();
+        return client.generateInsight(new InsightRequest("人力编制报表", "在职人数", summary), null);
     }
 
     @Test

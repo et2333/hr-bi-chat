@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
+import com.hrchat.aiclient.model.InsightCallContext;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
 import com.hrchat.api.chat.AnswerPayload;
@@ -185,14 +186,39 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
      */
     @Override
     public Map<String, Object> generateInsight(InsightRequest request) {
+        return generateInsight(request, null);
+    }
+
+    /**
+     * 报表 AI 洞察（R2）：富请求额外携带绑定租户/来源/任务身份的洞察凭据，
+     * Python 在选定适配器与调用模型之前校验该凭据。
+     */
+    @Override
+    public Map<String, Object> generateInsight(InsightRequest request, InsightCallContext call) {
         try {
-            Map<String, Object> body = toRemoteInsight(request);
+            String effectiveTenant = call != null && call.tenantId() != null && !call.tenantId().isBlank()
+                    ? call.tenantId() : tenantNo;
+            Map<String, Object> body = toRemoteInsight(request, call, effectiveTenant);
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-Tenant-No", tenantNo);
+            if (effectiveTenant != null && !effectiveTenant.isBlank()) {
+                headers.set("X-Tenant-No", effectiveTenant);
+            }
+            if (request.isRich()) {
+                if (serviceToken == null || serviceToken.isBlank()) {
+                    // 无法签发可验证凭据时不应向 Python 发送不可信请求
+                    log.warn("insight 缺少服务凭据, 拒绝富请求, baseUrl={}", baseUrl);
+                    throw new BizException(ErrorCode.AI_DEGRADED);
+                }
+                headers.set("X-Hrchat-Service-Token", serviceToken);
+                headers.set(InsightCredentialSigner.HEADER, InsightCredentialSigner.sign(
+                        serviceToken, objectMapper, request, call, effectiveTenant));
+            }
             ResponseEntity<Map> resp = restTemplate.postForEntity(
                     baseUrl + "/v1/insight", new HttpEntity<>(body, headers), Map.class);
             return resp.getBody() == null ? Map.of() : resp.getBody();
+        } catch (BizException e) {
+            throw e;
         } catch (Exception e) {
             log.warn("insight 远程调用失败, baseUrl={}, err={}", baseUrl, e.getMessage());
             throw new BizException(ErrorCode.AI_DEGRADED);
@@ -204,6 +230,13 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
      * 富路径带 context+snapshot；旧路径仅 report_name/metric_name/summary。
      */
     public static Map<String, Object> toRemoteInsight(InsightRequest request) {
+        return toRemoteInsight(request, null, null);
+    }
+
+    /**
+     * 富请求附带 {@code invocation}（task/attempt/tenant/correlation），供 Python 与凭据交叉校验。
+     */
+    static Map<String, Object> toRemoteInsight(InsightRequest request, InsightCallContext call, String tenantId) {
         Map<String, Object> body = new LinkedHashMap<>();
         putIfNotNull(body, "report_name", request.reportName());
         putIfNotNull(body, "metric_name", request.metricName());
@@ -215,6 +248,14 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         }
         if (request.snapshot() != null) {
             body.put("snapshot", toRemoteInsightSnapshot(request.snapshot()));
+        }
+        if (request.isRich() && call != null) {
+            Map<String, Object> invocation = new LinkedHashMap<>();
+            invocation.put("task_id", call.taskId());
+            invocation.put("attempt", call.attempt());
+            invocation.put("tenant_id", tenantId);
+            invocation.put("correlation_id", call.correlationId());
+            body.put("invocation", invocation);
         }
         return body;
     }
@@ -246,6 +287,10 @@ public class RemoteAgentRuntimeClient implements AgentRuntimeClient {
         putIfNotNull(remote, "ratio_scale", ctx.ratioScale());
         putIfNotNull(remote, "numerator_metric_code", ctx.numeratorMetricCode());
         putIfNotNull(remote, "denominator_metric_code", ctx.denominatorMetricCode());
+        // A7/D2：经授权的业务目标上下文；无授权时 question_summary 保持缺省，绝不旁路受限原问题。
+        putIfNotNull(remote, "question_summary", ctx.questionSummary());
+        putIfNotNull(remote, "analysis_goal", ctx.analysisGoal());
+        putIfNotNull(remote, "goal_source", ctx.goalSource());
         return remote;
     }
 

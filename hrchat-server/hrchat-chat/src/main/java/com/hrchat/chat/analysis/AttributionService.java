@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.api.mcp.McpEnvelope;
 import com.hrchat.api.report.AskSourceAccess;
+import com.hrchat.api.report.ReportActionSource;
+import com.hrchat.api.report.ReportActionSourceReader;
 import com.hrchat.api.report.ReportContext;
 import com.hrchat.api.report.ReportSourceReader;
 import com.hrchat.authz.mcp.McpToolHandler;
@@ -53,12 +55,25 @@ public class AttributionService implements McpToolHandler {
     }
     public record StartRequest(Period baselinePeriod, String mode) { }
     private record Source(Origin origin, ChatAskStore.AskRecord ask, MetricDetail metric, Map<String, String> current,
-                          List<Long> orgs, String fingerprint, String scopeLabel, Long turnId) { }
-    /** 分析来源：ASK（问答轮次）或 REPORT（报表数据版本）。 */
-    private record Origin(String type, String askId, Long reportId, Long dataVersionId) {
-        static Origin ask(String askId) { return new Origin("ASK", askId, null, null); }
-        static Origin report(Long reportId, Long dataVersionId) { return new Origin("REPORT", null, reportId, dataVersionId); }
-        String key() { return "ASK".equals(type) ? "ask:" + askId : "report:" + reportId + ":" + dataVersionId; }
+                          Map<String, String> baseline, List<Long> orgs, String fingerprint, String scopeLabel,
+                          Long turnId) { }
+    /** 分析来源：ASK（问答轮次）或 REPORT（报表数据版本 + 不可变动作引用）。 */
+    private record Origin(String type, String askId, Long reportId, Long dataVersionId,
+                          Long componentId, String viewKey, String actionId) {
+        static Origin ask(String askId) { return new Origin("ASK", askId, null, null, null, null, null); }
+        static Origin report(Long reportId, Long dataVersionId) {
+            return new Origin("REPORT", null, reportId, dataVersionId, null, null, null);
+        }
+        static Origin report(Long reportId, Long dataVersionId, Long componentId, String viewKey, String actionId) {
+            return new Origin("REPORT", null, reportId, dataVersionId, componentId, viewKey, actionId);
+        }
+        String key() {
+            if ("ASK".equals(type)) { return "ask:" + askId; }
+            return "report:" + reportId + ":" + dataVersionId
+                    + ":" + (componentId == null ? "-" : componentId)
+                    + ":" + (viewKey == null ? "-" : viewKey)
+                    + ":" + (actionId == null ? "-" : actionId);
+        }
     }
     private record Idempotent(String sourceKey, StartRequest request, String taskId) { }
     private static final Set<String> TERMINAL = Set.of("COMPLETED", "PARTIAL", "FAILED", "CANCELLED");
@@ -94,9 +109,16 @@ public class AttributionService implements McpToolHandler {
     private final Map<String, Idempotent> keys = new HashMap<>();
     private final ChtAnalysisTaskMapper taskStore;
     private ReportSourceReader reportSourceReader;
+    /** A2：按动作引用恢复视图级权威来源；未注入时回退到版本级来源（仅兼容旧调用/测试）。 */
+    private ReportActionSourceReader reportActionSourceReader;
 
     @Autowired(required = false)
     public void setReportSourceReader(ReportSourceReader reportSourceReader) { this.reportSourceReader = reportSourceReader; }
+
+    @Autowired(required = false)
+    public void setReportActionSourceReader(ReportActionSourceReader reportActionSourceReader) {
+        this.reportActionSourceReader = reportActionSourceReader;
+    }
 
     public AttributionService(ChatAskStore asks, ChtSessionMapper sessions, AuthzService authz,
             UserContextService users, SemanticMetaService semantic, ToolContextTokenService tokens,
@@ -131,12 +153,32 @@ public class AttributionService implements McpToolHandler {
         return publicContext(reportSource(fresh(user), reportId, dataVersionId));
     }
 
+    /** A2：报表动作引用的预填上下文；来源由动作引用恢复，不接受自由参数。 */
+    public Map<String, Object> context(UserContext user, Long reportId, Long dataVersionId, Long componentId,
+            String viewKey, String actionId) {
+        return publicContext(source(fresh(user),
+                Origin.report(reportId, dataVersionId, componentId, viewKey, actionId)));
+    }
+
     /**
      * 报表分析预填：返回可信指标/组织/本期基期/来源版本，并校验推荐动作能力与缺失参数。
      * 首轮仅支持离职人数两期部门贡献；页面确认参数后才创建任务。
      */
     public Map<String, Object> prefillFromReport(UserContext user, Long reportId, Long dataVersionId, String capabilityId) {
         Source source = reportSource(fresh(user), reportId, dataVersionId);
+        Map<String, Object> out = publicContext(source);
+        out.put("scopeOrgIds", source.orgs());
+        return applyCapability(out, capabilityId);
+    }
+
+    /**
+     * A2：报表动作引用的预填。来源（期间/组织/版本）由服务端按动作引用从视图快照恢复并重新授权，
+     * 前端只提供动作引用，不提供期间或组织参数。
+     */
+    public Map<String, Object> prefillFromReport(UserContext user, Long reportId, Long dataVersionId,
+            Long componentId, String viewKey, String actionId, String capabilityId) {
+        Source source = source(fresh(user),
+                Origin.report(reportId, dataVersionId, componentId, viewKey, actionId));
         Map<String, Object> out = publicContext(source);
         out.put("scopeOrgIds", source.orgs());
         return applyCapability(out, capabilityId);
@@ -166,6 +208,12 @@ public class AttributionService implements McpToolHandler {
     public synchronized Map<String, Object> startFromReport(UserContext user, Long reportId, Long dataVersionId,
             StartRequest request, String key) {
         return start(user, Origin.report(reportId, dataVersionId), request, key);
+    }
+
+    /** A2：按动作引用启动报表来源分析；来源由服务端恢复，前端不提供期间/组织参数。 */
+    public synchronized Map<String, Object> startFromReport(UserContext user, Long reportId, Long dataVersionId,
+            Long componentId, String viewKey, String actionId, StartRequest request, String key) {
+        return start(user, Origin.report(reportId, dataVersionId, componentId, viewKey, actionId), request, key);
     }
 
     private Map<String, Object> start(UserContext user, Origin origin, StartRequest request, String key) {
@@ -198,6 +246,10 @@ public class AttributionService implements McpToolHandler {
         task.snapshot = snapshots.freeze(user, task.orgs, task.metricVersion, source.current(), baseline, "snapshot:" + task.id);
         task.context = new LinkedHashMap<>(publicContext(source));
         task.context.put("baselinePeriod", baseline);
+        // R3：来源版本与实际取证版本分别保存并展示；新取证不标记成旧快照。
+        task.context.put("sourceDataVersion", "REPORT".equals(origin.type()) && origin.dataVersionId() != null
+                ? String.valueOf(origin.dataVersionId()) : null);
+        task.context.put("analysisDataVersion", "snapshot:" + task.id);
         Map<String, Object> trusted = trusted(task, source, baseline);
         task.body = Map.of("analysis_context", trusted, "invocation_id", task.invocation,
                 "tool_context_token", tokens.issue(task.empNo, task.tenant, task.invocation), "mode", mode);
@@ -225,7 +277,10 @@ public class AttributionService implements McpToolHandler {
         trusted.put("tenant_no", task.tenant); trusted.put("metric_code", "leave_count");
         trusted.put("metric_version", String.valueOf(task.metricVersion)); trusted.put("unit", "人");
         trusted.put("current_period", source.current()); trusted.put("baseline_period", baseline);
-        trusted.put("effective_org_ids", task.orgs); trusted.put("data_version", "snapshot:" + task.id);
+        trusted.put("effective_org_ids", task.orgs);
+        // Python `AnalysisContext` 为 extra=forbid 的严格契约：只发送其声明的键。
+        // 来源版本与取证版本的分离由 task.context（publicContext）保存与展示，不重复放入该契约。
+        trusted.put("data_version", "snapshot:" + task.id);
         trusted.put("scope_ref", task.fingerprint);
         return trusted;
     }
@@ -365,9 +420,48 @@ public class AttributionService implements McpToolHandler {
     }
 
     private Source source(UserContext user, Origin origin) {
-        return "ASK".equals(origin.type())
-                ? askSource(user, origin.askId())
-                : reportSource(user, origin.reportId(), origin.dataVersionId());
+        if ("ASK".equals(origin.type())) {
+            return askSource(user, origin.askId());
+        }
+        if (origin.componentId() != null) {
+            // A2：动作引用必须由服务端恢复原视图来源；来源读取器缺失时不得静默退回版本级/根范围。
+            if (reportActionSourceReader == null) throw new BizException(ErrorCode.SERVICE_UNAVAILABLE, "报表动作来源不可用");
+            return reportViewSource(user, origin);
+        }
+        return reportSource(user, origin.reportId(), origin.dataVersionId());
+    }
+
+    /**
+     * A2：以报表动作引用为来源。期间/组织/版本由 {@link ReportActionSourceReader} 从视图快照恢复，
+     * 前端不提供期间或组织；此处仅做指标口径校验并把视图基线透传为推荐基期。
+     */
+    private Source reportViewSource(UserContext user, Origin origin) {
+        authz.checkFunc(user, "chat:attribution");
+        ReportActionSource src = reportActionSourceReader.readAuthorizedAction(
+                new AskSourceAccess(user.getTenantId(), user.getUserId(), user.getEmpNo()),
+                origin.reportId(), origin.dataVersionId(), origin.componentId(), origin.viewKey(), origin.actionId());
+        if (!"leave_count".equals(src.metricCode())) throw new BizException(ErrorCode.PARAM_INVALID, "仅支持离职人数指标");
+        MetricDetail metric = semantic.getMetricByCode("leave_count");
+        String formula = metric.formulaExpr() == null ? "" : metric.formulaExpr().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        if (!Objects.equals(metric.status(), 1) || metric.permLevel() != null && metric.permLevel() > user.getDataLevel())
+            throw new BizException(ErrorCode.FUNC_FORBIDDEN);
+        if (!formula.equals("selectcount(*)fromfact_emp_changewherechange_typein(5,6)"))
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标口径已变化或不支持当前拆解，请重新查询");
+        if (src.metricVersion() != null && !src.metricVersion().equals(metric.effectiveVersion()))
+            throw new BizException(ErrorCode.PARAM_INVALID, "指标版本与报表来源不一致");
+        if (src.currentPeriod() == null) throw new BizException(ErrorCode.PARAM_INVALID, "报表来源期间缺失");
+        Map<String, String> current = new Period(src.currentPeriod().start(), src.currentPeriod().end()).checked();
+        Map<String, String> baseline = src.baselinePeriod() == null ? null
+                : new Period(src.baselinePeriod().start(), src.baselinePeriod().end()).checked();
+        List<Long> orgs = src.effectiveOrgIds() == null ? List.of()
+                : src.effectiveOrgIds().stream().distinct().sorted().toList();
+        if (orgs.isEmpty()) throw new BizException(ErrorCode.PARAM_INVALID, "报表授权组织范围缺失");
+        String scopeLabel = src.organizationLabel() == null || src.organizationLabel().isBlank()
+                ? "报表授权范围" : src.organizationLabel();
+        Origin viewOrigin = Origin.report(origin.reportId(), origin.dataVersionId(), src.componentId(),
+                src.viewKey(), src.actionId());
+        String fingerprint = user.getPermissionFingerprint() + "|" + viewOrigin.key();
+        return new Source(viewOrigin, null, metric, current, baseline, orgs, fingerprint, scopeLabel, null);
     }
 
     private Source askSource(UserContext user, String askId) {
@@ -402,7 +496,7 @@ public class AttributionService implements McpToolHandler {
         if (orgs.size() != raw.size() || !allowed.containsAll(orgs)) throw new BizException(ErrorCode.FUNC_FORBIDDEN);
         String scopeLabel = ask.payload() != null && ask.payload().caliber() != null
                 ? Objects.toString(ask.payload().caliber().organization(), "原答案授权范围") : "原答案授权范围";
-        return new Source(Origin.ask(askId), ask, metric, period, orgs, user.getPermissionFingerprint(), scopeLabel, ask.turnId());
+        return new Source(Origin.ask(askId), ask, metric, period, null, orgs, user.getPermissionFingerprint(), scopeLabel, ask.turnId());
     }
 
     private Source reportSource(UserContext user, Long reportId, Long dataVersionId) {
@@ -439,7 +533,7 @@ public class AttributionService implements McpToolHandler {
         String fingerprint = user.getPermissionFingerprint() + "|report:" + reportId + ":" + dataVersionId;
         String scopeLabel = ctx.organizationLabel() == null || ctx.organizationLabel().isBlank()
                 ? "报表授权范围" : ctx.organizationLabel();
-        return new Source(Origin.report(reportId, dataVersionId), null, metric, period, orgs, fingerprint, scopeLabel, null);
+        return new Source(Origin.report(reportId, dataVersionId), null, metric, period, null, orgs, fingerprint, scopeLabel, null);
     }
 
     private Map<String, Object> publicContext(Source source) {
@@ -449,12 +543,19 @@ public class AttributionService implements McpToolHandler {
         result.put("scopeLabel", source.scopeLabel());
         result.put("currentPeriod", source.current());
         LocalDate start = LocalDate.parse(source.current().get("start")), end = LocalDate.parse(source.current().get("end"));
-        result.put("suggestedBaselinePeriod", start.getDayOfMonth() == 1 && end.equals(start.plusMonths(1))
-                ? Map.of("start", start.minusMonths(1).toString(), "end", start.toString()) : null);
+        // 视图来源优先使用视图自身的基期（趋势视图取首期）；否则按整月回退到上一月。
+        result.put("suggestedBaselinePeriod", source.baseline() != null ? source.baseline()
+                : (start.getDayOfMonth() == 1 && end.equals(start.plusMonths(1))
+                        ? Map.of("start", start.minusMonths(1).toString(), "end", start.toString()) : null));
         if ("REPORT".equals(source.origin().type())) {
             result.put("sourceType", "REPORT");
             result.put("sourceReportId", source.origin().reportId());
             result.put("sourceDataVersionId", source.origin().dataVersionId());
+            if (source.origin().componentId() != null) {
+                result.put("sourceComponentId", source.origin().componentId());
+                result.put("sourceViewKey", source.origin().viewKey());
+                result.put("sourceActionId", source.origin().actionId());
+            }
         }
         return result;
     }
@@ -526,9 +627,16 @@ public class AttributionService implements McpToolHandler {
         task.tenant = row.getTenantId();
         task.fingerprint = row.getScopeRef();
         task.metricVersion = row.getMetricVersion() == null ? 0 : row.getMetricVersion();
-        task.origin = Origin.report(row.getSourceReportId(), row.getSourceDataVersionId());
         task.orgs = parseOrgs(row.getOrgsJson());
-        task.context = parseObject(row.getContextJson());
+        Map<String, Object> ctx = parseObject(row.getContextJson());
+        // A2：视图级任务的动作引用随可信上下文一并落库，重启后据此恢复同一不可变来源（否则指纹不一致）。
+        Long componentId = ctx == null || !(ctx.get("sourceComponentId") instanceof Number n) ? null : n.longValue();
+        task.origin = componentId == null
+                ? Origin.report(row.getSourceReportId(), row.getSourceDataVersionId())
+                : Origin.report(row.getSourceReportId(), row.getSourceDataVersionId(), componentId,
+                        ctx.get("sourceViewKey") == null ? null : String.valueOf(ctx.get("sourceViewKey")),
+                        ctx.get("sourceActionId") == null ? null : String.valueOf(ctx.get("sourceActionId")));
+        task.context = ctx;
         task.status = ChtAnalysisTask.RUNNING.equals(row.getStatus()) ? ChtAnalysisTask.INTERRUPTED : row.getStatus();
         task.result = parseObject(row.getResultJson());
         task.finished = System.nanoTime();

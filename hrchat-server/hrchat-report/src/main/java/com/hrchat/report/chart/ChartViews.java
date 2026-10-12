@@ -16,6 +16,15 @@ public final class ChartViews {
     private ChartViews() {
     }
 
+    /** 任务建立前的生命周期状态：视图支持洞察但无任务 / 当前视图不支持洞察。 */
+    public static final String INSIGHT_MISSING = "MISSING";
+    public static final String INSIGHT_NOT_APPLICABLE = "NOT_APPLICABLE";
+
+    public record InsightSource(Long reportId, Long componentId, String dataVersion, String viewKey,
+                                String snapshotId, String scopeRef) {}
+    public record EnsureInsightRequest(InsightSource source) {}
+    public record RetryInsightRequest(InsightSource source, Integer expectedAttempt) {}
+
     /**
      * 图表与洞察只读视图（I0：来自持久化数据版本）。
      *
@@ -30,7 +39,14 @@ public final class ChartViews {
     public record ChartAnalysisView(String dataVersion, String viewKey, String dimValue,
                                     String chartStatus, String insightStatus,
                                     ChartDataView chart, InsightView insight,
-                                    Long taskId, Integer attempt) {
+                                    Long taskId, Integer attempt, InsightSource source,
+                                    boolean canEnsure, boolean canRetry) {
+        public ChartAnalysisView(String dataVersion, String viewKey, String dimValue,
+                                 String chartStatus, String insightStatus, ChartDataView chart,
+                                 InsightView insight, Long taskId, Integer attempt) {
+            this(dataVersion, viewKey, dimValue, chartStatus, insightStatus, chart, insight,
+                    taskId, attempt, null, false, false);
+        }
         /** 兼容旧四参构造（测试/过渡）。 */
         public ChartAnalysisView(String dataVersion, String dimValue,
                                  ChartDataView chart, InsightView insight) {
@@ -78,13 +94,37 @@ public final class ChartViews {
     }
 
     /**
-     * AI 洞察解读（P3-C / I1 / I2）。
+     * AI 洞察解读（P3-C / I1 / I2 / R5）。
      * status：complete / degraded / failed / legacy；富路径可带 dataVersion/viewKey、
      * limitations 与可执行推荐动作。
+     *
+     * <p>R5：完整保留模型解读与证据。{@code summary/points} 由通过校验的 narrative 渲染；
+     * {@code claims/narrative/facts} 原样持久化以便页面展示与证据展开（不重新调用模型）。</p>
      */
     public record InsightView(String reportName, String metricName, String summary, List<InsightPoint> points,
                               String status, String degradationReason, String dataVersion, String viewKey,
-                              List<String> limitations, List<InsightAction> actions) {
+                              List<String> limitations, List<InsightAction> actions,
+                              InsightSource source, String taskStatus, boolean canEnsure, boolean canRetry,
+                              String schemaVersion, List<Map<String, Object>> claims, Map<String, Object> narrative,
+                              List<Map<String, Object>> facts) {
+        public InsightView {
+            limitations = limitations == null ? List.of() : limitations;
+            actions = actions == null ? List.of() : actions;
+            claims = claims == null ? List.of() : claims;
+            facts = facts == null ? List.of() : facts;
+        }
+        public InsightView(String reportName, String metricName, String summary, List<InsightPoint> points,
+                           String status, String degradationReason, String dataVersion, String viewKey,
+                           List<String> limitations, List<InsightAction> actions) {
+            this(reportName, metricName, summary, points, status, degradationReason, dataVersion, viewKey,
+                    limitations, actions, null, null, false, false, null, List.of(), null, List.of());
+        }
+        public InsightView withSource(InsightSource source, String taskStatus, boolean canEnsure, boolean canRetry) {
+            return new InsightView(reportName, metricName, summary, points, status, degradationReason,
+                    source == null ? dataVersion : source.dataVersion(), source == null ? viewKey : source.viewKey(),
+                    limitations, actions, source, taskStatus, canEnsure, canRetry,
+                    schemaVersion, claims, narrative, facts);
+        }
         public InsightView(String reportName, String metricName, String summary, List<InsightPoint> points) {
             this(reportName, metricName, summary, points, null, null, null, null, List.of(), List.of());
         }
@@ -96,15 +136,42 @@ public final class ChartViews {
         }
     }
 
-    /** 有效推荐动作（能力目录内，executable=false 时仅作人工核查建议）。 */
-    public record InsightAction(String actionId, String capabilityId, String question, Boolean executable) {
+    /**
+     * 有效推荐动作（能力目录内）。R3：完整保存 capability/参数/缺失参数/执行条件与类别，
+     * 不用单一布尔抹掉“直接可执行 / 需用户确认 / 仅人工建议”的差异。
+     *
+     * @param kind executable=直接可执行；needs_confirmation=需用户确认参数；manual_only=仅人工建议
+     */
+    public record InsightAction(String actionId, String capabilityId, String question, Boolean executable,
+                                Map<String, Object> params, List<String> missingParams,
+                                List<String> executionConditions, String kind) {
+        public InsightAction {
+            params = params == null ? Map.of() : params;
+            missingParams = missingParams == null ? List.of() : missingParams;
+            executionConditions = executionConditions == null ? List.of() : executionConditions;
+            if (kind == null || kind.isBlank()) {
+                kind = Boolean.TRUE.equals(executable) ? "executable"
+                        : (missingParams.isEmpty() ? "manual_only" : "needs_confirmation");
+            }
+        }
+        public InsightAction(String actionId, String capabilityId, String question, Boolean executable) {
+            this(actionId, capabilityId, question, executable, Map.of(), List.of(), List.of(), null);
+        }
     }
 
     /** 洞察任务状态视图（I2；读取只查状态/结果，不触发模型）。 */
     public record InsightTaskView(Long taskId, Integer attempt, String status, String dataVersion, String viewKey,
                                   String scopeRef, String insightRevision, String degradationReason,
                                   String failureReason, String insightGeneratedAt,
-                                  InsightView insight, Map<String, Object> generation) {
+                                  InsightView insight, Map<String, Object> generation,
+                                  InsightSource source, boolean canRetry) {
+        public InsightTaskView(Long taskId, Integer attempt, String status, String dataVersion, String viewKey,
+                               String scopeRef, String insightRevision, String degradationReason,
+                               String failureReason, String insightGeneratedAt, InsightView insight,
+                               Map<String, Object> generation) {
+            this(taskId, attempt, status, dataVersion, viewKey, scopeRef, insightRevision, degradationReason,
+                    failureReason, insightGeneratedAt, insight, generation, null, false);
+        }
     }
 
     /** 洞察要点（value=均值 / trend=趋势 / extreme=极值）。 */

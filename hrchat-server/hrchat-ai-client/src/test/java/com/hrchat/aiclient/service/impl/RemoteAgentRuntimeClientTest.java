@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
 import com.hrchat.aiclient.model.ClarifyQuestion;
+import com.hrchat.aiclient.model.InsightCallContext;
+import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.api.chat.AnswerPayload;
 import com.hrchat.api.chat.AskRequest;
 import com.hrchat.api.chat.ClarifyAnswerRequest;
@@ -306,5 +308,69 @@ class RemoteAgentRuntimeClientTest {
         assertEquals(snapshot, body.get("query_context"));
         assertEquals("new-inv", body.get("invocation_id"));
         assertEquals("new-tool", body.get("tool_context_token"));
+    }
+
+    @Test
+    void richInsightCarriesVerifiableCredentialAndInvocation() throws Exception {
+        client.withServiceToken("service-secret");
+        when(restTemplate.postForEntity(anyString(), any(), eq(Map.class)))
+                .thenReturn(ResponseEntity.ok(Map.of("status", "complete")));
+        var context = new InsightRequest.InsightContext("1", "1", "10", "headcount", "mv-1",
+                "在职人数", "编制对比", "人", "stock",
+                new InsightRequest.Period("2026-08-01", "2026-09-01"), null, List.of(10L),
+                "7", "root", "scope-1", null, null);
+        var snapshot = new InsightRequest.InsightSnapshot("555", "7", "root",
+                List.of("2026-08"), List.of(new InsightRequest.SeriesItem("在职人数", List.of(10))),
+                null, false, null, null, List.of());
+        var request = new InsightRequest("编制对比", "在职人数", Map.of(), context, snapshot);
+
+        client.generateInsight(request, new InsightCallContext("t01", 50L, 1, "corr-1"));
+
+        ArgumentCaptor<HttpEntity> captor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).postForEntity(eq("http://gateway:8000/v1/insight"), captor.capture(), eq(Map.class));
+        assertEquals("t01", captor.getValue().getHeaders().getFirst("X-Tenant-No"));
+        String credential = captor.getValue().getHeaders().getFirst(InsightCredentialSigner.HEADER);
+        assertNotNull(credential, "富请求必须携带洞察凭据");
+        Map<?, ?> body = (Map<?, ?>) captor.getValue().getBody();
+        Map<?, ?> invocation = (Map<?, ?>) body.get("invocation");
+        assertEquals(50L, ((Number) invocation.get("task_id")).longValue());
+        assertEquals(1, ((Number) invocation.get("attempt")).intValue());
+        assertEquals("corr-1", invocation.get("correlation_id"));
+
+        // 凭据可被共享密钥方以相同算法验证：payload.signature 且绑定任务/来源
+        Map<String, Object> claims = verifyCredential(credential, "service-secret");
+        assertEquals("insight", claims.get("purpose"));
+        assertEquals("t01", claims.get("tenant_id"));
+        assertEquals("1", claims.get("report_id"));
+        assertEquals("555", claims.get("snapshot_id"));
+        assertEquals(50L, ((Number) claims.get("task_id")).longValue());
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> verifyCredential(String credential, String secret) throws Exception {
+        String[] parts = credential.split("\\.");
+        assertEquals(2, parts.length);
+        java.util.Base64.Decoder decoder = java.util.Base64.getUrlDecoder();
+        byte[] payload = decoder.decode(parts[0]);
+        byte[] signature = decoder.decode(parts[1]);
+        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+        mac.init(new javax.crypto.spec.SecretKeySpec(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                "HmacSHA256"));
+        org.junit.jupiter.api.Assertions.assertArrayEquals(mac.doFinal(payload), signature);
+        return objectMapper.readValue(payload, Map.class);
+    }
+
+    @Test
+    void richInsightWithoutServiceTokenIsRejectedLocally() {
+        var context = new InsightRequest.InsightContext("1", "1", "10", "headcount", "mv-1",
+                "在职人数", "编制对比", "人", "stock",
+                new InsightRequest.Period("2026-08-01", "2026-09-01"), null, List.of(10L),
+                "7", "root", "scope-1", null, null);
+        var snapshot = new InsightRequest.InsightSnapshot("555", "7", "root",
+                List.of("2026-08"), List.of(new InsightRequest.SeriesItem("在职人数", List.of(10))),
+                null, false, null, null, List.of());
+        var request = new InsightRequest("编制对比", "在职人数", Map.of(), context, snapshot);
+        org.junit.jupiter.api.Assertions.assertThrows(com.hrchat.common.exception.BizException.class,
+                () -> client.generateInsight(request, new InsightCallContext("t01", 50L, 1, "corr-1")));
     }
 }

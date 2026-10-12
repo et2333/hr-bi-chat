@@ -29,6 +29,9 @@ public enum ErrorCode {
     IDEMPOTENT_PROCESSING("HRX-1006", 409, "幂等请求处理中，请勿重复提交"),
     IDEMPOTENCY_CONFLICT("HRX-1007", 409, "幂等键已用于不同请求"),
 
+    SOURCE_CONFLICT("HRX-1008", 409, "洞察来源不可用：{0}"),
+    ATTEMPT_CONFLICT("HRX-1009", 409, "洞察尝试已更新，请重新读取任务"),
+
     // ---------------- 权限错误 HRC-2xxx ----------------
     AUTH_EXPIRED("HRC-2001", 401, "登录已过期，请重新登录"),
     FUNC_FORBIDDEN("HRC-2002", 403, "您暂无该功能的访问权限"),

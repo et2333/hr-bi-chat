@@ -47,7 +47,7 @@ public class GlobalExceptionHandler {
         if (isPermissionDenied(e.getErrorCode())) {
             recordPermDenied(e, request);
         }
-        ApiResponse<Void> body = ApiResponse.error(e.getErrorCode().getCode(), e.getMessageText());
+        ApiResponse<Void> body = ApiResponse.error(e.getErrorCode().getCode(), e.getMessageText(), e.getDetails());
         return ResponseEntity.status(e.getErrorCode().getHttpStatus()).body(body);
     }
 
