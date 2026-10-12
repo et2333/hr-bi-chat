@@ -148,7 +148,12 @@ class MockLlmAdapter(ModelAdapter):
                 {
                     "claim_id": "c1",
                     "kind": "fact",
-                    "text": fact.get("label", ""),
+                    "segments": [
+                        {"type": "text", "text": "重点关注该项变化："},
+                        {"type": "fact", "fact_id": fact["fact_id"], "field": "value"},
+                        {"type": "text", "text": " "},
+                        {"type": "fact", "fact_id": fact["fact_id"], "field": "unit"},
+                    ],
                     "fact_ids": [fact["fact_id"]],
                     "predicate": self._insight_predicate(fact),
                     "unit": fact.get("unit"),
@@ -159,6 +164,7 @@ class MockLlmAdapter(ModelAdapter):
             {
                 "selected_fact_ids": [f["fact_id"] for f in selected],
                 "claims": claims,
+                "narrative": {"summary_claim_id": "c1" if claims else None, "finding_claim_ids": []},
                 "limitations": [],
                 "next_actions": [],
             },

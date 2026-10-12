@@ -58,8 +58,8 @@ class ReportTableServiceTest {
     @BeforeEach
     void setUp() {
         ReportChartService chartService = new ReportChartService(reportService, componentMapper, semanticMetaService,
-                authzService, queryExecService, org.mockito.Mockito.mock(RptReportMapper.class),
-                org.mockito.Mockito.mock(com.hrchat.aiclient.service.AgentRuntimeClient.class), new ObjectMapper());
+                authzService, queryExecService, new ObjectMapper(),
+                new ViewOrgScopeResolver(org.mockito.Mockito.mock(com.hrchat.authz.mapper.SecOrgNodeMapper.class)));
         service = new ReportTableService(reportService, componentMapper, semanticMetaService,
                 authzService, queryExecService, chartService);
         ctx = UserContext.builder().userId(1L).empNo("hr01").build();

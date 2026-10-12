@@ -2,6 +2,7 @@ package com.hrchat.aiclient.service;
 
 import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
+import com.hrchat.aiclient.model.InsightCallContext;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.api.chat.AskRequest;
 import com.hrchat.api.chat.ClarifyAnswerRequest;
@@ -72,6 +73,20 @@ public interface AgentRuntimeClient {
      * @return 解读视图（summary + points[{type,label}]）
      */
     default Map<String, Object> generateInsight(InsightRequest request) {
+        return generateInsight(request, null);
+    }
+
+    /**
+     * 报表 AI 洞察（R2：带可信调用绑定）。
+     *
+     * <p>默认忽略绑定并回退到 {@link #generateInsight(InsightRequest)}；远程实现据此签发
+     * 绑定租户/来源/任务身份的洞察凭据，非法请求由 Python 在模型调用前拒绝。</p>
+     */
+    default Map<String, Object> generateInsight(InsightRequest request, InsightCallContext call) {
+        return localInsightTemplate(request);
+    }
+
+    private Map<String, Object> localInsightTemplate(InsightRequest request) {
         String reportName = request.reportName() == null ? "" : request.reportName();
         String metricName = request.metricName() == null ? "" : request.metricName();
         Map<String, Object> summary = request.summary() == null ? Map.of() : request.summary();

@@ -187,6 +187,31 @@ class ReportVersionConsistencyIntegrationTest {
             assertTrue(h2v9.contains(token), "h2 V9 缺 token: " + token);
             assertTrue(mysqlv9.contains(token), "mysql V9 缺 token: " + token);
         }
+
+        // R3：数据版本冻结分析来源上下文的列随 V10 就位，且 H2 与 MySQL 脚本保持同步。
+        for (String col : List.of("context_json", "context_completeness")) {
+            assertTrue(columnExists("rpt_data_version", col), "rpt_data_version 缺列 " + col);
+        }
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version='10' AND success=TRUE", Integer.class));
+        String h2v10 = readClasspath("db/migration/h2/V10__version_analysis_source.sql");
+        String mysqlv10 = readClasspath("db/migration/mysql/V10__version_analysis_source.sql");
+        for (String token : List.of("rpt_data_version", "context_json", "context_completeness")) {
+            assertTrue(h2v10.contains(token), "h2 V10 缺 token: " + token);
+            assertTrue(mysqlv10.contains(token), "mysql V10 缺 token: " + token);
+        }
+
+        // A7/D2：洞察任务上下文可见域标识列随 V11 就位，且 H2 与 MySQL 脚本保持同步。
+        assertTrue(columnExists("rpt_insight_task", "context_visibility_ref"),
+                "rpt_insight_task 缺列 context_visibility_ref");
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM flyway_schema_history WHERE version='11' AND success=TRUE", Integer.class));
+        String h2v11 = readClasspath("db/migration/h2/V11__insight_context_visibility.sql");
+        String mysqlv11 = readClasspath("db/migration/mysql/V11__insight_context_visibility.sql");
+        for (String token : List.of("rpt_insight_task", "context_visibility_ref")) {
+            assertTrue(h2v11.contains(token), "h2 V11 缺 token: " + token);
+            assertTrue(mysqlv11.contains(token), "mysql V11 缺 token: " + token);
+        }
     }
 
     private boolean tableExists(String table) {

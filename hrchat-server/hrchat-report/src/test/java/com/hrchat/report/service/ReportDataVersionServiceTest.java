@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -141,6 +142,42 @@ class ReportDataVersionServiceTest {
 
         assertThat(first.dataVersionId()).isEqualTo(second.dataVersionId()).isEqualTo(11L);
         verify(dataVersionMapper, times(1)).insert(any());
+    }
+
+    /**
+     * 版本 scopeRef 必须先按冻结来源上下文收窄再取指纹：与读取路径 requireScope/readSnapshot 同口径，
+     * 否则同一用户生成时按全量范围、读取时按收窄范围计算，指纹恒不相等 → 组件端点恒 403。
+     */
+    @Test
+    void generatedScopeRefMustMatchNarrowedScopeUsedByReadPath() {
+        UserContext wide = UserContext.builder().userId(1L).empNo("hr04").tenantId("t01")
+                .dataLevel(1).grantedOrgs(List.of(grant(2L), grant(9L))).build();
+        RptReport report = report(7L, null);
+        report.setContextJson("{\"effectiveOrgIds\":[2]}");
+        when(reportService.requireAccessibleReport(wide, 7L)).thenReturn(report);
+        when(dataVersionMapper.insert(any())).thenAnswer(inv -> {
+            RptDataVersion v = inv.getArgument(0);
+            v.setId(11L);
+            return 1;
+        });
+        when(componentMapper.selectList(any())).thenReturn(List.of());
+
+        service.ensureCurrent(wide, 7L, "ensure-7");
+
+        ArgumentCaptor<RptDataVersion> captor = ArgumentCaptor.forClass(RptDataVersion.class);
+        verify(dataVersionMapper).insert(captor.capture());
+        RptDataVersion created = captor.getValue();
+        UserContext narrowed = ReportDataScope.narrow(wide, Map.of("effectiveOrgIds", List.of(2)));
+        assertThat(created.getScopeRef()).isEqualTo(ReportDataScope.fingerprint(narrowed));
+        assertThat(created.getScopeRef()).isNotEqualTo(ReportDataScope.fingerprint(wide));
+        // 读取路径同口径：收窄后指纹一致，不再抛 403。
+        service.requireScope(wide, report, created);
+    }
+
+    private static UserContext.GrantedOrg grant(long orgKey) {
+        return UserContext.GrantedOrg.builder().orgNodeId(orgKey).orgCode("org" + orgKey)
+                .orgName("org" + orgKey).orgPath("/1/" + orgKey + "/").scope(1)
+                .subtreeOrgKeys(List.of(orgKey)).build();
     }
 
     private static RptReport report(Long id, Long currentVersionId) {

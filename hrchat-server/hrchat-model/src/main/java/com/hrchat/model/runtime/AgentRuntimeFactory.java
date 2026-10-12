@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.aiclient.model.AgentInvocationContext;
 import com.hrchat.aiclient.model.AgentResult;
+import com.hrchat.aiclient.model.InsightCallContext;
 import com.hrchat.aiclient.model.InsightRequest;
 import com.hrchat.aiclient.service.AgentRuntimeClient;
 import com.hrchat.aiclient.service.impl.LocalAgentRuntimeImpl;
@@ -245,5 +246,15 @@ public class AgentRuntimeFactory implements AgentRuntimeClient, ApplicationListe
     @Override
     public Map<String, Object> generateInsight(InsightRequest request) {
         return getDelegate(TenantContextHolder.get()).generateInsight(request);
+    }
+
+    /**
+     * 报表 AI 洞察（R2）：按绑定租户委托，携带任务身份签发可信凭据。
+     */
+    @Override
+    public Map<String, Object> generateInsight(InsightRequest request, InsightCallContext call) {
+        String tenant = call != null && call.tenantId() != null && !call.tenantId().isBlank()
+                ? call.tenantId() : TenantContextHolder.get();
+        return getDelegate(tenant).generateInsight(request, call);
     }
 }

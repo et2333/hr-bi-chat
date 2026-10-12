@@ -35,6 +35,8 @@ public class RptInsightTask {
     private Long dataVersionId;
     private String viewKey;
     private String scopeRef;
+    /** A7/D2 上下文可见域标识（不可逆摘要）：隔离生成键与结果选择，客户端不可自选。 */
+    private String contextVisibilityRef;
     private String metricVersion;
     private String insightRevision;
     private String status;

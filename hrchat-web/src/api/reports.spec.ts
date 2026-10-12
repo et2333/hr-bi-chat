@@ -61,18 +61,33 @@ describe('api/reports', () => {
     expect(get).toHaveBeenCalledWith('/reports/7/components/23/insight')
   })
 
-  it('postInsightTask 幂等确保洞察任务并透传下钻条件', () => {
-    postInsightTask(7, 23, '研发中心')
-    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks', null, {
-      params: { dimValue: '研发中心' },
-    })
-    postInsightTask(7, 23)
-    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks', null, { params: undefined })
+  it('postInsightTask 幂等确保洞察任务并透传来源身份', () => {
+    const src = {
+      reportId: 7,
+      componentId: 23,
+      dataVersion: '88',
+      viewKey: 'dim=org|value=%E7%A0%94%E5%8F%91%E4%B8%AD%E5%BF%83',
+      snapshotId: '555',
+      scopeRef: 'scope-1',
+    }
+    postInsightTask(7, 23, src)
+    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks', { source: src })
   })
 
-  it('retryInsightTask 复用快照重试指定任务', () => {
-    retryInsightTask(7, 23, 99)
-    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks/99/retry', null)
+  it('retryInsightTask 复用快照重试指定任务并携带预期 attempt', () => {
+    const src = {
+      reportId: 7,
+      componentId: 23,
+      dataVersion: '88',
+      viewKey: 'root',
+      snapshotId: '555',
+      scopeRef: 'scope-1',
+    }
+    retryInsightTask(7, 23, 99, src, 1)
+    expect(post).toHaveBeenLastCalledWith('/reports/7/components/23/insight-tasks/99/retry', {
+      source: src,
+      expectedAttempt: 1,
+    })
   })
 
   it('createExport 透传 PDF 格式', () => {

@@ -27,6 +27,13 @@ public class BizException extends RuntimeException {
         this.args = args;
     }
 
+    private transient Object details;
+
+    public BizException withDetails(Object details) {
+        this.details = details;
+        return this;
+    }
+
     /** 格式化后的用户可读文案。 */
     public String getMessageText() {
         return super.getMessage();

@@ -5,9 +5,11 @@ import com.hrchat.authz.model.UserContext;
 import com.hrchat.common.api.ApiResponse;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
 import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
+import com.hrchat.report.chart.ChartViews.EnsureInsightRequest;
 import com.hrchat.report.chart.ChartViews.InsightTaskView;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
+import com.hrchat.report.chart.ChartViews.RetryInsightRequest;
 import com.hrchat.report.chart.ChartViews.TableView;
 import com.hrchat.report.service.InsightTaskService;
 import com.hrchat.report.service.ReportChartService;
@@ -19,6 +21,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -47,8 +50,12 @@ public class ChartController {
     public ApiResponse<ChartAnalysisView> chartAnalysis(@PathVariable Long reportId,
                                                         @PathVariable Long compId,
                                                         @RequestParam(required = false) String dimValue,
+                                                        @RequestParam(required = false) String dataVersion,
+                                                        @RequestParam(required = false) String viewKey,
+                                                        @RequestParam(required = false) String snapshotId,
                                                         @CurrentUser UserContext ctx) {
-        return ApiResponse.ok(chartService.chartAnalysis(reportId, compId, dimValue, ctx));
+        return ApiResponse.ok(chartService.chartAnalysis(reportId, compId, dimValue,
+                dataVersion, viewKey, snapshotId, ctx));
     }
 
     @Operation(summary = "确保报表有当前成功数据版本（旧报表打开初始化，幂等）")
@@ -107,22 +114,24 @@ public class ChartController {
         return ApiResponse.ok(tableService.dimValues(reportId, compId, ctx));
     }
 
-    @Operation(summary = "确保当前视图的洞察任务（幂等；图表就绪但尚无洞察时入队生成）")
+    @Operation(summary = "确保当前视图的洞察任务（幂等；携带预期来源，图表就绪但尚无洞察时入队生成）")
     @PostMapping("/{reportId}/components/{compId}/insight-tasks")
     public ApiResponse<InsightTaskView> ensureInsightTask(@PathVariable Long reportId,
                                                           @PathVariable Long compId,
-                                                          @RequestParam(required = false) String dimValue,
+                                                          @RequestBody(required = false) EnsureInsightRequest body,
                                                           @CurrentUser UserContext ctx) {
-        return ApiResponse.ok(insightTaskService.ensureForView(ctx, reportId, compId, dimValue));
+        return ApiResponse.ok(insightTaskService.ensureForView(ctx, reportId, compId, body == null ? null : body.source()));
     }
 
-    @Operation(summary = "重试失败的洞察任务（沿用同一数据版本与快照，attempt 递增）")
+    @Operation(summary = "重试失败的洞察任务（沿用同一数据版本与快照，expectedAttempt 匹配后 attempt 递增）")
     @PostMapping("/{reportId}/components/{compId}/insight-tasks/{taskId}/retry")
     public ApiResponse<InsightTaskView> retryInsightTask(@PathVariable Long reportId,
                                                          @PathVariable Long compId,
                                                          @PathVariable Long taskId,
+                                                         @RequestBody(required = false) RetryInsightRequest body,
                                                          @CurrentUser UserContext ctx) {
-        return ApiResponse.ok(insightTaskService.retry(ctx, reportId, compId, taskId));
+        return ApiResponse.ok(insightTaskService.retry(ctx, reportId, compId, taskId,
+                body == null ? null : body.source(), body == null ? null : body.expectedAttempt()));
     }
 
     @Operation(summary = "图表 AI 洞察解读")

@@ -3,6 +3,8 @@ package com.hrchat.report.source;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hrchat.api.report.AskSourceAccess;
 import com.hrchat.api.report.ReportContext;
+import com.hrchat.authz.model.UserContext;
+import com.hrchat.authz.service.UserContextService;
 import com.hrchat.common.error.ErrorCode;
 import com.hrchat.common.exception.BizException;
 import com.hrchat.report.entity.RptDataVersion;
@@ -23,10 +25,14 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
- * REPORT 来源读取单测（I3）：归属越权、数据版本归属/就绪、上下文为空与成功恢复。
+ * REPORT 来源读取单测（I3/R3）：统一访问裁决、数据版本归属/就绪、
+ * 冻结上下文优先、旧版本同修订号回退与不可恢复边界。
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -39,6 +45,8 @@ class ReportSourceReaderImplTest {
     private ReportService reportService;
     @Mock
     private RptDataVersionMapper dataVersionMapper;
+    @Mock
+    private UserContextService userContextService;
 
     private ObjectMapper objectMapper;
     private ReportSourceReaderImpl reader;
@@ -46,19 +54,23 @@ class ReportSourceReaderImplTest {
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
-        reader = new ReportSourceReaderImpl(reportService, dataVersionMapper, objectMapper);
+        reader = new ReportSourceReaderImpl(reportService, dataVersionMapper, userContextService, objectMapper);
+        when(userContextService.resolve(anyString(), anyString(), any()))
+                .thenReturn(UserContext.builder().userId(1L).empNo("hr01").tenantId("t01").build());
+        when(reportService.requireAccessibleReport(any(), anyLong())).thenReturn(accessibleReport());
     }
 
     private AskSourceAccess access() {
         return new AskSourceAccess("t01", 1L, "hr01");
     }
 
-    private RptReport ownedReport() {
+    private RptReport accessibleReport() {
         RptReport r = new RptReport();
         r.setId(REPORT_ID);
         r.setOwnerId(1L);
         r.setTenantId("t01");
         r.setIsDeleted(0);
+        r.setDefinitionRevision(1);
         return r;
     }
 
@@ -67,6 +79,7 @@ class ReportSourceReaderImplTest {
         v.setId(VERSION_ID);
         v.setReportId(reportId);
         v.setStatus(ReportDataVersionService.STATUS_READY);
+        v.setDefinitionRevision(1);
         return v;
     }
 
@@ -84,8 +97,16 @@ class ReportSourceReaderImplTest {
     }
 
     @Test
-    void missingReport_forbidden() {
-        when(reportService.loadReport(REPORT_ID)).thenReturn(null);
+    void missingAccess_forbidden() {
+        BizException e = assertThrows(BizException.class,
+                () -> reader.readAuthorizedReport(null, REPORT_ID, VERSION_ID));
+        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.FUNC_FORBIDDEN);
+    }
+
+    @Test
+    void resolvedUserMismatch_forbidden() {
+        when(userContextService.resolve(anyString(), anyString(), any()))
+                .thenReturn(UserContext.builder().userId(999L).empNo("hr01").tenantId("t01").build());
 
         BizException e = assertThrows(BizException.class,
                 () -> reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID));
@@ -93,21 +114,9 @@ class ReportSourceReaderImplTest {
     }
 
     @Test
-    void notOwner_forbidden() {
-        RptReport other = ownedReport();
-        other.setOwnerId(99L);
-        when(reportService.loadReport(REPORT_ID)).thenReturn(other);
-
-        BizException e = assertThrows(BizException.class,
-                () -> reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID));
-        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.FUNC_FORBIDDEN);
-    }
-
-    @Test
-    void tenantMismatch_forbidden() {
-        RptReport other = ownedReport();
-        other.setTenantId("t99");
-        when(reportService.loadReport(REPORT_ID)).thenReturn(other);
+    void notAccessible_forbidden() {
+        when(reportService.requireAccessibleReport(any(), anyLong()))
+                .thenThrow(new BizException(ErrorCode.FUNC_FORBIDDEN));
 
         BizException e = assertThrows(BizException.class,
                 () -> reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID));
@@ -116,7 +125,6 @@ class ReportSourceReaderImplTest {
 
     @Test
     void versionBelongsToOtherReport_paramInvalid() {
-        when(reportService.loadReport(REPORT_ID)).thenReturn(ownedReport());
         when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(readyVersion(999L));
 
         BizException e = assertThrows(BizException.class,
@@ -126,7 +134,6 @@ class ReportSourceReaderImplTest {
 
     @Test
     void versionNotReady_paramInvalid() {
-        when(reportService.loadReport(REPORT_ID)).thenReturn(ownedReport());
         RptDataVersion running = readyVersion(REPORT_ID);
         running.setStatus(ReportDataVersionService.STATUS_RUNNING);
         when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(running);
@@ -137,35 +144,55 @@ class ReportSourceReaderImplTest {
     }
 
     @Test
-    void missingContextJson_paramInvalid() {
-        RptReport report = ownedReport();
-        report.setContextJson("   ");
-        when(reportService.loadReport(REPORT_ID)).thenReturn(report);
-        when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(readyVersion(REPORT_ID));
+    void frozenContextSurvivesDefinitionEdit() throws Exception {
+        String json = contextJson();
+        RptReport report = accessibleReport();
+        report.setDefinitionRevision(2);          // 报表已编辑，当前修订号不同
+        report.setContextJson("{\"metricCode\":\"other\"}");
+        when(reportService.requireAccessibleReport(any(), anyLong())).thenReturn(report);
+        RptDataVersion version = readyVersion(REPORT_ID);
+        version.setDefinitionRevision(1);
+        version.setContextJson(json);             // 版本自身的冻结上下文
+        when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(version);
+
+        ReportContext actual = reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID);
+
+        assertThat(actual).isEqualTo(objectMapper.readValue(json, ReportContext.class));
+        assertThat(actual.metricCode()).isEqualTo("leave_count");
+        assertThat(actual.period().kind()).isEqualTo("FIXED");
+        assertThat(actual.effectiveOrgIds()).containsExactly(2L, 3L);
+        assertThat(actual.dimensions()).isEqualTo(List.of("org"));
+        assertThat(actual.filters()).isEqualTo(Map.of());
+    }
+
+    @Test
+    void legacyVersionWithoutFrozenContext_fallsBackWhenSameRevision() throws Exception {
+        String json = contextJson();
+        RptReport report = accessibleReport();
+        report.setDefinitionRevision(1);
+        report.setContextJson(json);
+        when(reportService.requireAccessibleReport(any(), anyLong())).thenReturn(report);
+        RptDataVersion version = readyVersion(REPORT_ID);
+        version.setDefinitionRevision(1);
+        when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(version);
+
+        ReportContext actual = reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID);
+
+        assertThat(actual).isEqualTo(objectMapper.readValue(json, ReportContext.class));
+    }
+
+    @Test
+    void legacyVersionWithoutFrozenContext_changedRevision_paramInvalid() {
+        RptReport report = accessibleReport();
+        report.setDefinitionRevision(2);
+        report.setContextJson(contextJson());
+        when(reportService.requireAccessibleReport(any(), anyLong())).thenReturn(report);
+        RptDataVersion version = readyVersion(REPORT_ID);
+        version.setDefinitionRevision(1);
+        when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(version);
 
         BizException e = assertThrows(BizException.class,
                 () -> reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID));
         assertThat(e.getErrorCode()).isEqualTo(ErrorCode.PARAM_INVALID);
-    }
-
-    @Test
-    void success_returnsPersistedContext() throws Exception {
-        RptReport report = ownedReport();
-        String json = contextJson();
-        report.setContextJson(json);
-        when(reportService.loadReport(REPORT_ID)).thenReturn(report);
-        when(dataVersionMapper.selectById(VERSION_ID)).thenReturn(readyVersion(REPORT_ID));
-
-        ReportContext actual = reader.readAuthorizedReport(access(), REPORT_ID, VERSION_ID);
-        ReportContext expected = objectMapper.readValue(json, ReportContext.class);
-
-        assertThat(actual).isEqualTo(expected);
-        assertThat(actual.metricCode()).isEqualTo("leave_count");
-        assertThat(actual.metricVersion()).isEqualTo(1);
-        assertThat(actual.effectiveOrgIds()).containsExactly(2L, 3L);
-        assertThat(actual.period().kind()).isEqualTo("FIXED");
-        assertThat(actual.dimensions()).isEqualTo(List.of("org"));
-        assertThat(actual.filters()).isEqualTo(Map.of());
-        assertThat(actual.snapshotReusable()).isTrue();
     }
 }

@@ -1,5 +1,162 @@
 # HR 问数评测基线（S1）
 
+## I4：AI 洞察全链路验收与三组对照（2026-10-11）
+
+阶段 I4 先冻结本轮代码、Schema、提示与数据版本，再交付固定评测集、三组对照、判定规则、真实模型小样本及运行归档。所有报告写入被 Git 忽略的 `docs/evaluation-runs/`，保留全部成功与失败，不挑最佳重跑。
+
+### 固定评测集与判定（I4-1、I4-4）
+
+`datasets/insight-scenarios-v1/`：5 个固定模拟业务场景（dev 3、frozen 2）加 3 组上下文消融。每例预写正确事实、禁止结论与可执行动作；`evals/insight_scenarios.py` 加载时用 `build_fact_bundle` 复核手写预期，出现漂移即报错。
+
+| 场景 | 指标/语义 | 关键预期 | 推荐动作 |
+|---|---|---|---|
+| IS-01 研发两期持平抵消 (dev) | leave_count/flow | 净变化 0、部门 -1/+1 抵消；禁止净贡献率 | 部门贡献，可执行 |
+| IS-02 小基数变化 (dev) | headcount/stock | 1→2 优先绝对变化；存量不跨期求和 | 仅人工核查，不可执行 |
+| IS-03 缺月序列 (dev) | leave_count/flow | 缺 2026-02，禁止持续趋势 | 部门贡献，可执行 |
+| IS-04 比率口径不足 (frozen) | leave_rate/ratio | 缺分子/分母，禁止百分点变化 | 仅人工核查，不可执行 |
+| IS-05 上下文不完整 (frozen) | leave_count/flow | 无基期，仅并列极值可算 | 部门贡献，缺参不可执行 |
+
+消融：AB-01 移除基期、AB-02 移除部门分项、AB-03 移除比率分子/分母。判定规则（`score_insight`/`score_ablation`）固定记录重点覆盖分子/分母、事实漂移、事实引用错误、禁止结论与动作匹配；消融另查是否引用了被移除的证据。相关单测 6 项见 `tests/test_insight_scenarios.py`。
+
+### 三组对照（I4-3）
+
+- **组 A 模板 vs LLM**：同一事实包，比较解读而非算数。
+- **组 B 缺上下文 vs 完整上下文**：逐项移除一个上下文变量，检查模型是否降级而非断言被移除的证据。
+- **组 C 单 vs 双 Agent**：复用 `evals.s6_real`，见 [S6 部门贡献文档](S6-department-contribution.md)。
+
+在 `hrchat-ai` 执行（离线脚本模型、零付费）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.insight_compare --group all --offline
+```
+
+真实模型（须显式确认，整轮 ≤60 次调用）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.insight_compare --group all --real --model qwen3.6-plus --confirm-real-calls
+```
+
+离线冒烟：组 A 模板 5/5、脚本 LLM 5/5 全覆盖，组 B 3/3。脚本臂只证明链路，不代表模型质量。
+
+### 真实模型小样本（I4-5）
+
+模型取 `.env.local` 配置的 `qwen3.6-plus`（该 Key 免费额度不接受 `qwen-plus`）；输出上限沿用 `limits`（每例最多 2 次调用、60 秒）。
+
+| 运行 | 报告 ID | 真实调用 | 结果 |
+|---|---|---:|---|
+| 组 A/B `qwen-plus`（保留失败） | `insight-compare-20261011T135722362276Z` | 11 | 全部 HTTP 403（AllocationQuota），usage 未知 |
+| 组 A/B `qwen3.6-plus` | `insight-compare-20261011T135759254435Z` | 22 | LLM 5 臂全部 `draft_validation_failed`；模板 5/5、组 B 3/3 |
+| 组 C 单/双 Agent | `s6-real-20261011T140302039924Z` | 10 | 6/6 通过（详见 S6 文档） |
+| 跨服务/浏览器（脚本模型） | `s6-smoke-20261011T140446260286Z` | 0 | 10 项检查全通过 |
+
+`qwen3.6-plus` 组 A/B 共 22 次调用（每臂 1 次 + 1 次修复）：组 A 输入 8,315/输出 3,012 tokens，组 B 输入 10,269/输出 3,671，合计 25,267 tokens；任务耗时组 A 55.7 秒、组 B 67.7 秒。组 C 输入 18,801/输出 1,346，合计 20,147 tokens，任务耗时约 31.5 秒。未配置价格快照，金额保持未知。报告内 `summary.calls` 依赖适配器 `.calls` 属性，真实适配器未暴露，故为 0；真实调用数以 `generation.call_count` 累计为准（22）。
+
+**真实模型发现（冻结本轮提示，未改生产 prompt）**：真实草稿全部未过契约校验，两类可复现错误——(1) 对 `absolute_change` 事实误用 predicate `tied_extreme`；(2) 动作参数中的期间被序列化为字符串 `"2026-03-01~2026-04-01"`，而契约要求 `{start,end}` 对象。这是冻结提示词的健壮性问题，本轮如实记录，修复与复验见下节。
+
+边界声明：组 C 本轮为脚本模型搭配冻结模拟工具，不是 Java/MCP/浏览器全栈真实模型验收（全栈由 `s6_smoke` 单独覆盖）；双 Agent 未观察到相对单 Agent 的净收益。单次小样本只做接通与行为验收，不声称泛化准确率。
+
+### 契约修复与真实模型复验（2026-10-11）
+
+针对 I4-5 发现的两类契约错误，完成三项修复并重测：
+
+- **提示升级**（`insight/generation.py`）：`PROMPT_VERSION` 由 `insight-prompt-1` → `insight-prompt-2`，补入 predicate→事实类型/方向映射（无法对应时须填 `null`）、`next_actions` 能力与报告指标 `metric_code` 一致约束、期间对象形状（`{start,end}`）、缺失参数不得补造（须写入 `missing_params` 且 `executable=false`）。
+- **校验放宽**（`insight/validator.py`）：仅 `fact`/`statistical_contribution` 强制 `claim.fact_ids`，`limitation`/`next_check` 允许无引用（真实模型对后者天然不引用事实）。
+- **能力目录**（`insight/capabilities.py`）：向模型可见目录暴露不可执行的 `manual_review` 兜底能力，供非 `leave_count` 指标选择。
+
+离线回归：insight 相关单测 **37 passed**；`insight_compare --group all --offline` 报告 `insight-compare-20261011T141936613100Z`（模板 5/5、脚本 LLM 5/5、组 B 3/3，11 调用）。
+
+真实复验（`qwen3.6-plus`，组 A，`--confirm-real-calls`）：报告 `insight-compare-20261011T142507954661Z`，5 例 LLM 臂全部 `status=complete`、`ok=true`、`prompt_version=insight-prompt-2`，首调即通过（`call_count=1`，无修复），llm_ok 由修复前 **1/5 提升至 5/5**、覆盖率 5/5，模板 5/5。本轮真实调用 **5 次**（每例 1 次）。修复前对照：`insight-compare-20261011T135759254435Z`（LLM 5 臂全部 `draft_validation_failed`）。
+
+### 全链路验收与需求→证据映射（I4-2）
+
+跨栈复验（2026-10-11）：Python 全量 **660 passed**；Web vitest **136 passed** 且 `vue-tsc` 无错误；Java `mvn test` BUILD SUCCESS（report 137、admin 94、bootstrap 21、subscription 10）；`s6_smoke --browser` 10 项 API 检查 + 2 个浏览器流程全绿（报告 `s6-smoke-20261011T140446260286Z`）。
+
+| 验收点 | 证据 |
+|---|---|
+| 保存→复用→刷新新版本 | `ReportDataVersionServiceTest`、`ReportVersionConsistencyIntegrationTest`、`ReportChartServiceTest` |
+| 幂等/复用不新增调用 | `s6_smoke` `idempotent_start`；`InsightTaskServiceTest`；`useReportChartAnalysis.spec.ts` |
+| 下钻/回溯 | `useReportChartAnalysis.spec.ts`（切下钻/回溯清空并更新版本、丢弃过期轮询） |
+| 进一步分析 | `s6_smoke` `browser_report_analysis_flow`；`ReportAnalysisPanel.spec.ts` |
+| 超时 | `s6_run` 注入 `deadline_exhausted` |
+| 格式错误 | `test_insight_generation.py`「malformed output is repaired once」；`s6_run` `invalid_model_json` |
+| 取消 | `s6_smoke` `cancel_does_not_become_success`；`s6_run` `cancel_during_tool`；`ReportAnalysisPanel.spec.ts` |
+| 进程重启 | `AnalysisTaskPersistenceTest`（运行中任务恢复为中断、成功结果可读） |
+| 权限变化 | `s6_smoke` `ownership_and_tenant_denied`；`AttributionServiceTest.runningTask_terminatesWhenPermissionChangesMidFlight`（运行中撤权传导）；Java `FunctionPermissionIntegrationTest` |
+| 迟到响应 | `useReportChartAnalysis.spec.ts`（离开页面/切换下钻丢弃过期请求） |
+
+**如实标注**：任务运行中的**动态权限变化**已在服务层补齐运行中撤权传导验证（`AttributionServiceTest.runningTask_terminatesWhenPermissionChangesMidFlight`：RUNNING 期间撤权→下一个流式事件/在途工具调用被拒→任务 FAILED 并清空结果、调用 `runtime.cancel` 传导至 Python、后续读取与调用持续被拒）；发起/读取时的权限重检与拒绝越权由 `s6_smoke` 所有权/租户检查覆盖。跨服务 smoke 无权限变更注入面，故该传导不在浏览器链路重复验证。
+
+### 演示与已知边界（I4-6）
+
+演示步骤：问数生成答案 → 保存为报表（继承来源口径）→ 打开复用（无新增模型调用）→ 手动刷新数据生成新版本及配套洞察 → 图表下钻/回溯（同版、幂等）→ 侧边「进一步分析」确认两期并查看部门贡献与证据。任一结论均可回溯到数据版本与来源。
+
+已知边界：首轮进一步分析仅支持 `leave_count` 两期部门贡献；Java/Python 均为单进程执行，重启后未完成任务标为中断、允许显式重试但不自动恢复；离线脚本模型与真实模型结果分开报告。
+
+### R6：评分器版本化、负向控制与最终可见结果验收（2026-10-12）
+
+评分规则与独立预期均已版本化：`evals/insight_scenarios.py` 的 `SCORING_VERSION="insight-scoring-4"`；独立 oracle `evals/insight_oracle.py` 的 `ORACLE_VERSION="insight-oracle-1"`（纯算术，不导入 `fact_builder`/`validator`，数值容差 `TOLERANCE=1e-6`）。加载时以 `verify_oracle` 做三重一致性核验（手写预期、oracle 计算、样例事实包），任一漂移即报错，避免“预期跟着实现漂移”。
+
+打分范围由“事实类型/computable”扩展到**数值（含容差）、单位、范围、期间、版本、引用、必需覆盖、状态、局限与动作参数**。`ok` 的新语义是“**最终可见结果通过**”：空 claims、数值错（如全改 999999）、单位/期间/范围错、引用无关事实、非法动作参数，以及“把降级（程序模板）当完整成功”，均不得 `ok=true`。C19 逐项覆盖上述负例（`tests/test_insight_scenarios.py`），先确认负例按预期失败，再调生成器。C20 针对**经持久化与 API 序列化后的可见结果**评测（而非仅 Python 内存结构），并核对隐藏结构与 UI 证据映射，防止“Python claims 正确、页面仍显示模板”的假通过。
+
+**scoring-3：可见正文从 segments/facts 独立重建（A4）**。旧版只比对 `summary` 与 `claim.text` 一致，可在保留全部正确事实/引用的同时，把 `claims.text`、`summary`、`points.label` 一起改成虚构因果句而不被发现。现在评分器独立复制槽位渲染规则（`_slot_text`：`unit→fact.unit`、`period_label→fact.period_ref`、`scope_label→fact.scope_ref`、`category→fact.category`、`value→` 按 `unit∈{ratio,share}` 用 `+x.x%`/`x.x%`、signed 类型 `+g`、否则 `g`），从 `claim.segments + facts` **重建**可见文本并逐字段比对：`_visible_errors` 校验 `claim.text` 必须等于重建文本（`claim_text_not_from_segments`）、`narrative.summary` 必须来自证据型 claim（`visible_summary_not_from_narrative`）、`points.label` 必须落在重建文本集合内（`point_not_from_claim`）。自由文本另查禁数字与因果词。C21 三个负向控制（含 999999 虚构正文、文本段夹带数字、事实槽位未绑定）覆盖该类绕过。
+
+**scoring-4：顶层 limitations 同受约束（B3）**。旧版把 `draft.limitations` 当作自由字符串直接展示，可在保留全部正确事实/claims/narrative/动作的同时追加一句虚构因果（如 `999999 people because management failed`）而不被任何评分发现。现在生产校验（`validator.free_text_issues`，正文文本段与 limitations 共用）拒绝含数字/日期或未获支持因果的局限，草稿因此修复一次后仍不合法即降级；评分器对 `limitations` 也做同一检查（`limitation_typed_number` / `limitation_unsupported_causality`），场景评分与 transport 评分同时生效。C24 三例覆盖（合法 `fact_type:reason` 局限仍通过、虚构数字局限失败、无数字因果局限失败）。生成提示同步升级为 `insight-prompt-5`，明确 limitations 不得出现数字/日期/单位与未获支持的因果。
+
+**跨服务输出评分（A4 第二部分）**。新增 `normalize_java_insight`：把 Java `InsightView` 的 camelCase（`next_actions`/`capability_id`/`data_version`/`source.snapshot_id`/`schema_version`）规范到评分器形状，`claims/facts/narrative` 原样透传（Java 以 `Map` 保存 Python 响应，内层键仍为 snake_case）；`score_cross_service` 在规范化后调用 `score_insight` 并标注 `transport="java_persisted_get"`。C22 校验该映射，C23 校验 `score_transport` 能重建可见正文并捕获虚构 summary 与悬空 fact 引用。真正 Java POST→持久化→GET 的端到端评分由 `evals/insight_cross_service.py` 执行（见下）。
+
+对已归档报告做**离线重评分**（零模型调用，旧报告保留、另产 `rescore-<scoring>-<run>.json`），本轮不新增付费真实模型实验（DP-2 选项 A）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.insight_compare --rescore ..\docs\evaluation-runs\<run_id>\report.json
+```
+
+跨服务/浏览器验收（fresh H2 + 脚本模型，零付费）：`s6_smoke --browser` 的 10 项 API 检查与 2 个浏览器流程（`analysis.spec.ts`、`report-analysis.spec.ts`）全绿，报告 `docs/evaluation-runs/s6-smoke-20261011T203429676537Z/report.json`。
+
+**在线跨服务可见结果评分（A4 最终验收）**：`evals/insight_cross_service.py` 启动 Python fixture gateway + Java bootstrap（fresh H2），走真实 HTTP：建会话 → 提问 → 存报表 → `data-versions/ensure` 至 READY → `chart-analysis` 取来源 → `insight-tasks` → 轮询 `GET insight`，对**经 Java POST→持久化→GET 的结果**做 `normalize_java_insight + score_transport` 评分，并注入虚构 summary 负例断言必须失败。运行（`hrchat-ai` 目录，零付费脚本模型）：
+
+```powershell
+.\.venv\Scripts\python.exe -m evals.insight_cross_service
+```
+
+通过报告 `docs/evaluation-runs/insight-cross-service-20261011T224845914142Z/report.json`：`passed=true`、`real_model_calls=0`，4 项检查全 true（`cross_service_visible_body_reconstructed`、`cross_service_source_identity`、`cross_service_references_resolve`、`fabricated_body_rejected`）；正例 `score.ok=true`（claims 2、facts 3、无 visible/reference 错误），篡改 summary 后 `ok=false` 且错误为 `visible_summary_not_from_narrative`。**如实区分**：本轮证明的是“Python 内部评分 + 跨服务输出评分（脚本模型）”；真实模型质量仍未验证（待授权）。
+
+本轮同时修复两处后端缺陷（见决策记录 DP-13/DP-14）：分析上下文契约漂移（Java `trusted()` 曾向 `extra="forbid"` 的 Python `AnalysisContext` 多发两个键 → 网关 422）；数据版本 `scopeRef` 写入口径与读取口径不一致（生成时按未收窄范围取指纹、读取时按冻结上下文收窄后取指纹），导致报表详情页组件端点恒 403、AI 洞察卡片不渲染。
+
+全量回归（2026-10-12，三套件均通过，零付费调用）：Java `mvn -o test` **BUILD SUCCESS**（15 模块，735 用例，0 失败；含 `QueryModeContractIntegrationTest` 4、`ReportVersionConsistencyIntegrationTest` 4、`ReportDataVersionServiceTest` 4）；Python `pytest -q` **723 passed**（1 项 Starlette 弃用警告）；Web `pnpm test` 28 文件 157 用例通过、`pnpm type-check`（vue-tsc --noEmit）通过。真实模型质量见下：prompt-7/8 已达 `ok=2/5`，prompt-9 待复验；组 C 待授权。
+
+**F8 尺度对照回归（2026-10-12 追加）**：`tests/test_insight_fact_builder.py` 由 9 增至 16 项，覆盖 `ratio_scale` 的 fraction（0.005→0.008 得 **+0.3pp**，不是按数值大小猜出的 +30pp）、percent（0.5→0.8 得 +0.3pp）、尺度缺失（`ratio_scale_missing` 不可计算，负向控制）、单位 `%` 推导默认、显式尺度优先、端点缺失（`missing_value`）与非比率指标不产出。**边界**：Java `ReportChartService.buildRichRequest` 恒传分子/分母为 null，故生产路径当前恒为 `ratio_components_missing`，两个尺度分支仅在单测可达；测试只锁契约，未改变该产品口径决策。
+
+**真实模型复验（2026-10-12，`insight-prompt-5` + `insight-scoring-4`）**：用户仅授权组 A/B，报告 `insight-compare-20261012T003000739110Z`（`real_model_insight_compare`）。**结果未达标**：组 A LLM 臂 **`ok=0/5`**（IS-01/03/04/05 `degraded: draft_validation_failed`，IS-02 `complete` 但覆盖不全）、组 A 模板臂 5/5 `degraded`（设计如此）、组 B `ok=3/3`；真实调用 **22 次**（11 个 LLM 臂各 `call_count=2`，即**首稿 11/11 校验失败**）。逐次调用记录 provider/model/request_id/usage(actual)/耗时。与 `insight-prompt-2` 的 5/5 **不可直接比较**（评分由 `insight-scoring-2` 升为 `-4`，且新增 limitations 与全 claim 文本规则）。组 C 未授权、未执行。
+
+**失败定因归档（2026-10-12 追加，零付费）**：上一轮只记 `degradation_reason`，无法回溯定因。现补齐两层证据：
+- 生产 `insight.generation` 的 `generation` 增记 **`validation_issues`**（每次被拒草稿的 `call_index`/`stage`/`outcome`/`issue_total` 与 `kind`/`message`/`fixable`/`claim_id`，各阶段最多 10 条；修复成功的首稿原因同样保留）。**不含模型原文**——该字段经任务 API 暴露，只放我们自己的校验消息与标识。
+- 评测 harness `evals/insight_compare.py` 用 `RecordingInsightAdapter` 包装每一臂，把模型响应原文（截断 4000 字符 + `text_sha256` + `text_length` + `truncated`）记入报告 **`model_io`**（组 B 分 `full`/`partial`）；`calls` 改为按臂计数，`summary.calls` 不再恒为 0（离线复跑实测 11）。
+- 回归：`tests/test_insight_generation.py` 新增 2 例，Python 全量 715 → **717 passed**；离线对照复跑 llm 5/5、组 B 3/3。
+- 上述证据**只对下一次运行生效**：本次已发生的失败无法补记原文，定因需再次授权重跑（候选原因：自由文本规则与真实模型「引用月份」习惯冲突，或覆盖/主结论更严规则）。
+
+**第二次授权运行与定因（2026-10-12）**：报告 `insight-compare-20261012T004447952532Z`（`calls=20`，组 A LLM `ok=0/5`、组 B `ok=3/3`，与首轮一致）。`model_io` + `validation_issues` 给出确切断因：
+- **主因 A（我方载荷缺陷）**：系统提示允许 `field=period_label/category`，但 `build_prompt` 的事实 JSON 未含 `period_ref`/`category`，模型无从判断 → 给 `tied_extreme:*` 绑 `period_label` → `bad_segment: fact has no period to render`，整条 claim 被拒（IS-03/04/05）。IS-03 原始草稿其余部分完全合规。
+- **次因 B（规则过宽）**：`limitation` 文本「由于时间序列存在缺失或不连续，无法判定…」被因果词规则拒绝——该句是局限说明而非因果断言（IS-03、IS-04 各 1 处）。
+- **级联 C**：`narrative references unknown claim` 全是 A/B 拒绝后的噪声。
+- 修复轮与首稿错误完全相同 → 载荷缺口未解时修复无效；IS-01 首轮失败次轮 `complete` → 存在运行间非确定性。
+- **此前怀疑的 limitations 数字规则冲突未成立**：B3 规则本轮仅触发 1 次且为因果词。定因详情见 [总体验收报告 §7.3](../docs/development-plans/1012-AI洞察补强总体验收报告.md)。
+
+**按定因修复（2026-10-12，零付费，`insight-prompt-6`）**：
+- **载荷补齐**：`build_prompt` 的事实 JSON 增补 `period_ref`/`category`/`tied_categories`，提示注明「只有事实确实带该字段才可绑定对应槽」——直接消除主因（模型给 `tied_extreme` 绑 `period_label` 被整条拒）。
+- **因果词规则收窄**：`validator.free_text_issues` 增加 `hedged_causality_ok`，`limitation`/`next_check` 文本与顶层 `limitations` 含限定标记（`无法/缺失/缺少/不连续/建议…`）时豁免因果词；数字/日期禁令与断言式因果不变。评分器 `insight_scenarios._causal_hit` 同口径。**已知边界**：关键词判定，限定标记在句内即豁免同句因果词，非语义保证。
+- 回归：新增 2 例（prompt 载荷含槽位元数据；限定表述放行而断言式因果仍拒），Python 717 → **719 passed**；离线对照复跑 llm 5/5、组 B 3/3、`calls=11`；B3 的 C24 反例仍按预期失败。
+- **prompt-5 的真实证据已被取代**，prompt-6 的真实通过率需再授权一次小样本（仅组 A/B）验证。
+
+**prompt-6 复验（2026-10-12，第三次授权运行）**：报告 `insight-compare-20261012T005631062010Z`（`calls=17`）。**修复主因生效**：组 A LLM `degraded` 4/5 → **1/5**、`coverage_incomplete` 3/5 → **1/5**、事实覆盖分子 1~2 → **4/5**；4/5 用例已 `complete` 且数值/引用/可见正文/动作参数**全部无错**，`fact has no period to render` 不再出现。`ok` 仍 0/5，但阻塞点换成更窄的一条：`limitation_errors: undisclosed_incomputable`（4/5 例）——评分器要求不可计算事实的 **`fact_type` 标识**字面出现在 limitations 中，而模型改用自然语言局限（语义披露但无标识），属**格式契约不匹配**；另 IS-02 首稿与修复稿均 `draft_parse_failed`（模型侧非法 JSON）。下一步：提示要求局限以受控格式 `fact_type:补充说明` 引用不可计算事实。
+
+**prompt-7：局限披露改为受控格式（2026-10-12，零付费）**：系统提示的 `limitations` 改为必须为「`fact_type:补充说明`」，`fact_type` 取自 `computable=false` 的事实类型且须覆盖全部；用户提示新增由 `build_fact_bundle` 确定性生成的「不可计算的事实类型（每条都必须在 limitations 中以「fact_type:补充说明」披露）：…」一行，模型无需自行推断。评分器 `_limitation_errors` 本就做该披露检查，故 validator/评分器口径未改。回归：`test_prompt_lists_incomputable_fact_types_for_disclosure`、`test_structured_limitation_is_required_for_disclosure`，Python 719 → **721 passed**；离线对照复跑 llm 5/5、组 B 3/3、`calls=11`。
+
+**prompt-7 复验（第四次授权运行）**：报告 `insight-compare-20261012T010444822599Z`（`calls=17`），组 A LLM **`ok=2/5`（首次非 0）**、组 B `3/3`；`limitations` 已为受控格式并满足披露检查。剩余 3 例失败均为**模型侧契约违规**：事实 claim 的 text 片段夹带数字/日期（IS-05 写了 `{"type":"text","text":"2026-03"}` 与内联 `org:3`）、fact claim 文本含因果词（IS-01 c3）、`unit_mismatch`（IS-04 c1）；三例修复轮重复同样错误故降级。
+
+**prompt-8 复验（第五次授权运行）**：报告 `insight-compare-20261012T011223783601Z`（`calls=17`），组 A LLM **`ok=2/5`**（IS-03、IS-04）、组 B `3/3`。**空 text 片段问题已消除**（无 `draft_parse_failed`）。仍失败 3 例且修复轮重复同样错误：IS-01 事实 claim 的 text 夹带数字/日期、IS-02 `unit_mismatch`（均模型侧违规），IS-05 **`fact has no category to render: tied_extreme:max`**——**我方契约陷阱**：`tied_extreme` 的类目在 `tied_categories`，而槽位渲染只读 `category`（与 prompt-6 修掉的 `period_label` 同源）。下一步：`category` 槽对 `tied_extreme` 回退渲染 `tied_categories`（validator 与评分器同口径）。运行间非确定性明显：prompt-7 与 prompt-8 通过的是不同用例，聚合同为 2/5。
+
+**prompt-9：category 槽对 tied_extreme 回退渲染（2026-10-12，零付费）**：`validator.category_slot_text` 统一「渲染 + 槽位校验」口径——`category` 槽渲染 `fact.category`，为空时回退 `"、".join(tied_categories)`；评分器 `_slot_text` 同步。提示改为「tied_extreme 等并列事实的类目请用 category 槽（渲染其 tied_categories）」，取代此前「用 text 片段表达」（后者会把事实值诱导进 text，与 text 不得承载数值/事实的口径冲突）。回归：`test_tied_extreme_category_slot_renders_tied_categories`，Python 722 → **723 passed**；离线对照复跑 llm 5/5、组 B 3/3、`calls=11`。**待授权复验**。
+
 ## R5：检索分层评测（2026-10-11）
 
 新增 [题集与指标说明](datasets/retrieval-quality-v1/README.md)：60 条合成题、20 个表达家族，dev/frozen 各 30 条。人工业务复核待完成；与旧题集/语料无规范化完全重合，不等于已证明语义独立。四臂共用 63 条口径及 36 个示例，直接调用生产排序函数；纯 BGE 仅用于离线消融，日常问数模式与权限边界不变。

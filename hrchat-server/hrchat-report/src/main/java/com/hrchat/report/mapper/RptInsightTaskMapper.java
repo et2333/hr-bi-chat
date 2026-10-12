@@ -11,8 +11,8 @@ import java.time.LocalDateTime;
 @Mapper
 public interface RptInsightTaskMapper extends BaseMapper<RptInsightTask> {
 
-    /** 认领待执行任务：仅 PENDING→RUNNING 成功一次，并递增 attempt。 */
-    @Update("UPDATE rpt_insight_task SET status = 'RUNNING', attempt = attempt + 1, "
+    /** 认领待执行任务：仅 PENDING→RUNNING 成功一次，沿用入队时分配的 attempt。 */
+    @Update("UPDATE rpt_insight_task SET status = 'RUNNING', "
             + "updated_at = CURRENT_TIMESTAMP WHERE id = #{id} AND status = 'PENDING'")
     int claim(@Param("id") Long id);
 

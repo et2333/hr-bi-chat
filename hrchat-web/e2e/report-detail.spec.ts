@@ -25,7 +25,11 @@ test('报表详情页：图表切换 / AI 洞察 / 表格展示', async ({ page,
   await expect(page.locator('.echart-container').first()).toBeVisible()
 
   // AI 洞察卡片出现并含摘要与要点
+  // DP-3 A：洞察已异步化（GET 只读 + ensure + 轮询），先显式等待状态标签进入终态“完成”，
+  // 再断言正文可见，避免“卡片在、正文未就绪”的时序抖动放行 F1 类回归。
   await expect(page.locator('.insight-card').first()).toBeVisible({ timeout: 15_000 })
+  const insightStatus = page.locator('.insight-card').first().locator('.insight-head .ant-tag').first()
+  await expect(insightStatus).toHaveText('完成', { timeout: 30_000 })
   await expect(page.locator('.insight-summary').first()).toBeVisible()
   await expect(page.locator('.insight-points li').first()).toBeVisible()
 

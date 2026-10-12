@@ -70,19 +70,47 @@ public class ReportDataVersionService {
     }
 
     public void requireScope(UserContext ctx, RptReport report, RptDataVersion version) {
-        if (!java.util.Objects.equals(version.getScopeRef(), ReportDataScope.fingerprint(reportScope(ctx, report)))) {
+        if (!java.util.Objects.equals(version.getScopeRef(), ReportDataScope.fingerprint(reportScope(ctx, report, version)))) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN, "当前数据权限与报表快照不一致，请由所有者刷新");
         }
     }
 
-    private UserContext reportScope(UserContext ctx, RptReport report) {
-        if (report.getContextJson() == null) return ctx;
-        return ReportDataScope.narrow(ctx, chartService.parseMap(report.getContextJson()));
+    /** 版本自身冻结的上下文优先；旧版本无冻结值时才回退当前报表上下文（仅同一修订号安全）。 */
+    private UserContext reportScope(UserContext ctx, RptReport report, RptDataVersion version) {
+        Map<String, Object> context = parseContext(resolveContextJson(report, version));
+        if (context == null) return ctx;
+        return ReportDataScope.narrow(ctx, context);
+    }
+
+    /**
+     * 解析该数据版本可用的不可变来源上下文（R3）：
+     * <ol>
+     *   <li>版本冻结的 {@code context_json}（生成时写入）优先；</li>
+     *   <li>旧版本无冻结值时，仅当定义修订号与当前报表一致，才回退当前报表上下文；</li>
+     *   <li>否则返回 null，调用方须按“来源不可恢复”处理，绝不静默用当前版本替代。</li>
+     * </ol>
+     */
+    public static String resolveContextJson(RptReport report, RptDataVersion version) {
+        if (version != null && version.getContextJson() != null && !version.getContextJson().isBlank()) {
+            return version.getContextJson();
+        }
+        if (report != null && version != null
+                && java.util.Objects.equals(version.getDefinitionRevision(), report.getDefinitionRevision())
+                && report.getContextJson() != null && !report.getContextJson().isBlank()) {
+            return report.getContextJson();
+        }
+        return null;
+    }
+
+    private Map<String, Object> parseContext(String json) {
+        if (json == null || json.isBlank()) return null;
+        try { return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() { }); }
+        catch (Exception e) { return null; }
     }
 
     public void requireExportScope(UserContext ctx, Long reportId) {
         RptReport report = reportService.requireAccessibleReport(ctx, reportId);
-        UserContext effective = reportScope(ctx, report);
+        UserContext effective = reportScope(ctx, report, requireReadyVersion(report));
         if (!ReportDataScope.orgs(ctx, 3).containsAll(ReportDataScope.orgs(effective, 1))) {
             throw new BizException(ErrorCode.FUNC_FORBIDDEN, "导出权限未覆盖报表全部组织");
         }
@@ -152,6 +180,23 @@ public class ReportDataVersionService {
         return version;
     }
 
+    /**
+     * 解析调用方指定的固定数据版本（R1）：必须属于同一报表、同一修订号且 READY。
+     * 无法恢复时返回 null，调用方须返回 STALE，绝不静默改读当前版本（D1）。
+     */
+    public RptDataVersion requireVersion(RptReport report, Long dataVersionId) {
+        if (dataVersionId == null) {
+            return null;
+        }
+        RptDataVersion version = dataVersionMapper.selectById(dataVersionId);
+        if (version == null || !java.util.Objects.equals(version.getReportId(), report.getId())
+                || !STATUS_READY.equals(version.getStatus())
+                || !java.util.Objects.equals(version.getDefinitionRevision(), report.getDefinitionRevision())) {
+            return null;
+        }
+        return version;
+    }
+
     public RptViewSnapshot findSnapshot(Long dataVersionId, Long componentId, String viewKey) {
         return viewSnapshotMapper.selectOne(new LambdaQueryWrapper<RptViewSnapshot>()
                 .eq(RptViewSnapshot::getDataVersionId, dataVersionId)
@@ -179,7 +224,13 @@ public class ReportDataVersionService {
         version.setDefinitionRevision(report.getDefinitionRevision() == null ? 1 : report.getDefinitionRevision());
         version.setStatus(STATUS_RUNNING);
         version.setSnapshotReuse(0);
-        version.setScopeRef(ReportDataScope.fingerprint(reportScope(ctx, report)));
+        // R3：生成时冻结来源上下文，之后读取该版本不再依赖可变的报表上下文。
+        version.setContextJson(report.getContextJson());
+        version.setContextCompleteness(report.getContextCompleteness());
+        // scopeRef 必须与读取路径（requireScope/readSnapshot）同口径：两者都先按版本冻结上下文收窄数据范围再取指纹。
+        // 传入 version 而非 null，否则 resolveContextJson 返回 null 导致按未收窄的全量范围计算，
+        // 与读取时收窄后的指纹恒不相等，组件端点恒 403。
+        version.setScopeRef(ReportDataScope.fingerprint(reportScope(ctx, report, version)));
         version.setIdempotencyKey(key);
         version.setTenantId(TenantContextHolder.get());
         version.setCreatedAt(LocalDateTime.now());

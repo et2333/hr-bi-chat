@@ -5,10 +5,13 @@ import com.hrchat.common.api.ApiResponse;
 import com.hrchat.report.chart.ChartViews.ChartAnalysisView;
 import com.hrchat.report.chart.ChartViews.ChartDataView;
 import com.hrchat.report.chart.ChartViews.ChartSeries;
+import com.hrchat.report.chart.ChartViews.EnsureInsightRequest;
 import com.hrchat.report.chart.ChartViews.InsightPoint;
+import com.hrchat.report.chart.ChartViews.InsightSource;
 import com.hrchat.report.chart.ChartViews.InsightTaskView;
 import com.hrchat.report.chart.ChartViews.InsightView;
 import com.hrchat.report.chart.ChartViews.MetricCardView;
+import com.hrchat.report.chart.ChartViews.RetryInsightRequest;
 import com.hrchat.report.chart.ChartViews.TableColumn;
 import com.hrchat.report.chart.ChartViews.TableView;
 import com.hrchat.report.service.InsightTaskService;
@@ -46,13 +49,13 @@ class ChartControllerTest {
                 List.of(new ChartSeries("在职人数", List.of(10))), List.of());
         ChartAnalysisView expected = new ChartAnalysisView("7", "root", null,
                 "READY", "PENDING", chart, null, null, null);
-        when(chartService.chartAnalysis(1L, 10L, "研发一部", ctx)).thenReturn(expected);
+        when(chartService.chartAnalysis(1L, 10L, "研发一部", null, null, null, ctx)).thenReturn(expected);
 
-        ApiResponse<ChartAnalysisView> resp = controller.chartAnalysis(1L, 10L, "研发一部", ctx);
+        ApiResponse<ChartAnalysisView> resp = controller.chartAnalysis(1L, 10L, "研发一部", null, null, null, ctx);
 
         assertThat(resp.getCode()).isEqualTo(ApiResponse.SUCCESS);
         assertThat(resp.getData()).isSameAs(expected);
-        verify(chartService).chartAnalysis(1L, 10L, "研发一部", ctx);
+        verify(chartService).chartAnalysis(1L, 10L, "研发一部", null, null, null, ctx);
     }
 
     @Test
@@ -141,26 +144,30 @@ class ChartControllerTest {
                 List.of(new InsightPoint("value", "在职人数 10 人")));
         InsightTaskView expected = new InsightTaskView(50L, 1, "COMPLETE", "7", "root", null, null,
                 null, null, null, insight, null);
-        when(insightTaskService.ensureForView(ctx, 1L, 10L, "研发一部")).thenReturn(expected);
+        InsightSource source = new InsightSource(1L, 10L, "7", "root", "555", "scope");
+        when(insightTaskService.ensureForView(ctx, 1L, 10L, source)).thenReturn(expected);
 
-        ApiResponse<InsightTaskView> resp = controller.ensureInsightTask(1L, 10L, "研发一部", ctx);
+        ApiResponse<InsightTaskView> resp =
+                controller.ensureInsightTask(1L, 10L, new EnsureInsightRequest(source), ctx);
 
         assertThat(resp.getCode()).isEqualTo(ApiResponse.SUCCESS);
         assertThat(resp.getData()).isSameAs(expected);
-        verify(insightTaskService).ensureForView(ctx, 1L, 10L, "研发一部");
+        verify(insightTaskService).ensureForView(ctx, 1L, 10L, source);
     }
 
     @Test
     void retryInsightTask_delegates() {
         InsightTaskView expected = new InsightTaskView(50L, 2, "PENDING", "7", "root", null, null,
                 null, null, null, null, null);
-        when(insightTaskService.retry(ctx, 1L, 10L, 50L)).thenReturn(expected);
+        InsightSource source = new InsightSource(1L, 10L, "7", "root", "555", "scope");
+        when(insightTaskService.retry(ctx, 1L, 10L, 50L, source, 1)).thenReturn(expected);
 
-        ApiResponse<InsightTaskView> resp = controller.retryInsightTask(1L, 10L, 50L, ctx);
+        ApiResponse<InsightTaskView> resp =
+                controller.retryInsightTask(1L, 10L, 50L, new RetryInsightRequest(source, 1), ctx);
 
         assertThat(resp.getCode()).isEqualTo(ApiResponse.SUCCESS);
         assertThat(resp.getData()).isSameAs(expected);
-        verify(insightTaskService).retry(ctx, 1L, 10L, 50L);
+        verify(insightTaskService).retry(ctx, 1L, 10L, 50L, source, 1);
     }
 
     @Test

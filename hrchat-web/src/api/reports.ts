@@ -52,8 +52,10 @@ export interface ChartDataView {
   pieData: Array<{ name: string; value: number }>
 }
 
-/** 洞察任务状态：与后端 InsightTaskView.status 对齐。 */
+/** 洞察任务状态：与后端 InsightTaskView.status 对齐；MISSING/NOT_APPLICABLE 为无任务时的视图状态。 */
 export type InsightStatus =
+  | 'MISSING'
+  | 'NOT_APPLICABLE'
   | 'NONE'
   | 'PENDING'
   | 'RUNNING'
@@ -62,6 +64,16 @@ export type InsightStatus =
   | 'FAILED'
   | 'CANCELLED'
   | 'INTERRUPTED'
+
+/** 洞察来源身份（R1）：后端 ChartViews.InsightSource，ensure/retry 必须原样回传。 */
+export interface InsightSource {
+  reportId: number
+  componentId: number
+  dataVersion: string
+  viewKey: string
+  snapshotId: string
+  scopeRef: string
+}
 
 /** 只读图文视图：来自持久化数据版本，GET 不触发取数（也不触发模型调用）。 */
 export interface ChartAnalysisView {
@@ -75,6 +87,12 @@ export interface ChartAnalysisView {
   attempt: number | null
   chart: ChartDataView | null
   insight: InsightView | null
+  /** 当前视图的洞察来源身份；不可生成时为 null */
+  source: InsightSource | null
+  /** 图表就绪但无任务时为 true，前端只在此时发起一次 ensure */
+  canEnsure: boolean
+  /** 任务处于可重试终态时为 true */
+  canRetry: boolean
 }
 
 /** 洞察可执行的后续问数动作（后端 InsightView.actions）。 */
@@ -99,6 +117,9 @@ export interface InsightTaskView {
   insightGeneratedAt: string | null
   insight: InsightView | null
   generation: Record<string, unknown> | null
+  /** 任务绑定的来源身份；快照缺失时为 null（此时不可重试） */
+  source: InsightSource | null
+  canRetry: boolean
 }
 
 export interface DataVersionView {
@@ -111,25 +132,59 @@ export interface DataVersionView {
   published: boolean
 }
 
-export function getChartAnalysis(reportId: number, componentId: number, dimValue?: string) {
+/**
+ * 只读图文端点。携带 expectedSource 时要求服务端读取并校验该固定来源（同版本/快照/范围），
+ * 版本不可恢复时返回 STALE，绝不静默改读当前版本（D1）。
+ */
+export function getChartAnalysis(
+  reportId: number,
+  componentId: number,
+  dimValue?: string,
+  expectedSource?: InsightSource | null,
+) {
+  const params: Record<string, string> = {}
+  if (dimValue) params.dimValue = dimValue
+  if (expectedSource) {
+    params.dataVersion = expectedSource.dataVersion
+    params.viewKey = expectedSource.viewKey
+    params.snapshotId = expectedSource.snapshotId
+    params.scopeRef = expectedSource.scopeRef
+  }
   return get<ApiResponse<ChartAnalysisView>>(`/reports/${reportId}/components/${componentId}/chart-analysis`, {
-    params: dimValue ? { dimValue } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   })
 }
 
-/** 幂等确保当前视图的洞察任务（仅在图表就绪但尚无洞察时调用），可能入队生成。 */
-export function postInsightTask(reportId: number, componentId: number, dimValue?: string) {
-  return post<ApiResponse<InsightTaskView>>(`/reports/${reportId}/components/${componentId}/insight-tasks`, null, {
-    params: dimValue ? { dimValue } : undefined,
-  })
+/** 幂等确保指定来源视图的洞察任务（图表就绪但尚无洞察时调用），可能入队生成。 */
+export function postInsightTask(reportId: number, componentId: number, source: InsightSource) {
+  return post<ApiResponse<InsightTaskView>>(
+    `/reports/${reportId}/components/${componentId}/insight-tasks`,
+    { source },
+  )
 }
 
-/** 复用同一快照重试指定洞察任务（attempt 递增）。 */
-export function retryInsightTask(reportId: number, componentId: number, taskId: number) {
+/** 复用同一快照重试指定洞察任务（expectedAttempt 匹配后 attempt 递增）。 */
+export function retryInsightTask(
+  reportId: number,
+  componentId: number,
+  taskId: number,
+  source: InsightSource,
+  expectedAttempt: number,
+) {
   return post<ApiResponse<InsightTaskView>>(
     `/reports/${reportId}/components/${componentId}/insight-tasks/${taskId}/retry`,
-    null,
+    { source, expectedAttempt },
   )
+}
+
+/**
+ * A2：进一步分析的服务端动作引用。前端只回传这三个不可变引用，
+ * 期间/组织/版本由后端按动作从视图快照恢复并重新授权，不接受自由参数。
+ */
+export interface ReportActionRef {
+  componentId: number
+  viewKey: string
+  actionId: string
 }
 
 /** 报表来源可信分析范围（后端 publicContext + 报表字段），不含推荐动作能力信息。 */
@@ -138,6 +193,10 @@ export interface ReportAnalysisContext {
   sourceAskId: null
   sourceReportId: number
   sourceDataVersionId: number
+  /** 视图级来源：动作引用恢复出的组件/视图/动作（版本级来源时为 undefined）。 */
+  sourceComponentId?: number
+  sourceViewKey?: string | null
+  sourceActionId?: string | null
   metricCode: string
   metricName: string
   unit: string
@@ -161,13 +220,27 @@ export interface ReportAnalysisStartRequest {
   dataVersionId: number
   baselinePeriod: AnalysisPeriod
   mode?: 'deterministic' | 'single' | 'dual'
+  /** A2：服务端动作引用；提供时来源由后端恢复，不传期间/组织。 */
+  componentId?: number
+  viewKey?: string
+  actionId?: string
 }
 
-/** 预填并校验推荐动作；页面确认参数后才创建任务。 */
-export function getReportAnalysisContext(reportId: number, dataVersionId: number, capabilityId?: string) {
-  return get<ApiResponse<ReportAnalysisPrefill>>(`/reports/${reportId}/analysis/context`, {
-    params: capabilityId ? { dataVersionId, capabilityId } : { dataVersionId },
-  })
+/** 预填并校验推荐动作；页面确认参数后才创建任务。携带动作引用时来源由后端恢复。 */
+export function getReportAnalysisContext(
+  reportId: number,
+  dataVersionId: number,
+  capabilityId?: string,
+  actionRef?: ReportActionRef | null,
+) {
+  const params: Record<string, string | number> = { dataVersionId }
+  if (capabilityId) params.capabilityId = capabilityId
+  if (actionRef) {
+    params.componentId = actionRef.componentId
+    params.viewKey = actionRef.viewKey
+    params.actionId = actionRef.actionId
+  }
+  return get<ApiResponse<ReportAnalysisPrefill>>(`/reports/${reportId}/analysis/context`, { params })
 }
 
 /** 用户确认后创建报表来源分析任务（幂等）；进度/取消/事件复用既有任务端点。 */
@@ -207,7 +280,47 @@ export interface TableView {
   size: number
 }
 
-/** AI 洞察（后端 ChartViews.InsightView；I1 可带状态与版本字段） */
+/** 洞察断言片段：文本或事实槽位（服务端渲染，R5）。 */
+export interface InsightClaimSegment {
+  type: 'text' | 'fact'
+  text?: string | null
+  fact_id?: string | null
+  field?: string | null
+}
+
+/** 洞察断言（R5）：text 为服务端渲染值，数值/日期/单位来自 fact 槽位。 */
+export interface InsightClaim {
+  claim_id: string
+  kind: string
+  text?: string
+  segments?: InsightClaimSegment[]
+  fact_ids?: string[]
+  scope_ref?: string | null
+  predicate?: string | null
+  unit?: string | null
+}
+
+/** 洞察正文引用结构（R5）：核心结论与重点分别引用通过校验的 claim。 */
+export interface InsightNarrative {
+  summary_claim_id?: string | null
+  finding_claim_ids?: string[]
+}
+
+/** 确定性事实（服务端 FactBuilder 产出，页面据此展开证据）。 */
+export interface InsightFact {
+  fact_id: string
+  fact_type: string
+  label?: string
+  value?: number | null
+  unit?: string | null
+  period_ref?: string | null
+  scope_ref?: string | null
+  basis?: string
+  snapshot_id?: string
+  computable?: boolean
+}
+
+/** AI 洞察（后端 ChartViews.InsightView；I1 可带状态与版本字段；R5 携带断言与证据） */
 export interface InsightView {
   reportName: string
   metricName: string
@@ -221,6 +334,20 @@ export interface InsightView {
   degradationReason?: string | null
   dataVersion?: string | null
   viewKey?: string | null
+  /** 结果 schema 版本（R5 为 "2"） */
+  schemaVersion?: string | null
+  /** 通过校验的模型断言（含事实引用）；页面证据区据此展开 */
+  claims?: InsightClaim[]
+  /** 核心结论/重点引用的 claim ids */
+  narrative?: InsightNarrative | null
+  /** 事实证据（供展开显示期间/范围/依据/快照） */
+  facts?: InsightFact[]
+  /** 来源身份；由任务/旧 GET 回填，供前端成组校验 */
+  source?: InsightSource | null
+  /** 任务状态（有任务时与 InsightTaskView.status 一致） */
+  taskStatus?: string | null
+  canEnsure?: boolean
+  canRetry?: boolean
 }
 
 /** 指标卡实时数据（后端 ChartViews.MetricCardView） */

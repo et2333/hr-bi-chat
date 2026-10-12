@@ -1,6 +1,7 @@
 package com.hrchat.chat.analysis;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hrchat.api.report.ReportActionSource;
 import com.hrchat.api.report.ReportContext;
 import com.hrchat.api.report.ReportSourceReader;
 import com.hrchat.authz.mcp.ToolContextTokenService;
@@ -116,6 +117,12 @@ class AttributionReportSourceTest {
         assertEquals(List.of(2L, 3L, 4L), analysis.get("effective_org_ids"));
         assertFalse(analysis.containsKey("source_ask_id"));
         assertFalse(analysis.containsKey("source_turn_id"));
+        // Python `AnalysisContext` 为 extra=forbid：analysis_context 不得出现其未声明的键，否则网关直接 422。
+        assertTrue(new java.util.HashSet<>(List.of("schema_version", "task_id", "source_type", "source_ask_id",
+                        "source_turn_id", "source_report_id", "source_data_version_id", "tenant_no", "metric_code",
+                        "metric_version", "unit", "current_period", "baseline_period", "effective_org_ids",
+                        "data_version", "scope_ref")).containsAll(analysis.keySet()),
+                "analysis_context 含 Python 契约未声明的键: " + analysis.keySet());
     }
 
     @Test
@@ -169,6 +176,79 @@ class AttributionReportSourceTest {
         assertEquals(Boolean.FALSE, prefill.get("supported"));
         assertEquals(Boolean.FALSE, prefill.get("executable"));
         assertTrue(((List<String>) prefill.get("missingParams")).isEmpty());
+    }
+
+    @Test
+    void reportActionSource_unavailable_whenReaderNotInjected() {
+        BizException ex = assertThrows(BizException.class, () -> service.startFromReport(hr01, REPORT_ID, DATA_VERSION_ID,
+                9L, "root", "act-1",
+                new AttributionService.StartRequest(new AttributionService.Period("2026-08-01", "2026-09-01"), "dual"),
+                "view-1"));
+        assertEquals(ErrorCode.SERVICE_UNAVAILABLE, ex.getErrorCode());
+    }
+
+    /** A2：动作引用来源由服务端恢复期间/组织；前端不提供这些参数，analysis_context 仍只含 Python 契约键。 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void startFromReportAction_restoresImmutableViewSource() throws Exception {
+        service.setReportActionSourceReader((access, reportId, dataVersionId, componentId, viewKey, actionId) ->
+                new ReportActionSource(REPORT_ID, DATA_VERSION_ID, 9L, "root", "act-1",
+                        "leave_count_department_contribution", "查看部门贡献", "leave_count", 1,
+                        "离职人数", "人",
+                        new ReportActionSource.Period("2026-09-01", "2026-10-01"),
+                        new ReportActionSource.Period("2026-08-01", "2026-09-01"),
+                        List.of(2L, 3L), "研发中心"));
+        AtomicReference<Map<String, Object>> body = new AtomicReference<>();
+        doAnswer(invocation -> {
+            body.set(invocation.getArgument(1));
+            BiConsumer<String, Map<String, Object>> consumer = invocation.getArgument(2);
+            consumer.accept("FINAL", Map.of("status", "COMPLETED", "summary", "ok"));
+            return null;
+        }).when(runtime).stream(anyString(), any(), any());
+
+        Map<String, Object> started = service.startFromReport(hr01, REPORT_ID, DATA_VERSION_ID, 9L, "root", "act-1",
+                new AttributionService.StartRequest(new AttributionService.Period("2026-08-01", "2026-09-01"), "dual"),
+                "view-1");
+
+        Map<String, Object> context = (Map<String, Object>) started.get("context");
+        assertEquals("REPORT", context.get("sourceType"));
+        assertEquals(REPORT_ID, context.get("sourceReportId"));
+        assertEquals(DATA_VERSION_ID, context.get("sourceDataVersionId"));
+        assertEquals(9L, context.get("sourceComponentId"));
+        assertEquals("root", context.get("sourceViewKey"));
+        assertEquals("act-1", context.get("sourceActionId"));
+        // 期间来自视图来源（服务端恢复），而非前端自报
+        assertEquals(Map.of("start", "2026-09-01", "end", "2026-10-01"), context.get("currentPeriod"));
+        assertEquals(Map.of("start", "2026-08-01", "end", "2026-09-01"), context.get("suggestedBaselinePeriod"));
+
+        // 先等任务终态，确保 worker 已把 analysis_context 交给运行时。
+        assertEquals("COMPLETED", waitTerminal(String.valueOf(started.get("taskId"))).get("status"));
+        Map<String, Object> analysis = (Map<String, Object>) body.get().get("analysis_context");
+        assertEquals(List.of(2L, 3L), analysis.get("effective_org_ids"));
+        assertEquals(Map.of("start", "2026-09-01", "end", "2026-10-01"), analysis.get("current_period"));
+        // 视图引用只随可信上下文展示，不进入 Python 严格契约。
+        assertFalse(analysis.containsKey("source_component_id"));
+        assertFalse(analysis.containsKey("source_view_key"));
+        assertFalse(analysis.containsKey("source_action_id"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void prefillFromReportAction_exposesActionRefAndScope() {
+        service.setReportActionSourceReader((access, reportId, dataVersionId, componentId, viewKey, actionId) ->
+                new ReportActionSource(REPORT_ID, DATA_VERSION_ID, 9L, "root", "act-1",
+                        "leave_count_department_contribution", "查看部门贡献", "leave_count", 1,
+                        "离职人数", "人",
+                        new ReportActionSource.Period("2026-09-01", "2026-10-01"),
+                        new ReportActionSource.Period("2026-08-01", "2026-09-01"),
+                        List.of(2L, 3L), "研发中心"));
+        Map<String, Object> prefill = service.prefillFromReport(hr01, REPORT_ID, DATA_VERSION_ID, 9L, "root", "act-1",
+                "leave_count_department_contribution");
+        assertEquals(9L, prefill.get("sourceComponentId"));
+        assertEquals("root", prefill.get("sourceViewKey"));
+        assertEquals("act-1", prefill.get("sourceActionId"));
+        assertEquals(List.of(2L, 3L), prefill.get("scopeOrgIds"));
+        assertEquals(Boolean.TRUE, prefill.get("executable"));
     }
 
     private Map<String, Object> waitTerminal(String taskId) throws Exception {
